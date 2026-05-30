@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11819.183
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Eliteracingleague.API", "Eliteracingleague.API.csproj", "{A33807BE-9E37-2666-7F09-2E5686459E1C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {AF22E4DB-BB15-4AA6-8FBA-2DC81F845728}
+	EndGlobalSection
+EndGlobal
