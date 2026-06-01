@@ -15,7 +15,6 @@ namespace Eliteracingleague.API.Controllers
             _context = context;
         }
 
-        // Lấy danh sách tất cả user
         [HttpGet]
         public async Task<IActionResult> GetUsers()
         {
@@ -35,7 +34,6 @@ namespace Eliteracingleague.API.Controllers
             return Ok(users);
         }
 
-        // Lấy chi tiết 1 user theo ID
         [HttpGet("{id}")]
         public async Task<IActionResult> GetUserById(int id)
         {
@@ -57,6 +55,48 @@ namespace Eliteracingleague.API.Controllers
                 return NotFound(new { message = "User not found" });
 
             return Ok(user);
+        }
+
+        [HttpPut("{id}/block")]
+        public async Task<IActionResult> BlockUser(int id)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+
+            if (user == null)
+                return NotFound(new { message = "User not found" });
+
+            user.Status = "Suspended";
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "User blocked successfully",
+                user.UserId,
+                user.FullName,
+                user.Status
+            });
+        }
+
+        [HttpPut("{id}/unblock")]
+        public async Task<IActionResult> UnblockUser(int id)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+
+            if (user == null)
+                return NotFound(new { message = "User not found" });
+
+            user.Status = "Active";
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "User unblocked successfully",
+                user.UserId,
+                user.FullName,
+                user.Status
+            });
         }
     }
 }
