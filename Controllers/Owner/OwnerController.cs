@@ -213,7 +213,7 @@ public class OwnerController : ControllerBase
             RaceId = t.RaceId,
             RaceDate = t.RaceDate.ToString("yyyy-MM-dd"),
             Location = t.Location,
-            Surface = null
+            
         });
 
         return Ok(response);
@@ -277,7 +277,6 @@ public class OwnerController : ControllerBase
             RaceDate = race.RaceDate.ToString("yyyy-MM-dd"),
             Location = race.Location ?? race.TournamentLocation,
             Distance = race.DistanceMeters,
-            Surface = null,
             Status = race.Status
         };
 

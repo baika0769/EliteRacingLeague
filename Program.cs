@@ -12,6 +12,24 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy
+            .WithOrigins(
+                "http://localhost:5173",
+                "https://localhost:5173",
+                "http://localhost:3000",
+                "https://localhost:3000"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+
+
 builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -88,6 +106,8 @@ if (app.Environment.IsDevelopment())
 
 
 app.UseHttpsRedirection();
+
+app.UseCors("AllowFrontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
