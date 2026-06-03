@@ -62,7 +62,9 @@ public partial class EliteRacingLeagueContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
-   
+    public virtual DbSet<EmailVerificationOtp> EmailVerificationOtps { get; set; }
+
+
 
 
 
@@ -115,6 +117,46 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasForeignKey(d => d.OwnerId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_horses_horse_owners");
+        });
+
+        modelBuilder.Entity<EmailVerificationOtp>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK_email_verification_otps");
+
+            entity.ToTable("email_verification_otps");
+
+            entity.HasIndex(e => new { e.UserId, e.IsUsed, e.ExpiresAt }, "IX_email_verification_otps_user_active");
+
+            entity.HasIndex(e => new { e.UserId, e.CreatedAt }, "IX_email_verification_otps_user_created_at");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.Property(e => e.OtpHash)
+                .HasMaxLength(255)
+                .IsUnicode(false)
+                .HasColumnName("otp_hash");
+
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+
+            entity.Property(e => e.IsUsed)
+                .HasDefaultValue(false)
+                .HasColumnName("is_used");
+
+            entity.Property(e => e.FailedAttempts)
+                .HasDefaultValue(0)
+                .HasColumnName("failed_attempts");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasColumnName("created_at");
+
+            entity.Property(e => e.UsedAt).HasColumnName("used_at");
+
+            entity.HasOne(d => d.User).WithMany(p => p.EmailVerificationOtps)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_email_verification_otps_users");
         });
 
         modelBuilder.Entity<HorseBreed>(entity =>
@@ -313,6 +355,8 @@ public partial class EliteRacingLeagueContext : DbContext
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_jockey_invitations_registrations");
         });
+
+
 
         modelBuilder.Entity<JockeyRecommendation>(entity =>
         {

@@ -25,6 +25,8 @@ public partial class User
 
     public DateTime? UpdatedAt { get; set; }
 
+    public virtual ICollection<EmailVerificationOtp> EmailVerificationOtps { get; set; } = new List<EmailVerificationOtp>();
+
     public virtual HorseOwner? HorseOwner { get; set; }
 
     public virtual Jockey? Jockey { get; set; }
