@@ -23,6 +23,7 @@ public partial class Horse
 
     public string? AchievementSummary { get; set; }
 
+    public string? ImageUrl { get; set; }
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }

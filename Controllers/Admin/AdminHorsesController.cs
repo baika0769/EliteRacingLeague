@@ -1,8 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
-
-namespace Eliteracingleague.API.Controllers
+using Eliteracingleague.API.DTOs.Admin;
+namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
     [Route("api/admin/horses")]
