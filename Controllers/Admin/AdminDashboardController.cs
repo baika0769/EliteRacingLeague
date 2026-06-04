@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -27,17 +28,19 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .CountAsync(r => r.Status == "Pending");
 
             var pendingResults = await _context.RaceResults
-                .CountAsync(r => r.Status == "Pending");
+                .CountAsync(r => r.Status == "Draft");
 
-            return Ok(new
+            var response = new AdminDashboardResponse
             {
-                totalUsers,
-                totalHorses,
-                totalRaces,
-                totalTournaments,
-                pendingRegistrations,
-                pendingResults
-            });
+                TotalUsers = totalUsers,
+                TotalHorses = totalHorses,
+                TotalRaces = totalRaces,
+                TotalTournaments = totalTournaments,
+                PendingRegistrations = pendingRegistrations,
+                PendingResults = pendingResults
+            };
+
+            return Ok(response);
         }
     }
 }

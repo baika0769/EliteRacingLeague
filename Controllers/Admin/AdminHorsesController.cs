@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -19,18 +20,19 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetHorses()
         {
             var horses = await _context.Horses
-                .Select(h => new
+                .Select(h => new AdminHorseResponse
                 {
-                    h.HorseId,
-                    h.HorseName,
-                    h.Age,
-                    h.HeightCm,
-                    h.WeightKg,
-                    h.HealthStatus,
-                    h.IsActive,
-                    h.OwnerId,
-                    h.BreedId,
-                    h.CreatedAt
+                    HorseId = h.HorseId,
+                    HorseName = h.HorseName,
+                    Age = h.Age,
+                    HeightCm = h.HeightCm,
+                    WeightKg = h.WeightKg,
+                    HealthStatus = h.HealthStatus,
+                    IsActive = h.IsActive,
+                    OwnerId = h.OwnerId,
+                    BreedId = h.BreedId,
+                    AchievementSummary = h.AchievementSummary,
+                    CreatedAt = h.CreatedAt
                 })
                 .ToListAsync();
 
@@ -42,24 +44,30 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var horse = await _context.Horses
                 .Where(h => h.HorseId == id)
-                .Select(h => new
+                .Select(h => new AdminHorseResponse
                 {
-                    h.HorseId,
-                    h.HorseName,
-                    h.Age,
-                    h.HeightCm,
-                    h.WeightKg,
-                    h.HealthStatus,
-                    h.AchievementSummary,
-                    h.IsActive,
-                    h.OwnerId,
-                    h.BreedId,
-                    h.CreatedAt
+                    HorseId = h.HorseId,
+                    HorseName = h.HorseName,
+                    Age = h.Age,
+                    HeightCm = h.HeightCm,
+                    WeightKg = h.WeightKg,
+                    HealthStatus = h.HealthStatus,
+                    IsActive = h.IsActive,
+                    OwnerId = h.OwnerId,
+                    BreedId = h.BreedId,
+                    AchievementSummary = h.AchievementSummary,
+                    CreatedAt = h.CreatedAt
                 })
                 .FirstOrDefaultAsync();
 
             if (horse == null)
-                return NotFound(new { message = "Horse not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Horse not found",
+                    Id = id
+                });
+            }
 
             return Ok(horse);
         }
@@ -71,20 +79,25 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(h => h.HorseId == id);
 
             if (horse == null)
-                return NotFound(new { message = "Horse not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Horse not found",
+                    Id = id
+                });
+            }
 
             horse.IsActive = true;
             horse.HealthStatus = "Healthy";
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Horse approved successfully",
-                horse.HorseId,
-                horse.HorseName,
-                horse.HealthStatus,
-                horse.IsActive
+                Message = "Horse approved successfully",
+                Id = horse.HorseId,
+                Name = horse.HorseName,
+                Status = horse.HealthStatus
             });
         }
 
@@ -95,19 +108,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(h => h.HorseId == id);
 
             if (horse == null)
-                return NotFound(new { message = "Horse not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Horse not found",
+                    Id = id
+                });
+            }
 
             horse.IsActive = false;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Horse suspended successfully",
-                horse.HorseId,
-                horse.HorseName,
-                horse.HealthStatus,
-                horse.IsActive
+                Message = "Horse suspended successfully",
+                Id = horse.HorseId,
+                Name = horse.HorseName,
+                Status = horse.HealthStatus
             });
         }
     }

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -15,63 +16,72 @@ namespace Eliteracingleague.API.Controllers.Admin
             _context = context;
         }
 
-        // Lấy danh sách tất cả giải đấu
         [HttpGet]
         public async Task<IActionResult> GetTournaments()
         {
             var tournaments = await _context.Tournaments
-                .Select(t => new
+                .Select(t => new AdminTournamentResponse
                 {
-                    t.TournamentId,
-                    t.TournamentName,
-                    t.Description,
-                    t.Location,
-                    t.StartDate,
-                    t.EndDate,
-                    t.MaxHorses,
-                    t.PrizePool,
-                    t.Status,
-                    t.CreatedAt
+                    TournamentId = t.TournamentId,
+                    TournamentName = t.TournamentName,
+                    Description = t.Description,
+                    Location = t.Location,
+                    StartDate = t.StartDate,
+                    EndDate = t.EndDate,
+                    MaxHorses = t.MaxHorses,
+                    PrizePool = t.PrizePool,
+                    Status = t.Status,
+                    MinHorseAge = t.MinHorseAge,
+                    MaxHorseAge = t.MaxHorseAge,
+                    MinHorseWeightKg = t.MinHorseWeightKg,
+                    MaxHorseWeightKg = t.MaxHorseWeightKg,
+                    Rules = t.Rules,
+                    CreatedBy = t.CreatedBy,
+                    CreatedAt = t.CreatedAt
                 })
                 .ToListAsync();
 
             return Ok(tournaments);
         }
 
-        // Lấy chi tiết 1 giải đấu theo ID
         [HttpGet("{id}")]
         public async Task<IActionResult> GetTournamentById(int id)
         {
             var tournament = await _context.Tournaments
                 .Where(t => t.TournamentId == id)
-                .Select(t => new
+                .Select(t => new AdminTournamentResponse
                 {
-                    t.TournamentId,
-                    t.TournamentName,
-                    t.Description,
-                    t.Location,
-                    t.StartDate,
-                    t.EndDate,
-                    t.MaxHorses,
-                    t.MinHorseAge,
-                    t.MaxHorseAge,
-                    t.MinHorseWeightKg,
-                    t.MaxHorseWeightKg,
-                    t.PrizePool,
-                    t.Rules,
-                    t.Status,
-                    t.CreatedBy,
-                    t.CreatedAt
+                    TournamentId = t.TournamentId,
+                    TournamentName = t.TournamentName,
+                    Description = t.Description,
+                    Location = t.Location,
+                    StartDate = t.StartDate,
+                    EndDate = t.EndDate,
+                    MaxHorses = t.MaxHorses,
+                    PrizePool = t.PrizePool,
+                    Status = t.Status,
+                    MinHorseAge = t.MinHorseAge,
+                    MaxHorseAge = t.MaxHorseAge,
+                    MinHorseWeightKg = t.MinHorseWeightKg,
+                    MaxHorseWeightKg = t.MaxHorseWeightKg,
+                    Rules = t.Rules,
+                    CreatedBy = t.CreatedBy,
+                    CreatedAt = t.CreatedAt
                 })
                 .FirstOrDefaultAsync();
 
             if (tournament == null)
-                return NotFound(new { message = "Tournament not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
 
             return Ok(tournament);
         }
 
-        // Duyệt giải đấu
         [HttpPut("{id}/approve")]
         public async Task<IActionResult> ApproveTournament(int id)
         {
@@ -79,23 +89,28 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
-                return NotFound(new { message = "Tournament not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
 
             tournament.Status = "OpenRegistration";
             tournament.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Tournament approved successfully",
-                tournament.TournamentId,
-                tournament.TournamentName,
-                tournament.Status
+                Message = "Tournament approved successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
             });
         }
 
-        // Hủy giải đấu
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelTournament(int id)
         {
@@ -103,19 +118,25 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
-                return NotFound(new { message = "Tournament not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
 
             tournament.Status = "Cancelled";
             tournament.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Tournament cancelled successfully",
-                tournament.TournamentId,
-                tournament.TournamentName,
-                tournament.Status
+                Message = "Tournament cancelled successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
             });
         }
     }

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -19,17 +20,17 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetReports()
         {
             var reports = await _context.RaceViolations
-                .Select(r => new
+                .Select(r => new AdminReportResponse
                 {
-                    r.ViolationId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.RefereeId,
-                    r.ViolationType,
-                    r.Description,
-                    r.PenaltyPoints,
-                    r.Action,
-                    r.CreatedAt
+                    ViolationId = r.ViolationId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    RefereeId = r.RefereeId,
+                    ViolationType = r.ViolationType,
+                    Description = r.Description,
+                    PenaltyPoints = r.PenaltyPoints,
+                    Action = r.Action,
+                    CreatedAt = r.CreatedAt
                 })
                 .ToListAsync();
 
@@ -41,22 +42,28 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var report = await _context.RaceViolations
                 .Where(r => r.ViolationId == id)
-                .Select(r => new
+                .Select(r => new AdminReportResponse
                 {
-                    r.ViolationId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.RefereeId,
-                    r.ViolationType,
-                    r.Description,
-                    r.PenaltyPoints,
-                    r.Action,
-                    r.CreatedAt
+                    ViolationId = r.ViolationId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    RefereeId = r.RefereeId,
+                    ViolationType = r.ViolationType,
+                    Description = r.Description,
+                    PenaltyPoints = r.PenaltyPoints,
+                    Action = r.Action,
+                    CreatedAt = r.CreatedAt
                 })
                 .FirstOrDefaultAsync();
 
             if (report == null)
-                return NotFound(new { message = "Report not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Report not found",
+                    Id = id
+                });
+            }
 
             return Ok(report);
         }
@@ -68,17 +75,17 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var reports = await _context.RaceViolations
                 .Where(r => r.CreatedAt.Date == today)
-                .Select(r => new
+                .Select(r => new AdminReportResponse
                 {
-                    r.ViolationId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.RefereeId,
-                    r.ViolationType,
-                    r.Description,
-                    r.PenaltyPoints,
-                    r.Action,
-                    r.CreatedAt
+                    ViolationId = r.ViolationId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    RefereeId = r.RefereeId,
+                    ViolationType = r.ViolationType,
+                    Description = r.Description,
+                    PenaltyPoints = r.PenaltyPoints,
+                    Action = r.Action,
+                    CreatedAt = r.CreatedAt
                 })
                 .ToListAsync();
 
@@ -96,7 +103,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .CountAsync(r => r.CreatedAt.Date == today);
 
             var pendingReports = await _context.RaceViolations
-                .CountAsync(r => r.Action == null || r.Action == "Pending");
+                .CountAsync(r => r.Action == null);
 
             return Ok(new
             {
@@ -113,17 +120,23 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.ViolationId == id);
 
             if (report == null)
-                return NotFound(new { message = "Report not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Report not found",
+                    Id = id
+                });
+            }
 
-            report.Action = "Resolved";
+            report.Action = "Warning";
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Report resolved successfully",
-                report.ViolationId,
-                report.Action
+                Message = "Report resolved successfully",
+                Id = report.ViolationId,
+                Status = report.Action
             });
         }
 
@@ -134,18 +147,25 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.ViolationId == id);
 
             if (report == null)
-                return NotFound(new { message = "Report not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Report not found",
+                    Id = id
+                });
+            }
 
-            report.Action = "Rejected";
+            report.Action = "Disqualified";
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Report rejected successfully",
-                report.ViolationId,
-                report.Action
+                Message = "Report rejected successfully",
+                Id = report.ViolationId,
+                Status = report.Action
             });
         }
     }
+
 }

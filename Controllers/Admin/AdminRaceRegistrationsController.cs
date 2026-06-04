@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -19,18 +20,19 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetRegistrations()
         {
             var registrations = await _context.RaceRegistrations
-                .Select(r => new
+                .Select(r => new AdminRegistrationResponse
                 {
-                    r.RegistrationId,
-                    r.RaceId,
-                    r.HorseId,
-                    r.OwnerId,
-                    r.JockeyId,
-                    r.Status,
-                    r.SubmittedAt,
-                    r.ReviewedBy,
-                    r.ReviewedAt,
-                    r.AdminNote
+                    RegistrationId = r.RegistrationId,
+                    RaceId = r.RaceId,
+                    HorseId = r.HorseId,
+                    OwnerId = r.OwnerId,
+                    JockeyId = r.JockeyId,
+                    Status = r.Status,
+                    SubmittedAt = r.SubmittedAt,
+                    ReviewedBy = r.ReviewedBy,
+                    ReviewedAt = r.ReviewedAt,
+                    JockeyConfirmedAt = r.JockeyConfirmedAt,
+                    AdminNote = r.AdminNote
                 })
                 .ToListAsync();
 
@@ -42,24 +44,30 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var registration = await _context.RaceRegistrations
                 .Where(r => r.RegistrationId == id)
-                .Select(r => new
+                .Select(r => new AdminRegistrationResponse
                 {
-                    r.RegistrationId,
-                    r.RaceId,
-                    r.HorseId,
-                    r.OwnerId,
-                    r.JockeyId,
-                    r.Status,
-                    r.SubmittedAt,
-                    r.ReviewedBy,
-                    r.ReviewedAt,
-                    r.JockeyConfirmedAt,
-                    r.AdminNote
+                    RegistrationId = r.RegistrationId,
+                    RaceId = r.RaceId,
+                    HorseId = r.HorseId,
+                    OwnerId = r.OwnerId,
+                    JockeyId = r.JockeyId,
+                    Status = r.Status,
+                    SubmittedAt = r.SubmittedAt,
+                    ReviewedBy = r.ReviewedBy,
+                    ReviewedAt = r.ReviewedAt,
+                    JockeyConfirmedAt = r.JockeyConfirmedAt,
+                    AdminNote = r.AdminNote
                 })
                 .FirstOrDefaultAsync();
 
             if (registration == null)
-                return NotFound(new { message = "Registration not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Registration not found",
+                    Id = id
+                });
+            }
 
             return Ok(registration);
         }
@@ -71,18 +79,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
-                return NotFound(new { message = "Registration not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Registration not found",
+                    Id = id
+                });
+            }
 
             registration.Status = "Approved";
             registration.ReviewedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Registration approved successfully",
-                registration.RegistrationId,
-                registration.Status
+                Message = "Registration approved successfully",
+                Id = registration.RegistrationId,
+                Status = registration.Status
             });
         }
 
@@ -93,7 +107,13 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
-                return NotFound(new { message = "Registration not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Registration not found",
+                    Id = id
+                });
+            }
 
             registration.Status = "Rejected";
             registration.ReviewedAt = DateTime.UtcNow;
@@ -101,12 +121,11 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Registration rejected successfully",
-                registration.RegistrationId,
-                registration.Status,
-                registration.AdminNote
+                Message = "Registration rejected successfully",
+                Id = registration.RegistrationId,
+                Status = registration.Status
             });
         }
     }

@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [ApiController]
@@ -10,7 +11,8 @@ namespace Eliteracingleague.API.Controllers.Admin
     {
         private readonly EliteRacingLeagueContext _context;
 
-        public AdminRaceResultsController(EliteRacingLeagueContext context)
+
+    public AdminRaceResultsController(EliteRacingLeagueContext context)
         {
             _context = context;
         }
@@ -19,20 +21,21 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetResults()
         {
             var results = await _context.RaceResults
-                .Select(r => new
+                .Select(r => new AdminRaceResultResponse
                 {
-                    r.ResultId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.FinishTimeSeconds,
-                    r.FinishPosition,
-                    r.Score,
-                    r.Status,
-                    r.EnteredByRefereeId,
-                    r.AdminConfirmedBy,
-                    r.PublishedAt,
-                    r.Note,
-                    r.CreatedAt
+                    ResultId = r.ResultId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    FinishTimeSeconds = r.FinishTimeSeconds,
+                    FinishPosition = r.FinishPosition,
+                    Score = r.Score,
+                    Status = r.Status,
+                    EnteredByRefereeId = r.EnteredByRefereeId,
+                    AdminConfirmedBy = r.AdminConfirmedBy,
+                    PublishedAt = r.PublishedAt,
+                    Note = r.Note,
+                    CreatedAt = r.CreatedAt,
+                    UpdatedAt = r.UpdatedAt
                 })
                 .ToListAsync();
 
@@ -44,26 +47,32 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var result = await _context.RaceResults
                 .Where(r => r.ResultId == id)
-                .Select(r => new
+                .Select(r => new AdminRaceResultResponse
                 {
-                    r.ResultId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.FinishTimeSeconds,
-                    r.FinishPosition,
-                    r.Score,
-                    r.Status,
-                    r.EnteredByRefereeId,
-                    r.AdminConfirmedBy,
-                    r.PublishedAt,
-                    r.Note,
-                    r.CreatedAt,
-                    r.UpdatedAt
+                    ResultId = r.ResultId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    FinishTimeSeconds = r.FinishTimeSeconds,
+                    FinishPosition = r.FinishPosition,
+                    Score = r.Score,
+                    Status = r.Status,
+                    EnteredByRefereeId = r.EnteredByRefereeId,
+                    AdminConfirmedBy = r.AdminConfirmedBy,
+                    PublishedAt = r.PublishedAt,
+                    Note = r.Note,
+                    CreatedAt = r.CreatedAt,
+                    UpdatedAt = r.UpdatedAt
                 })
                 .FirstOrDefaultAsync();
 
             if (result == null)
-                return NotFound(new { message = "Race result not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Race result not found",
+                    Id = id
+                });
+            }
 
             return Ok(result);
         }
@@ -72,18 +81,18 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetPendingResults()
         {
             var results = await _context.RaceResults
-                .Where(r => r.Status == "Pending")
-                .Select(r => new
+                .Where(r => r.Status == "Draft")
+                .Select(r => new AdminRaceResultResponse
                 {
-                    r.ResultId,
-                    r.RaceId,
-                    r.RegistrationId,
-                    r.FinishTimeSeconds,
-                    r.FinishPosition,
-                    r.Score,
-                    r.Status,
-                    r.EnteredByRefereeId,
-                    r.CreatedAt
+                    ResultId = r.ResultId,
+                    RaceId = r.RaceId,
+                    RegistrationId = r.RegistrationId,
+                    FinishTimeSeconds = r.FinishTimeSeconds,
+                    FinishPosition = r.FinishPosition,
+                    Score = r.Score,
+                    Status = r.Status,
+                    EnteredByRefereeId = r.EnteredByRefereeId,
+                    CreatedAt = r.CreatedAt
                 })
                 .ToListAsync();
 
@@ -97,19 +106,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.ResultId == id);
 
             if (result == null)
-                return NotFound(new { message = "Race result not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Race result not found",
+                    Id = id
+                });
+            }
 
-            result.Status = "Confirmed";
+            result.Status = "AdminApproved";
             result.PublishedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Race result approved successfully",
-                result.ResultId,
-                result.Status,
-                result.PublishedAt
+                Message = "Race result approved successfully",
+                Id = result.ResultId,
+                Status = result.Status
             });
         }
 
@@ -120,20 +134,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .FirstOrDefaultAsync(r => r.ResultId == id);
 
             if (result == null)
-                return NotFound(new { message = "Race result not found" });
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Race result not found",
+                    Id = id
+                });
+            }
 
-            result.Status = "Rejected";
-            result.Note = "Rejected by admin";
+            result.Status = "Returned";
+            result.Note = "Returned by admin";
 
             await _context.SaveChangesAsync();
 
-            return Ok(new
+            return Ok(new AdminActionResponse
             {
-                message = "Race result rejected successfully",
-                result.ResultId,
-                result.Status,
-                result.Note
+                Message = "Race result returned successfully",
+                Id = result.ResultId,
+                Status = result.Status
             });
         }
     }
+
 }
