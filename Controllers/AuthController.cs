@@ -92,7 +92,7 @@ public class AuthController : ControllerBase
                 Email = email,
                 Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim(),
                 Role = role,
-                Status = UserStatuses.Active,
+                Status = UserStatuses.Pending,
                 EmailVerified = false,
                 CreatedAt = DateTime.UtcNow
             };
@@ -264,13 +264,30 @@ public class AuthController : ControllerBase
         otp.UsedAt = DateTime.UtcNow;
 
         user.EmailVerified = true;
+
+        if (user.Role == UserRoles.Spectator)
+        {
+            user.Status = UserStatuses.Active;
+        }
+        else if (user.Role == UserRoles.HorseOwner || user.Role == UserRoles.Jockey)
+        {
+            user.Status = UserStatuses.Pending;
+        }
+        else
+        {
+            user.Status = UserStatuses.Pending;
+        }
+
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
 
         return Ok(new
         {
-            message = "Xác thực email thành công. Bạn có thể đăng nhập."
+            message = "Xác thực email thành công.",
+            role = user.Role,
+            status = user.Status,
+            nextStep = GetNextStep(user)
         });
     }
 
@@ -389,30 +406,55 @@ public class AuthController : ControllerBase
             });
         }
 
-        if (user.Status != UserStatuses.Active)
-        {
-            return BadRequest(new
-            {
-                message = "Tài khoản không hoạt động."
-            });
-        }
-
         if (!user.EmailVerified)
         {
             return BadRequest(new
             {
-                message = "Email chưa được xác thực."
+                message = "Email chưa được xác thực.",
+                nextStep = AuthNextSteps.VerifyEmail
+            });
+        }
+
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đang bị vô hiệu hóa.",
+                nextStep = AuthNextSteps.ContactSupport
+            });
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đã bị khóa.",
+                nextStep = AuthNextSteps.AccountBlocked
+            });
+        }
+
+        if (user.Status != UserStatuses.Active && user.Status != UserStatuses.Pending)
+        {
+            return BadRequest(new
+            {
+                message = "Trạng thái tài khoản không hợp lệ.",
+                status = user.Status,
+                nextStep = AuthNextSteps.Unknown
             });
         }
 
         var token = GenerateJwtToken(user);
         var expiresInMinutes = int.Parse(_configuration["Jwt:ExpireMinutes"]!);
+        var nextStep = GetNextStep(user);
 
         var response = new LoginResponse
         {
-            Message = "Đăng nhập thành công.",
+            Message = user.Status == UserStatuses.Pending
+                ? "Đăng nhập thành công. Vui lòng hoàn thiện hồ sơ."
+                : "Đăng nhập thành công.",
             Token = token,
             ExpiresInMinutes = expiresInMinutes,
+            NextStep = nextStep,
             User = new LoginUserResponse
             {
                 UserId = user.UserId,
@@ -464,7 +506,8 @@ public class AuthController : ControllerBase
             phone = user.Phone,
             role = user.Role,
             status = user.Status,
-            emailVerified = user.EmailVerified
+            emailVerified = user.EmailVerified,
+            nextStep = GetNextStep(user)
         });
     }
 
@@ -477,7 +520,7 @@ public class AuthController : ControllerBase
                 {
                     OwnerId = user.UserId,
                     Address = null,
-                    IsActive = true,
+                    IsActive = false,
                     CreatedAt = DateTime.UtcNow
                 });
                 break;
@@ -491,7 +534,7 @@ public class AuthController : ControllerBase
                     HealthStatus = HorseHealthStatuses.Healthy,
                     CertificateNo = null,
                     CertificateFileUrl = null,
-                    IsActive = true,
+                    IsActive = false,
                     CreatedAt = DateTime.UtcNow
                 });
                 break;
@@ -575,6 +618,47 @@ public class AuthController : ControllerBase
     ";
 
         await _emailService.SendEmailAsync(email, subject, htmlBody);
+    }
+
+
+    private static string GetNextStep(User user)
+    {
+        if (!user.EmailVerified)
+        {
+            return AuthNextSteps.VerifyEmail;
+        }
+
+        if (user.Status == UserStatuses.Active)
+        {
+            return AuthNextSteps.GoToDashboard;
+        }
+
+        if (user.Status == UserStatuses.Pending && user.Role == UserRoles.HorseOwner)
+        {
+            return AuthNextSteps.AddHorse;
+        }
+
+        if (user.Status == UserStatuses.Pending && user.Role == UserRoles.Jockey)
+        {
+            return AuthNextSteps.CompleteJockeyProfile;
+        }
+
+        if (user.Status == UserStatuses.Pending)
+        {
+            return AuthNextSteps.WaitForActivation;
+        }
+
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return AuthNextSteps.ContactSupport;
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return AuthNextSteps.AccountBlocked;
+        }
+
+        return AuthNextSteps.Unknown;
     }
 
 
