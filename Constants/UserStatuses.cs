@@ -2,12 +2,14 @@
 
 public static class UserStatuses
 {
+    public const string Pending = "Pending";
     public const string Active = "Active";
     public const string Inactive = "Inactive";
     public const string Banned = "Banned";
 
     public static readonly string[] All =
     {
+        Pending,
         Active,
         Inactive,
         Banned
