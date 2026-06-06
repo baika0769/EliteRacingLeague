@@ -2,9 +2,12 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/registrations")]
     public class AdminRaceRegistrationsController : ControllerBase
@@ -87,7 +90,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            registration.Status = "Approved";
+            registration.Status = RaceRegistrationStatuses.Approved;
             registration.ReviewedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -115,7 +118,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            registration.Status = "Rejected";
+            registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedAt = DateTime.UtcNow;
             registration.AdminNote = "Rejected by admin";
 

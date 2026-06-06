@@ -2,9 +2,12 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/tournaments")]
     public class AdminTournamentsController : ControllerBase
@@ -37,7 +40,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                     MaxHorseWeightKg = t.MaxHorseWeightKg,
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
-                    CreatedAt = t.CreatedAt
+                    CreatedAt = t.CreatedAt,
+
+                    EntriesCount = _context.RaceRegistrations
+                        .Count(r => r.Race.TournamentId == t.TournamentId),
+
+                    EntriesText =
+                        _context.RaceRegistrations
+                            .Count(r => r.Race.TournamentId == t.TournamentId)
+                        + "/" + t.MaxHorses
                 })
                 .ToListAsync();
 
@@ -66,7 +77,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                     MaxHorseWeightKg = t.MaxHorseWeightKg,
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
-                    CreatedAt = t.CreatedAt
+                    CreatedAt = t.CreatedAt,
+
+                    EntriesCount = _context.RaceRegistrations
+                        .Count(r => r.Race.TournamentId == t.TournamentId),
+
+                    EntriesText =
+                        _context.RaceRegistrations
+                            .Count(r => r.Race.TournamentId == t.TournamentId)
+                        + "/" + t.MaxHorses
                 })
                 .FirstOrDefaultAsync();
 
@@ -97,7 +116,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            tournament.Status = "OpenRegistration";
+            tournament.Status = TournamentStatuses.OpenRegistration;
             tournament.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -126,7 +145,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            tournament.Status = "Cancelled";
+            tournament.Status = TournamentStatuses.Cancelled;
             tournament.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
