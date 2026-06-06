@@ -2,9 +2,11 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
-
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/results")]
     public class AdminRaceResultsController : ControllerBase
@@ -81,7 +83,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetPendingResults()
         {
             var results = await _context.RaceResults
-                .Where(r => r.Status == "Draft")
+                .Where(r => r.Status == RaceResultStatuses.Draft)
                 .Select(r => new AdminRaceResultResponse
                 {
                     ResultId = r.ResultId,
@@ -114,7 +116,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            result.Status = "AdminApproved";
+            result.Status = RaceResultStatuses.AdminApproved;
             result.PublishedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -142,7 +144,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            result.Status = "Returned";
+            result.Status = RaceResultStatuses.Returned;
             result.Note = "Returned by admin";
 
             await _context.SaveChangesAsync();

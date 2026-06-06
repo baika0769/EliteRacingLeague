@@ -2,9 +2,11 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
-
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/reports")]
     public class AdminReportsController : ControllerBase
@@ -128,7 +130,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            report.Action = "Warning";
+            report.Action = RaceViolationActions.Warning;
 
             await _context.SaveChangesAsync();
 
@@ -155,7 +157,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            report.Action = "Disqualified";
+            report.Action = RaceViolationActions.Disqualified;
 
             await _context.SaveChangesAsync();
 
