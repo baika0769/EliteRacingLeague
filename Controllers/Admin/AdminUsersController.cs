@@ -2,9 +2,12 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/users")]
     public class AdminUsersController : ControllerBase
@@ -62,6 +65,59 @@ namespace Eliteracingleague.API.Controllers.Admin
             return Ok(user);
         }
 
+        [HttpPut("{id}/approve")]
+        public async Task<IActionResult> ApproveUser(int id)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+
+            if (user == null)
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "User not found",
+                    Id = id
+                });
+
+            user.Status = UserStatuses.Active;
+            user.EmailVerified = true;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "User approved successfully",
+                Id = user.UserId,
+                Name = user.FullName,
+                Status = user.Status
+            });
+        }
+
+        [HttpPut("{id}/reject")]
+        public async Task<IActionResult> RejectUser(int id)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+
+            if (user == null)
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "User not found",
+                    Id = id
+                });
+
+            user.Status = UserStatuses.Inactive;
+            user.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "User rejected successfully",
+                Id = user.UserId,
+                Name = user.FullName,
+                Status = user.Status
+            });
+        }
+
         [HttpPut("{id}/block")]
         public async Task<IActionResult> BlockUser(int id)
         {
@@ -74,7 +130,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Id = id
                 });
 
-            user.Status = "Suspended";
+            user.Status = UserStatuses.Banned;
+            user.UpdatedAt = DateTime.UtcNow;
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
@@ -98,7 +156,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Id = id
                 });
 
-            user.Status = "Active";
+            user.Status = UserStatuses.Active;
+            user.UpdatedAt = DateTime.UtcNow;
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse

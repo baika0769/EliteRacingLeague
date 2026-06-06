@@ -2,9 +2,12 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/horses")]
     public class AdminHorsesController : ControllerBase
@@ -88,7 +91,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             horse.IsActive = true;
-            horse.HealthStatus = "Healthy";
+            horse.HealthStatus = HorseHealthStatuses.Healthy;
 
             await _context.SaveChangesAsync();
 

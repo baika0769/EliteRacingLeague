@@ -2,9 +2,11 @@
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
-
+using Microsoft.AspNetCore.Authorization;
+using Eliteracingleague.API.Constants;
 namespace Eliteracingleague.API.Controllers.Admin
 {
+    [Authorize(Roles = UserRoles.Admin)]
     [ApiController]
     [Route("api/admin/dashboard")]
     public class AdminDashboardController : ControllerBase
@@ -25,10 +27,10 @@ namespace Eliteracingleague.API.Controllers.Admin
             var totalTournaments = await _context.Tournaments.CountAsync();
 
             var pendingRegistrations = await _context.RaceRegistrations
-                .CountAsync(r => r.Status == "Pending");
+    .CountAsync(r => r.Status == RaceRegistrationStatuses.Pending);
 
             var pendingResults = await _context.RaceResults
-                .CountAsync(r => r.Status == "Draft");
+    .CountAsync(r => r.Status == RaceResultStatuses.Draft);
 
             var response = new AdminDashboardResponse
             {

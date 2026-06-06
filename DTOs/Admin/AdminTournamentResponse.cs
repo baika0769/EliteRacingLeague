@@ -18,5 +18,7 @@
         public string? Rules { get; set; }
         public int CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+        public int EntriesCount { get; set; }
+        public string EntriesText { get; set; } = string.Empty;
     }
 }
