@@ -154,9 +154,19 @@ public class AuthController : ControllerBase
                 expiresInMinutes = OtpExpireMinutes
             });
         }
-        catch
-        {
+        catch(Exception ex)
+{
             await transaction.RollbackAsync();
+
+            if (_environment.IsDevelopment())
+            {
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Đăng ký thất bại. Không thể tạo user và profile tương ứng.",
+                    error = ex.Message,
+                    innerError = ex.InnerException?.Message
+                });
+            }
 
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
