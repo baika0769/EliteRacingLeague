@@ -17,6 +17,14 @@ public partial class Jockey
 
     public string? CertificateFileUrl { get; set; }
 
+    public string? ProfileImageUrl { get; set; }
+
+    public string? IdCardFrontUrl { get; set; }
+
+    public string? IdCardBackUrl { get; set; }
+
+    public string? HealthCertificateUrl { get; set; }
+
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }
