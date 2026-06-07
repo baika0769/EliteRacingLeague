@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using Eliteracingleague.API.Models;
 
 namespace Eliteracingleague.API.Controllers.Owner;
 
@@ -128,9 +129,9 @@ public class OwnerController : ControllerBase
         return Ok(response);
     }
 
-    // GET: /api/owner/horses
-    [HttpGet("horses")]
-    public async Task<IActionResult> GetMyHorses()
+    // POST: /api/owner/horses
+    [HttpPost("horses")]
+    public async Task<IActionResult> CreateHorse(CreateOwnerHorseRequest request)
     {
         var ownerId = GetCurrentUserId();
 
@@ -142,32 +143,138 @@ public class OwnerController : ControllerBase
             });
         }
 
-        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.UserId == ownerId.Value);
 
-        if (ownerProfileError != null)
+        var owner = await _context.HorseOwners
+            .FirstOrDefaultAsync(o => o.OwnerId == ownerId.Value);
+
+        if (user == null || owner == null)
         {
-            return ownerProfileError;
+            return NotFound(new
+            {
+                message = "Không tìm thấy hồ sơ chủ ngựa."
+            });
         }
 
-        var horses = await _context.Horses
-            .AsNoTracking()
-            .Where(h => h.OwnerId == ownerId.Value && h.IsActive)
-            .OrderByDescending(h => h.CreatedAt)
-            .Select(h => new OwnerHorseResponse
+        if (!user.EmailVerified)
+        {
+            return BadRequest(new
             {
-                HorseId = h.HorseId,
-                HorseName = h.HorseName,
-                BreedName = h.Breed.BreedName,
-                Age = h.Age,
-                WeightKg = h.WeightKg,
-                HealthStatus = h.HealthStatus,
-                ImageUrl = null
-            })
-            .ToListAsync();
+                message = "Email chưa được xác thực.",
+                nextStep = AuthNextSteps.VerifyEmail
+            });
+        }
 
-        return Ok(horses);
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đang bị vô hiệu hóa.",
+                status = user.Status,
+                nextStep = AuthNextSteps.ContactSupport
+            });
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đã bị khóa.",
+                status = user.Status,
+                nextStep = AuthNextSteps.AccountBlocked
+            });
+        }
+
+        if (user.Status != UserStatuses.Pending && user.Status != UserStatuses.Active)
+        {
+            return BadRequest(new
+            {
+                message = "Trạng thái tài khoản không hợp lệ.",
+                status = user.Status,
+                nextStep = AuthNextSteps.Unknown
+            });
+        }
+
+        var breedExists = await _context.HorseBreeds
+            .AnyAsync(b => b.BreedId == request.BreedId);
+
+        if (!breedExists)
+        {
+            return BadRequest(new
+            {
+                message = "Giống ngựa không hợp lệ."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.HorseName))
+        {
+            return BadRequest(new
+            {
+                message = "Tên ngựa không được để trống."
+            });
+        }
+
+        if (request.Age <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "Tuổi ngựa phải lớn hơn 0."
+            });
+        }
+
+        if (request.WeightKg <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "Cân nặng ngựa phải lớn hơn 0."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.HealthStatus))
+        {
+            return BadRequest(new
+            {
+                message = "Tình trạng sức khỏe không được để trống."
+            });
+        }
+
+        var horse = new Horse
+        {
+            OwnerId = ownerId.Value,
+            BreedId = request.BreedId,
+            HorseName = request.HorseName.Trim(),
+            Age = request.Age,
+            HeightCm = request.HeightCm,
+            WeightKg = request.WeightKg,
+            HealthStatus = request.HealthStatus.Trim(),
+            AchievementSummary = request.AchievementSummary,
+            ImageUrl = request.ImageUrl,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Horses.Add(horse);
+
+        if (user.Status == UserStatuses.Pending)
+        {
+            user.Status = UserStatuses.Active;
+            user.UpdatedAt = DateTime.UtcNow;
+            owner.IsActive = true;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Thêm ngựa thành công. Tài khoản HorseOwner đã được kích hoạt.",
+            horseId = horse.HorseId,
+            status = user.Status,
+            ownerIsActive = owner.IsActive,
+            nextStep = AuthNextSteps.GoToDashboard
+        });
     }
-
+    
     // GET: /api/owner/tournaments/new
     [HttpGet("tournaments/new")]
     public async Task<IActionResult> GetNewTournaments()
