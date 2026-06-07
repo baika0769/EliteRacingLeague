@@ -220,6 +220,21 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasMaxLength(500)
                 .IsUnicode(false)
                 .HasColumnName("certificate_file_url");
+            entity.Property(e => e.ProfileImageUrl)
+                .HasMaxLength(500)
+                .HasColumnName("profile_image_url");
+
+            entity.Property(e => e.IdCardFrontUrl)
+                .HasMaxLength(500)
+                .HasColumnName("id_card_front_url");
+
+            entity.Property(e => e.IdCardBackUrl)
+                .HasMaxLength(500)
+                .HasColumnName("id_card_back_url");
+
+            entity.Property(e => e.HealthCertificateUrl)
+                .HasMaxLength(500)
+                .HasColumnName("health_certificate_url");
             entity.Property(e => e.CertificateNo)
                 .HasMaxLength(100)
                 .IsUnicode(false)

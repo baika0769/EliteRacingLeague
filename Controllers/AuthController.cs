@@ -526,7 +526,7 @@ public class AuthController : ControllerBase
                 break;
 
             case UserRoles.Jockey:
-                _context.Jockeys.Add(new Jockey
+                _context.Jockeys.Add(new Eliteracingleague.API.Models.Jockey
                 {
                     JockeyId = user.UserId,
                     WeightKg = 50m,
@@ -534,6 +534,10 @@ public class AuthController : ControllerBase
                     HealthStatus = HorseHealthStatuses.Healthy,
                     CertificateNo = null,
                     CertificateFileUrl = null,
+                    ProfileImageUrl = null,
+                    IdCardFrontUrl = null,
+                    IdCardBackUrl = null,
+                    HealthCertificateUrl = null,
                     IsActive = false,
                     CreatedAt = DateTime.UtcNow
                 });
