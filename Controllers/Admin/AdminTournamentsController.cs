@@ -4,6 +4,8 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Models;
+using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
@@ -99,6 +101,131 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             return Ok(tournament);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> CreateTournament([FromBody] AdminTournamentRequest request)
+        {
+            if (request.StartDate >= request.EndDate)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Start date must be before end date"
+                });
+            }
+
+            if (request.MaxHorses <= 0)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Max horses must be greater than 0"
+                });
+            }
+
+            var userIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (!int.TryParse(userIdText, out var adminId))
+            {
+                return Unauthorized(new AdminActionResponse
+                {
+                    Message = "Invalid admin token"
+                });
+            }
+
+            var tournament = new Tournament
+            {
+                TournamentName = request.TournamentName,
+                Description = request.Description,
+                Location = request.Location,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                MaxHorses = request.MaxHorses,
+                PrizePool = request.PrizePool,
+                Status = TournamentStatuses.Draft,
+                MinHorseAge = request.MinHorseAge,
+                MaxHorseAge = request.MaxHorseAge,
+                MinHorseWeightKg = request.MinHorseWeightKg,
+                MaxHorseWeightKg = request.MaxHorseWeightKg,
+                Rules = request.Rules,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = adminId,
+                UpdatedAt = DateTime.UtcNow,
+            };
+
+            _context.Tournaments.Add(tournament);
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Tournament created successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
+            });
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateTournament(int id, [FromBody] AdminTournamentRequest request)
+        {
+            var tournament = await _context.Tournaments
+                .FirstOrDefaultAsync(t => t.TournamentId == id);
+
+            if (tournament == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
+
+            if (request.StartDate >= request.EndDate)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Start date must be before end date",
+                    Id = id
+                });
+            }
+
+            if (request.MaxHorses < 1 || request.MaxHorses > 20)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Max horses must be between 1 and 20"
+                });
+            }
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Max horses must be greater than 0",
+                    Id = id
+                });
+            }
+
+            tournament.TournamentName = request.TournamentName;
+            tournament.Description = request.Description;
+            tournament.Location = request.Location;
+            tournament.StartDate = request.StartDate;
+            tournament.EndDate = request.EndDate;
+            tournament.MaxHorses = request.MaxHorses;
+            tournament.PrizePool = request.PrizePool;
+            tournament.MinHorseAge = request.MinHorseAge;
+            tournament.MaxHorseAge = request.MaxHorseAge;
+            tournament.MinHorseWeightKg = request.MinHorseWeightKg;
+            tournament.MaxHorseWeightKg = request.MaxHorseWeightKg;
+            tournament.Rules = request.Rules;
+            tournament.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Tournament updated successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
+            });
         }
 
         [HttpPut("{id}/approve")]
