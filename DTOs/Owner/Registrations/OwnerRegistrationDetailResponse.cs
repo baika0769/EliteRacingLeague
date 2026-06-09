@@ -1,0 +1,18 @@
+﻿namespace Eliteracingleague.API.DTOs.Owner.Registrations;
+
+public class OwnerRegistrationDetailResponse
+{
+    public int RegistrationId { get; set; }
+    public int RaceId { get; set; }
+    public int HorseId { get; set; }
+
+    public string TournamentName { get; set; } = null!;
+    public string HorseName { get; set; } = null!;
+    public string? JockeyName { get; set; }
+
+    public string RaceDate { get; set; } = null!;
+    public string SubmittedAt { get; set; } = null!;
+
+    public string Status { get; set; } = null!;
+    public string? AdminNote { get; set; }
+}
