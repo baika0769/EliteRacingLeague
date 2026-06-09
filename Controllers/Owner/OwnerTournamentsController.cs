@@ -37,18 +37,24 @@ public class OwnerTournamentsController : OwnerBaseController
 
         var data = await _context.Tournaments
             .AsNoTracking()
-            .Where(t => t.Race != null && t.Race.RaceDate >= today)
+            .Where(t =>
+                t.Race != null &&
+                t.Race.RaceDate >= today &&
+                t.Status == TournamentStatuses.OpenRegistration &&
+                t.Race.Status == RaceStatuses.Open &&
+                 t.Race.RaceRegistrations.Count < t.Race.MaxHorses &&
+                !t.Race.RaceRegistrations.Any(r => r.OwnerId == ownerId.Value))
             .OrderBy(t => t.Race!.RaceDate)
             .Take(5)
             .Select(t => new
-            {
-                t.TournamentId,
-                t.TournamentName,
-                RaceId = t.Race!.RaceId,
-                RaceDate = t.Race.RaceDate,
-                Location = t.Race.Location ?? t.Location
-            })
-            .ToListAsync();
+        {
+        t.TournamentId,
+        t.TournamentName,
+        RaceId = t.Race!.RaceId,
+        RaceDate = t.Race.RaceDate,
+        Location = t.Race.Location ?? t.Location
+    })
+    .ToListAsync();
 
         var response = data.Select(t => new OwnerNewTournamentResponse
         {
