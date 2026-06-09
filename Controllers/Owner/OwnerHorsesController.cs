@@ -81,7 +81,7 @@ public class OwnerHorsesController : OwnerBaseController
         }
 
         var breedExists = await _context.HorseBreeds
-            .AnyAsync(b => b.BreedId == request.BreedId);
+            .AnyAsync(b => b.BreedId == request.BreedId && b.IsActive);
 
         if (!breedExists)
         {
