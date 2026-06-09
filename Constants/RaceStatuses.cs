@@ -3,7 +3,7 @@
 public static class RaceStatuses
 {
     public const string Open = "Open";
-    public const string Scheduled = "Scheduled";
+    public const string Closed = "Closed";
     public const string Ongoing = "Ongoing";
     public const string Completed = "Completed";
     public const string Cancelled = "Cancelled";
@@ -11,7 +11,7 @@ public static class RaceStatuses
     public static readonly string[] All =
     {
         Open,
-        Scheduled,
+        Closed,
         Ongoing,
         Completed,
         Cancelled

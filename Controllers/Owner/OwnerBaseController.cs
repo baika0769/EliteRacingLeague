@@ -1,8 +1,8 @@
-﻿using System.Security.Claims;
-using Eliteracingleague.API.Constants;
+﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Owner;
 
@@ -52,8 +52,7 @@ public abstract class OwnerBaseController : ControllerBase
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
-                message = "Không tìm thấy hồ sơ HorseOwner.",
-                nextStep = AuthNextSteps.Unknown
+                message = "Không tìm thấy hồ sơ HorseOwner."
             });
         }
 
@@ -62,16 +61,16 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Email chưa được xác thực.",
-                nextStep = AuthNextSteps.VerifyEmail
+                nextStep = "VerifyEmail"
             });
         }
 
-        if (data.UserStatus == UserStatuses.Pending)
+        if (data.UserStatus == "Pending")
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Vui lòng thêm ngựa để kích hoạt tài khoản.",
-                nextStep = AuthNextSteps.AddHorse
+                nextStep = "AddHorse"
             });
         }
 
@@ -80,8 +79,7 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Tài khoản đang bị vô hiệu hóa.",
-                status = data.UserStatus,
-                nextStep = AuthNextSteps.ContactSupport
+                nextStep = "ContactSupport"
             });
         }
 
@@ -90,8 +88,7 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Tài khoản đã bị khóa.",
-                status = data.UserStatus,
-                nextStep = AuthNextSteps.AccountBlocked
+                nextStep = "AccountBlocked"
             });
         }
 
@@ -100,8 +97,7 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Tài khoản HorseOwner chưa được kích hoạt.",
-                status = data.UserStatus,
-                nextStep = AuthNextSteps.Unknown
+                status = data.UserStatus
             });
         }
 
@@ -125,8 +121,7 @@ public abstract class OwnerBaseController : ControllerBase
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
-                message = "Không tìm thấy hồ sơ HorseOwner.",
-                nextStep = AuthNextSteps.Unknown
+                message = "Không tìm thấy hồ sơ HorseOwner."
             });
         }
 
@@ -135,7 +130,7 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Email chưa được xác thực.",
-                nextStep = AuthNextSteps.VerifyEmail
+                nextStep = "VerifyEmail"
             });
         }
 
@@ -144,7 +139,7 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Tài khoản đang bị vô hiệu hóa.",
-                nextStep = AuthNextSteps.ContactSupport
+                nextStep = "ContactSupport"
             });
         }
 
@@ -153,19 +148,16 @@ public abstract class OwnerBaseController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Tài khoản đã bị khóa.",
-                nextStep = AuthNextSteps.AccountBlocked
+                nextStep = "AccountBlocked"
             });
         }
 
-        // Owner Pending vẫn được vào My Horse Directory để thêm ngựa.
-        if (data.UserStatus != UserStatuses.Pending &&
-            data.UserStatus != UserStatuses.Active)
+        if (data.UserStatus != "Pending" && data.UserStatus != UserStatuses.Active)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Trạng thái tài khoản không hợp lệ.",
-                status = data.UserStatus,
-                nextStep = AuthNextSteps.Unknown
+                status = data.UserStatus
             });
         }
 
