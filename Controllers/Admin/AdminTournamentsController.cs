@@ -195,13 +195,6 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Message = "Max horses must be between 1 and 20"
                 });
             }
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Max horses must be greater than 0",
-                    Id = id
-                });
-            }
 
             tournament.TournamentName = request.TournamentName;
             tournament.Description = request.Description;
@@ -254,6 +247,30 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Id = tournament.TournamentId,
                 Name = tournament.TournamentName,
                 Status = tournament.Status
+            });
+        }
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteTournament(int id)
+        {
+            var tournament = await _context.Tournaments
+                .FirstOrDefaultAsync(t => t.TournamentId == id);
+
+            if (tournament == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
+
+            _context.Tournaments.Remove(tournament);
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Tournament deleted successfully",
+                Id = id
             });
         }
 
