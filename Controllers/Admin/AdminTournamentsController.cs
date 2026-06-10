@@ -137,8 +137,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 TournamentName = request.TournamentName,
                 Description = request.Description,
                 Location = request.Location,
-                StartDate = request.RaceDate,
-                EndDate = request.RegistrationDeadline,
+                StartDate = request.RegistrationDeadline,
+                EndDate = request.RaceDate,
                 MaxHorses = request.MaxHorses,
                 PrizePool = request.PrizePool,
                 Status = TournamentStatuses.Draft,
@@ -199,8 +199,8 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.TournamentName = request.TournamentName;
             tournament.Description = request.Description;
             tournament.Location = request.Location;
-            tournament.StartDate = request.RaceDate;
-            tournament.EndDate = request.RegistrationDeadline;
+            tournament.StartDate = request.RegistrationDeadline;
+            tournament.EndDate = request.RaceDate;
             tournament.MaxHorses = request.MaxHorses;
             tournament.PrizePool = request.PrizePool;
             tournament.MinHorseAge = request.MinHorseAge;
@@ -208,6 +208,11 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.MinHorseWeightKg = request.MinHorseWeightKg;
             tournament.MaxHorseWeightKg = request.MaxHorseWeightKg;
             tournament.Rules = request.Rules;
+            if (!string.IsNullOrWhiteSpace(request.Status))
+            {
+                tournament.Status = request.Status;
+            }
+
             tournament.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
