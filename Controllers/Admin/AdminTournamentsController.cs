@@ -106,11 +106,11 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpPost]
         public async Task<IActionResult> CreateTournament([FromBody] AdminTournamentRequest request)
         {
-            if (request.StartDate >= request.EndDate)
+            if (request.RegistrationDeadline >= request.RaceDate)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Start date must be before end date"
+                    Message = "Registration deadline must be before race date"
                 });
             }
 
@@ -137,8 +137,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 TournamentName = request.TournamentName,
                 Description = request.Description,
                 Location = request.Location,
-                StartDate = request.StartDate,
-                EndDate = request.EndDate,
+                StartDate = request.RaceDate,
+                EndDate = request.RegistrationDeadline,
                 MaxHorses = request.MaxHorses,
                 PrizePool = request.PrizePool,
                 Status = TournamentStatuses.Draft,
@@ -179,11 +179,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.StartDate >= request.EndDate)
+            if (request.RegistrationDeadline >= request.RaceDate)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Start date must be before end date",
+                    Message = "Registration deadline must be before race date",
                     Id = id
                 });
             }
@@ -199,8 +199,8 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.TournamentName = request.TournamentName;
             tournament.Description = request.Description;
             tournament.Location = request.Location;
-            tournament.StartDate = request.StartDate;
-            tournament.EndDate = request.EndDate;
+            tournament.StartDate = request.RaceDate;
+            tournament.EndDate = request.RegistrationDeadline;
             tournament.MaxHorses = request.MaxHorses;
             tournament.PrizePool = request.PrizePool;
             tournament.MinHorseAge = request.MinHorseAge;

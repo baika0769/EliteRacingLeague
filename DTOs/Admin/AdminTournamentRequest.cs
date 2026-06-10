@@ -6,8 +6,8 @@ public class AdminTournamentRequest
     public string? Description { get; set; }
     public string? Location { get; set; }
 
-    public DateOnly StartDate { get; set; }
-    public DateOnly EndDate { get; set; }
+    public DateOnly RaceDate { get; set; }
+    public DateOnly RegistrationDeadline { get; set; }
 
     public int MaxHorses { get; set; }
     public decimal PrizePool { get; set; }
