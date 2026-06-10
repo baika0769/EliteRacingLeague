@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Owner;
 
-[Route("api/owner")]
+[Route("api/owner/lookups")]
 [ApiController]
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerLookupsController : OwnerBaseController

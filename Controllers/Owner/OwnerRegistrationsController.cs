@@ -188,6 +188,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             return InvalidToken();
         }
 
+
+
         var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
 
         if (ownerProfileError != null)
@@ -214,6 +216,30 @@ public class OwnerRegistrationsController : OwnerBaseController
         if (race == null)
         {
             return NotFound(new { message = "Không tìm thấy race." });
+        }
+
+        if (race.TournamentStatus != TournamentStatuses.OpenRegistration)
+        {
+            return BadRequest(new
+            {
+                message = "Tournament hiện không mở đăng ký."
+            });
+        }
+
+        if (race.Status != RaceStatuses.Open)
+        {
+            return BadRequest(new
+            {
+                message = "Race hiện không mở đăng ký."
+            });
+        }
+
+        if (race.RaceDate.Date < DateTime.UtcNow.Date)
+        {
+            return BadRequest(new
+            {
+                message = "Race đã diễn ra, không thể chọn ngựa."
+            });
         }
 
         var horses = await _context.Horses
@@ -383,7 +409,277 @@ public class OwnerRegistrationsController : OwnerBaseController
         });
     }
 
+    [HttpGet("pending")]
+    public async Task<IActionResult> GetPendingRegistrations()
+    {
+        var ownerId = GetCurrentUserId();
 
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var data = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.OwnerId == ownerId.Value &&
+                r.Status == RaceRegistrationStatuses.Pending)
+            .OrderByDescending(r => r.SubmittedAt)
+            .Select(r => new
+            {
+                r.RegistrationId,
+                r.RaceId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                HorseName = r.Horse.HorseName,
+                r.SubmittedAt,
+                r.Status,
+                r.AdminNote
+            })
+            .ToListAsync();
+
+        var response = data.Select(r => new OwnerPendingRegistrationResponse
+        {
+            RegistrationId = r.RegistrationId,
+            RaceId = r.RaceId,
+            TournamentName = r.TournamentName,
+            HorseName = r.HorseName,
+            RegDate = r.SubmittedAt.ToString("yyyy-MM-dd"),
+            Status = r.Status,
+            AdminNote = r.AdminNote
+        });
+
+        return Ok(response);
+    }
+
+
+
+    [HttpGet("approved")]
+    public async Task<IActionResult> GetApprovedRegistrations()
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var data = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.OwnerId == ownerId.Value &&
+                ApprovedRegistrationStatuses.Contains(r.Status))
+            .OrderByDescending(r => r.Race.RaceDate)
+            .Select(r => new
+            {
+                r.RegistrationId,
+                r.RaceId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                HorseName = r.Horse.HorseName,
+                JockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
+                RaceDate = r.Race.RaceDate,
+                r.Status
+            })
+            .ToListAsync();
+
+        var response = data.Select(r => new OwnerApprovedRegistrationResponse
+        {
+            RegistrationId = r.RegistrationId,
+            RaceId = r.RaceId,
+            TournamentName = r.TournamentName,
+            HorseName = r.HorseName,
+            JockeyName = r.JockeyName,
+            RaceDate = r.RaceDate.ToString("yyyy-MM-dd"),
+            Status = r.Status
+        });
+
+        return Ok(response);
+    }
+
+
+
+    [HttpGet("{registrationId:int}")]
+    public async Task<IActionResult> GetRegistrationDetail(int registrationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var data = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.RegistrationId == registrationId &&
+                r.OwnerId == ownerId.Value)
+            .Select(r => new
+            {
+                r.RegistrationId,
+                r.RaceId,
+                r.HorseId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                HorseName = r.Horse.HorseName,
+                JockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
+                RaceDate = r.Race.RaceDate,
+                r.SubmittedAt,
+                r.Status,
+                r.AdminNote
+            })
+            .FirstOrDefaultAsync();
+
+        if (data == null)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy đơn đăng ký hoặc bạn không có quyền xem đơn này."
+            });
+        }
+
+        var response = new OwnerRegistrationDetailResponse
+        {
+            RegistrationId = data.RegistrationId,
+            RaceId = data.RaceId,
+            HorseId = data.HorseId,
+            TournamentName = data.TournamentName,
+            HorseName = data.HorseName,
+            JockeyName = data.JockeyName,
+            RaceDate = data.RaceDate.ToString("yyyy-MM-dd"),
+            SubmittedAt = data.SubmittedAt.ToString("yyyy-MM-dd HH:mm"),
+            Status = data.Status,
+            AdminNote = data.AdminNote
+        };
+
+        return Ok(response);
+    }
+
+
+    [HttpGet("{registrationId:int}/journey")]
+    public async Task<IActionResult> GetRegistrationJourney(int registrationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var registration = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.RegistrationId == registrationId &&
+                r.OwnerId == ownerId.Value)
+            .Select(r => new
+            {
+                r.RegistrationId,
+                r.Status
+            })
+            .FirstOrDefaultAsync();
+
+        if (registration == null)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy đơn đăng ký hoặc bạn không có quyền xem đơn này."
+            });
+        }
+
+        var currentStep = GetRegistrationCurrentStep(registration.Status);
+
+        var steps = new List<RegistrationJourneyStepResponse>
+        {
+            new RegistrationJourneyStepResponse
+            {
+                StepNumber = 1,
+                Key = "Submitted",
+                Label = "Đã gửi đơn",
+                Description = "Owner đã gửi đơn đăng ký race.",
+                IsCompleted = currentStep >= 1,
+                IsCurrent = currentStep == 1
+            },
+            new RegistrationJourneyStepResponse
+            {
+                StepNumber = 2,
+                Key = "PendingReview",
+                Label = "Chờ Admin duyệt",
+                Description = "Admin đang kiểm tra đơn đăng ký.",
+                IsCompleted = currentStep >= 2 &&
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled,
+                IsCurrent = currentStep == 2
+            },
+            new RegistrationJourneyStepResponse
+            {
+                StepNumber = 3,
+                Key = "Approved",
+                Label = "Đã được duyệt",
+                Description = "Đơn đăng ký đã được Admin duyệt.",
+                IsCompleted = currentStep >= 3 &&
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled,
+                IsCurrent = currentStep == 3
+            },
+            new RegistrationJourneyStepResponse
+            {
+                StepNumber = 4,
+                Key = "JockeyInvited",
+                Label = "Mời Jockey",
+                Description = "Owner đã mời Jockey tham gia race.",
+                IsCompleted = currentStep >= 4 &&
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled,
+                IsCurrent = currentStep == 4
+            },
+            new RegistrationJourneyStepResponse
+            {
+                StepNumber = 5,
+                Key = "ReadyToRace",
+                Label = "Sẵn sàng thi đấu",
+                Description = "Ngựa và Jockey đã sẵn sàng tham gia race.",
+                IsCompleted = currentStep >= 5 &&
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled,
+                IsCurrent = currentStep == 5
+            }
+        };
+
+        var response = new OwnerRegistrationJourneyResponse
+        {
+            RegistrationId = registration.RegistrationId,
+            CurrentStatus = registration.Status,
+            CurrentStep = currentStep,
+            Steps = steps
+        };
+
+        return Ok(response);
+    }
 
 
 }
