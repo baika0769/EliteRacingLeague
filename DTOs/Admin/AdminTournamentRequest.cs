@@ -19,4 +19,6 @@ public class AdminTournamentRequest
     public decimal? MaxHorseWeightKg { get; set; }
 
     public string? Rules { get; set; }
+
+    public string? Status { get; set; }
 }
