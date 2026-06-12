@@ -36,8 +36,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     horse = p.PredictedRegistration.Horse.HorseName,
                     count = 1,
                     status = p.Status,
-                    accuracy = p.IsCorrect == true ? "High Accuracy" :
-                               p.IsCorrect == false ? "Low Accuracy" : "Pending",
+                    accuracy = p.IsCorrect == true
+                        ? "High Accuracy"
+                        : p.IsCorrect == false
+                            ? "Low Accuracy"
+                            : PredictionStatuses.Pending,
                     pointsAwarded = p.PointsAwarded,
                     rewardAmount = p.RewardAmount,
                     rewardStatus = p.RewardStatus,
@@ -49,31 +52,38 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpPut("{id}/status")]
-        public async Task<IActionResult> UpdatePredictionStatus(int id, [FromBody] UpdatePredictionStatusRequest request)
+        public async Task<IActionResult> UpdatePredictionStatus(
+            int id,
+            [FromBody] UpdatePredictionStatusRequest request)
         {
             var prediction = await _context.RacePredictions.FindAsync(id);
 
             if (prediction == null)
             {
-                return NotFound(new { message = "Prediction not found", id });
+                return NotFound(new
+                {
+                    message = "Prediction not found",
+                    id
+                });
             }
 
-            var allowedStatuses = new[] { "Pending", "Locked", "Evaluated", "Cancelled" };
-
-            if (!allowedStatuses.Contains(request.Status))
+            if (!PredictionStatuses.All.Contains(request.Status))
             {
-                return BadRequest(new { message = "Invalid prediction status" });
+                return BadRequest(new
+                {
+                    message = "Invalid prediction status"
+                });
             }
 
             prediction.Status = request.Status;
             prediction.UpdatedAt = DateTime.UtcNow;
 
-            if (request.Status == "Locked")
+            if (request.Status == PredictionStatuses.Locked)
             {
                 prediction.LockedAt = DateTime.UtcNow;
             }
 
-            if (request.Status == "Evaluated")
+            if (request.Status == PredictionStatuses.Evaluated)
             {
                 prediction.EvaluatedAt = DateTime.UtcNow;
             }
