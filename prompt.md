@@ -1,109 +1,95 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn ưu tiên: sửa lỗi nghiêm trọng Jockey không được tự Active.
+Nhiệm vụ: sửa lại luồng Jockey profile để không tự Active và phân biệt rõ API xác minh với API cập nhật thông tin thường.
 
-Nhiệm vụ:
-
-* Kiểm tra và sửa luồng Jockey update hồ sơ, Auth nextStep, Admin approve/reject.
-* Chỉ sửa file thật sự cần thiết.
-* Không sửa database.
-* Không migration.
-* Không sửa frontend.
-* Không refactor lớn.
-* Không in code dài ra terminal.
-
-File cần kiểm tra/sửa nếu liên quan:
+Phạm vi được sửa:
 
 * Controllers/Jockey/JockeyProfileController.cs
-* Controllers/AuthController.cs
-* Controllers/Admin/AdminVerificationsController.cs
-* DTO/constants liên quan nếu cần, nhưng không sửa lan man.
+* Controllers/AuthController.cs nếu cần chỉnh nextStep
+* Controllers/Admin/AdminVerificationsController.cs nếu cần đồng bộ approve/reject
+* DTO liên quan nếu thiếu response/request
+* Không sửa database
+* Không migration
+* Không sửa frontend
+* Không refactor lớn
+* Không in code dài ra terminal
 
-Logic sai cần loại bỏ:
+Logic bắt buộc:
 
-* Jockey update hồ sơ xong mà backend set user.Status = Active.
-* Jockey update hồ sơ xong mà backend set jockey.IsActive = true.
-* Jockey update hồ sơ xong mà response trả nextStep = GoToDashboard.
+1. API PUT /api/jockey/profile/verification
+   Dùng cho hồ sơ xác minh Jockey.
 
-Logic đúng bắt buộc:
+Khi Jockey save hồ sơ xác minh:
 
-1. Khi Jockey PUT /api/jockey/profile/verification hoặc API save hồ sơ:
-
-* Update thông tin hồ sơ Jockey.
-* Update/replace distance experiences.
-* Update/replace breed experiences nếu có.
-* Sau khi hồ sơ đủ:
+* Update thông tin verification/document/experience.
+* Nếu hồ sơ đủ:
 
   * user.Status = Pending
   * jockey.IsActive = false
   * nextStep = WaitForActivation
-* Không được set Active ở API này.
-* Không được trả GoToDashboard ở API này.
-* Response đúng:
+* Không được set user.Status = Active.
+* Không được set jockey.IsActive = true.
+* Không được trả nextStep = GoToDashboard.
+* Response:
   message = "Đã gửi hồ sơ. Vui lòng chờ admin duyệt."
   status = "Pending"
   isActive = false
   nextStep = "WaitForActivation"
 
-2. Auth login/me nextStep:
+2. API PUT /api/jockey/profile/me
+   Dùng cho Jockey đã Active sửa thông tin cá nhân thường.
 
-* EmailVerified = false => VerifyEmail.
-* User/Jockey Banned => AccountBlocked.
-* User/Jockey Inactive => ContactSupport hoặc Rejected nếu project đã có nextStep Rejected.
-* Role Jockey + Pending + chưa đủ hồ sơ => CompleteJockeyProfile.
-* Role Jockey + Pending + đã đủ hồ sơ => WaitForActivation.
-* Role Jockey + Active + jockey.IsActive = true => GoToDashboard.
-* Role khác Jockey giữ logic cũ, không áp dụng CompleteJockeyProfile/WaitForActivation.
+Chỉ cho sửa thông tin thường nếu field có trong DB, ví dụ:
 
-3. Admin approve:
+* phone
+* profileImageUrl/avatar nếu project xem đây là thông tin thường
+* bio nếu DB có
+* các thông tin không phải giấy tờ xác minh
 
-* Chỉ Admin approve mới được:
+API này không được đổi:
 
-  * user.Status = Active
-  * jockey.IsActive = true
-  * nextStep login/me sau đó mới là GoToDashboard.
+* user.Status
+* jockey.IsActive
 
-4. Admin reject:
+Nếu Jockey sửa giấy tờ xác minh như:
 
-* Khi Admin reject thì đồng bộ trạng thái với bảng Jockey.
-* user.Status = Inactive hoặc status reject hiện có của project.
-* jockey.IsActive = false.
-* nextStep sau login/me là ContactSupport hoặc Rejected theo constants hiện có.
+* idCardFrontUrl
+* idCardBackUrl
+* certificateFileUrl
+* healthCertificateUrl
+  thì phải dùng API /api/jockey/profile/verification, không xử lý ở /profile/me.
 
-Helper cần kiểm tra/tạo:
-private static bool IsJockeyProfileCompleted(Jockey jockey)
+3. Auth nextStep:
 
-Điều kiện hồ sơ Jockey đủ:
+* EmailVerified = false => VerifyEmail
+* Jockey Pending + chưa đủ hồ sơ => CompleteJockeyProfile
+* Jockey Pending + đã đủ hồ sơ => WaitForActivation
+* Jockey Active + jockey.IsActive = true => GoToDashboard
+* Inactive => ContactSupport
+* Banned => AccountBlocked
+* Logic đặc biệt này chỉ áp dụng cho role Jockey.
+* Role khác giữ nguyên luồng cũ.
 
-* ProfileImageUrl có giá trị.
-* IdCardFrontUrl có giá trị.
-* IdCardBackUrl có giá trị.
-* CertificateFileUrl có giá trị.
-* HealthCertificateUrl có giá trị.
-* WeightKg > 0.
-* YearsOfExperience >= 0.
-* HealthStatus hợp lệ.
-* Distance experience có dữ liệu hợp lệ, tốt nhất đủ 3 cự ly 1000, 1500, 2400.
-* Breed experience không bắt buộc.
+4. Admin approve:
+   Chỉ Admin approve mới được:
 
-Yêu cầu bảo vệ role khác:
+* user.Status = Active
+* jockey.IsActive = true
 
-* Logic đặc biệt chỉ áp dụng cho user.Role == Jockey.
-* Owner/Admin/Staff giữ nguyên luồng login/me hiện tại.
-* Không thay đổi response contract ngoài giá trị nextStep/message nếu cần.
+5. Admin reject:
 
-Sau khi sửa:
+* user.Status = Inactive hoặc trạng thái reject hiện có
+* jockey.IsActive = false
+* nextStep sau login/me là ContactSupport hoặc Rejected nếu project có
 
-* Chạy build nếu được phép.
-* Chỉ trả lời tối đa 10 dòng:
+Sau khi sửa xong chỉ trả lời tối đa 10 dòng:
 
-  1. File đã sửa
-  2. Đã bỏ tự Active ở PUT chưa
-  3. PUT trả WaitForActivation chưa
-  4. Auth nextStep Jockey Pending chưa đủ hồ sơ
-  5. Auth nextStep Jockey Pending đủ hồ sơ
-  6. Admin approve set Active đúng chưa
-  7. Admin reject sync đúng chưa
-  8. Role khác có giữ nguyên không
-  9. Build command
-  10. Lỗi còn lại nếu có
+1. File đã sửa
+2. API verification đã không tự Active chưa
+3. API profile/me có giữ nguyên Status/IsActive chưa
+4. Auth nextStep đã đúng chưa
+5. Admin approve có set Active đúng chưa
+6. Admin reject có sync IsActive false chưa
+7. Role khác có bị ảnh hưởng không
+8. Build command
+9. Lỗi còn lại nếu có

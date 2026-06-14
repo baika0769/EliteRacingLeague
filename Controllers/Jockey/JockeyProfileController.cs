@@ -113,6 +113,95 @@ public class JockeyProfileController : ControllerBase
         return Ok(response);
     }
 
+    [HttpPut("me")]
+    public async Task<IActionResult> UpdateProfile(UpdateJockeyProfileRequest request)
+    {
+        var jockeyIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!int.TryParse(jockeyIdText, out var jockeyId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ." });
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == jockeyId);
+
+        if (user == null)
+        {
+            return NotFound(new { message = "Không tìm thấy tài khoản jockey." });
+        }
+
+        if (user.Role != UserRoles.Jockey)
+        {
+            return Forbid();
+        }
+
+        var jockey = await _context.Jockeys.FirstOrDefaultAsync(j => j.JockeyId == jockeyId);
+
+        if (jockey == null)
+        {
+            return NotFound(new { message = "Không tìm thấy hồ sơ jockey." });
+        }
+
+        if (!user.EmailVerified)
+        {
+            return BadRequest(new
+            {
+                message = "Email chưa được xác thực.",
+                nextStep = AuthNextSteps.VerifyEmail
+            });
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đã bị khóa.",
+                nextStep = AuthNextSteps.AccountBlocked
+            });
+        }
+
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return BadRequest(new
+            {
+                message = "Tài khoản đang bị vô hiệu hóa.",
+                nextStep = AuthNextSteps.ContactSupport
+            });
+        }
+
+        if (user.Status != UserStatuses.Active || !jockey.IsActive)
+        {
+            return BadRequest(new
+            {
+                message = "Chỉ jockey đã được duyệt mới được cập nhật thông tin cá nhân.",
+                status = user.Status,
+                isActive = jockey.IsActive,
+                nextStep = AuthNextSteps.WaitForActivation
+            });
+        }
+
+        user.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+
+        if (!string.IsNullOrWhiteSpace(request.ProfileImageUrl))
+        {
+            jockey.ProfileImageUrl = request.ProfileImageUrl.Trim();
+        }
+
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Cập nhật thông tin cá nhân thành công.",
+            phone = user.Phone,
+            profileImageUrl = jockey.ProfileImageUrl,
+            status = user.Status,
+            isActive = jockey.IsActive,
+            nextStep = AuthNextSteps.GoToDashboard
+        });
+    }
+
     [HttpPut("verification")]
     public async Task<IActionResult> UpdateVerification(UpdateJockeyVerificationRequest request)
     {
@@ -339,6 +428,16 @@ public class JockeyProfileController : ControllerBase
         if (!user.EmailVerified)
         {
             return AuthNextSteps.VerifyEmail;
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return AuthNextSteps.AccountBlocked;
+        }
+
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return AuthNextSteps.ContactSupport;
         }
 
         if (!IsJockeyProfileCompleted(jockey))
