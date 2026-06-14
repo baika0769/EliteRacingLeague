@@ -1,268 +1,160 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn 4: làm trang Jockey Notifications.
+Giai đoạn: làm Jockey Calendar.
 
 Mục tiêu:
 
-* Tạo API cho màn hình Jockey Notifications.
-* Jockey xem danh sách notification, lọc, sắp xếp, phân trang.
-* Jockey xem summary: total alerts, unread, invitations.
-* Jockey xem detail notification.
-* Jockey đánh dấu đã đọc một notification hoặc tất cả.
-* Có thể xóa notification nếu DB/controller pattern hiện có hỗ trợ.
-* Nếu notification liên quan invitation thì detail trả thêm raceDetail để frontend render card bên phải.
+* Calendar chỉ dùng được sau khi Jockey đã được Admin duyệt.
+* Jockey chưa verify email, đang chờ duyệt, bị reject/inactive không được vào Calendar.
+* Race chỉ hiện trong Calendar khi Jockey đã nhận lời mời và race registration chuyển sang ReadyToRace hoặc trạng thái tương ứng.
 * Không sửa database.
 * Không migration.
 * Không sửa frontend.
 * Không refactor lớn.
 * Không in code dài ra terminal.
 
-API cần tạo trong:
-Controllers/Jockey/JockeyNotificationsController.cs
+Luồng nghiệp vụ đúng:
+Jockey đăng ký
+=> Verify email
+=> Bổ sung hồ sơ
+=> Admin duyệt
+=> Jockey Active
+=> Jockey nhận lời mời race
+=> RaceRegistration chuyển ReadyToRace
+=> Race hiện trong Calendar
 
-Routes cần có:
+API cần kiểm tra/tạo:
 
-1. GET /api/jockey/notifications
-2. GET /api/jockey/notifications/summary
-3. GET /api/jockey/notifications/{id}
-4. PUT /api/jockey/notifications/{id}/read
-5. PUT /api/jockey/notifications/read-all
-6. DELETE /api/jockey/notifications/{id} nếu project cho phép xóa notification
+* GET /api/jockey/calendar
+* Nếu project đã có controller calendar thì sửa controller hiện có.
+* Nếu chưa có thì tạo Controllers/Jockey/JockeyCalendarController.cs.
 
-Trước khi sửa:
+Query params gợi ý:
 
-* Kiểm tra project đã có Notification entity/table chưa.
-* Kiểm tra DbContext có DbSet Notifications chưa.
-* Kiểm tra notification fields hiện có: NotificationId, UserId/ReceiverId, Title, Message, IsRead, CreatedAt, Type, ReferenceId, RaceId, InvitationId nếu có.
-* Kiểm tra JockeyInvitation entity.
-* Kiểm tra Race, RaceRegistration, Horse, Owner/User entity để map raceDetail nếu có.
-* Kiểm tra auth pattern lấy userId/currentJockeyId từ token.
-* Kiểm tra route/controller convention trong Controllers/Jockey.
-* Chỉ đọc file liên quan trực tiếp.
+* month
+* year
+  Hoặc:
+* startDate
+* endDate
+  Chọn theo convention hiện có, ưu tiên month/year cho màn hình calendar tháng.
 
-Nếu project chưa có Notification entity/table:
+Quyền truy cập:
 
-* Không tự tạo migration.
-* Không tự bịa table mới.
-* Chỉ tạo được phần dựa trên existing entity nếu có.
-* Nếu thiếu infrastructure, dừng và báo rõ: “Chưa có Notification entity/table, cần giai đoạn DB riêng.”
+* Token thiếu/sai => 401 theo pattern hiện có.
+* User không phải Jockey => 403 Forbidden.
+* Jockey chưa verify email => 403 Forbidden.
+* user.Status != Active => 403 Forbidden.
+* jockey.IsActive != true => 403 Forbidden.
+* Chỉ Jockey Active mới xem được Calendar.
 
-Quyền truy cập chung:
+Dữ liệu Calendar lấy từ:
 
-* Token thiếu/sai: 401 theo pattern hiện có.
-* User không phải Jockey: 403 Forbidden.
-* Jockey chưa Active:
+1. Available Days:
 
-  * user.Status != Active hoặc jockey.IsActive != true
-  * trả 403 Forbidden.
-* Jockey chỉ được thao tác notification của chính mình.
-* Không ảnh hưởng Owner/Admin/Staff.
+* jockey_availabilities + ngày trong tháng.
+* Nếu chưa có bảng/entity jockey_availabilities thì không tự tạo DB, chỉ ghi rõ thiếu infrastructure.
 
-API 1: GET /api/jockey/notifications
+2. Racing Day:
 
-Query params:
+* race_registrations + races.
+* Ngày có race lấy từ race_registrations.RaceId => races.RaceDate hoặc field ngày tương ứng.
+* Chỉ lấy race registration của currentJockeyId.
+* Chỉ lấy registration status ReadyToRace hoặc trạng thái tương ứng hiện có như Accepted/Confirmed/Approved.
+* Không lấy race Cancelled nếu project có race status.
 
-* status: All, Unread, Read
-* date: lọc theo CreatedAt theo ngày, ví dụ 2024-07-14
-* sort: Newest, Oldest
-* page
-* pageSize
+3. Race detail:
 
-Logic:
+* RaceName từ races.RaceName/Name/Title.
+* Location từ races.Location.
+* Horse từ race_registrations.HorseId => horses.
+* Owner từ race_registrations.OwnerId hoặc Horse.OwnerId => users/horse_owners theo model hiện có.
+* Profile status từ users.Status.
+* Jockey active từ jockeys.IsActive.
 
-* Lấy notifications theo userId của Jockey đang login.
-* status = All hoặc null: lấy tất cả.
-* status = Unread: IsRead = false.
-* status = Read: IsRead = true.
-* date có giá trị: lọc CreatedAt theo ngày đó.
-* sort = Newest hoặc null: CreatedAt giảm dần.
-* sort = Oldest: CreatedAt tăng dần.
-* page mặc định 1.
-* pageSize mặc định 10, có giới hạn hợp lý nếu project có convention.
-* Trả phân trang.
-
-Response dạng:
+Response gợi ý:
 
 {
+"month": 7,
+"year": 2024,
+"profileStatus": "Active",
+"isActive": true,
+"days": [
+{
+"date": "2024-07-14",
+"isAvailable": true,
+"hasRace": true,
 "items": [
 {
-"notificationId": 1,
-"title": "New Race Invitation: Grand Ascot Cup",
-"message": "Trainer Arthur Pendleton has invited you to ride Thunderbolt.",
-"isRead": false,
-"createdAt": "2024-07-14T16:30:00Z",
-"displayTime": "2 mins ago"
-}
-],
-"totalItems": 128,
-"page": 1,
-"pageSize": 10
-}
-
-DTO cần tạo nếu chưa có:
-
-* DTOs/Jockey/Notifications/JockeyNotificationListQuery.cs hoặc tên theo convention
-* DTOs/Jockey/Notifications/JockeyNotificationListResponse.cs
-* DTOs/Jockey/Notifications/JockeyNotificationItemResponse.cs
-
-API 2: GET /api/jockey/notifications/summary
-
-Logic:
-
-* totalAlerts = Count notifications theo userId của Jockey.
-* unread = Count notifications where userId = current user và IsRead = false.
-* invitations = Count JockeyInvitations của currentJockeyId where Status = Pending.
-
-Response:
-
-{
-"totalAlerts": 128,
-"unread": 12,
-"invitations": 7
-}
-
-DTO cần tạo nếu chưa có:
-
-* DTOs/Jockey/Notifications/JockeyNotificationSummaryResponse.cs
-
-API 3: GET /api/jockey/notifications/{id}
-
-Logic:
-
-* Chỉ lấy notification thuộc userId của Jockey hiện tại.
-* Nếu không tồn tại hoặc không thuộc user hiện tại: 404 hoặc 403 theo pattern hiện có.
-* Trả detail notification.
-* Nếu notification liên quan JockeyInvitation thì include raceDetail nếu có đủ dữ liệu.
-* Không bắt buộc auto mark read khi xem detail, trừ khi project đã có convention như vậy.
-
-Response detail dạng:
-
-{
-"notificationId": 1,
-"title": "New Race Invitation: Grand Ascot Cup",
-"message": "Owner has invited you to join this race.",
-"isRead": false,
-"createdAt": "2024-07-14T16:30:00Z",
-"raceDetail": {
+"type": "Race",
 "raceId": 5,
-"raceName": "Grand Ascot Cup - G1 Stakes",
+"raceName": "Grand Ascot Cup",
 "raceDate": "2024-07-14T16:30:00Z",
 "location": "Ascot Racecourse",
 "horseId": 10,
 "horseName": "Thunderbolt",
-"horseAge": 4,
+"ownerId": 3,
 "ownerName": "Arthur Pendleton",
-"ownerMessage": "Thunderbolt is at peak performance."
+"registrationStatus": "ReadyToRace"
 }
+]
+}
+]
 }
 
 DTO cần tạo nếu chưa có:
 
-* DTOs/Jockey/Notifications/JockeyNotificationDetailResponse.cs
-* DTOs/Jockey/Notifications/JockeyNotificationRaceDetailResponse.cs
+* DTOs/Jockey/Calendar/JockeyCalendarResponse.cs
+* DTOs/Jockey/Calendar/JockeyCalendarDayResponse.cs
+* DTOs/Jockey/Calendar/JockeyCalendarItemResponse.cs
 
-Mapping raceDetail:
+Yêu cầu xử lý Available Days:
 
-* Nếu Notification có InvitationId/ReferenceId trỏ tới JockeyInvitation thì join qua JockeyInvitation.
-* Từ JockeyInvitation lấy Race/RaceRegistration/Horse/Owner tùy model hiện có.
-* raceId lấy từ Race.
-* raceName lấy từ Race.Name/Title nếu có.
-* raceDate lấy từ Race.Date/StartTime nếu có.
-* location lấy từ Race.Location nếu có.
-* horseId/horseName/horseAge lấy từ Horse nếu có.
-* ownerName lấy từ Owner/User nếu có.
-* ownerMessage lấy từ invitation.Message/Note nếu có.
-* Nếu field nào không có trong DB thì map null, không tự bịa field.
+* Với mỗi ngày trong tháng, kiểm tra có record jockey_availabilities tương ứng không.
+* Nếu có thì isAvailable = true hoặc theo field status/isAvailable hiện có.
+* Nếu không có record thì isAvailable = false hoặc null tùy convention, chọn cách ít phá frontend nhất.
 
-API 4: PUT /api/jockey/notifications/{id}/read
+Yêu cầu xử lý Racing Day:
 
-Logic:
-
-* Chỉ update notification thuộc userId của Jockey hiện tại.
-* Set IsRead = true.
-* Nếu có ReadAt field thì set ReadAt = now.
-* SaveChanges.
-* Response message thành công.
-
-Response gợi ý:
-{
-"message": "Đã đánh dấu notification là đã đọc.",
-"notificationId": 1,
-"isRead": true
-}
-
-API 5: PUT /api/jockey/notifications/read-all
-
-Logic:
-
-* Lấy tất cả notification của Jockey hiện tại có IsRead = false.
-* Set IsRead = true.
-* Nếu có ReadAt field thì set ReadAt = now.
-* SaveChanges.
-* Response trả số lượng đã update.
-
-Response gợi ý:
-{
-"message": "Đã đánh dấu tất cả notification là đã đọc.",
-"updatedCount": 12
-}
-
-API 6: DELETE /api/jockey/notifications/{id}
-
-Logic:
-
-* Chỉ xóa notification thuộc userId của Jockey hiện tại.
-* Nếu project có soft delete thì dùng soft delete.
-* Nếu không có soft delete và pattern cho phép hard delete thì remove.
-* Nếu project không có pattern xóa notification thì không cần làm DELETE, chỉ báo rõ.
-
-Yêu cầu displayTime:
-
-* Tạo helper private hoặc method nhỏ để convert CreatedAt thành text đơn giản.
-* Ví dụ:
-
-  * dưới 1 phút: "Just now"
-  * dưới 60 phút: "x mins ago"
-  * dưới 24 giờ: "x hours ago"
-  * còn lại: "x days ago"
-* Không cần localization phức tạp ở giai đoạn này.
+* Nếu ngày có race của Jockey thì hasRace = true.
+* items chứa danh sách race trong ngày đó.
+* Race chỉ hiện nếu race registration thuộc currentJockeyId.
+* Race chỉ hiện nếu registration đã được Jockey accept/ReadyToRace.
+* Không hiển thị invitation Pending trong Calendar. Invitation Pending nằm ở Pending Invitations/Notifications.
 
 Yêu cầu bảo vệ role khác:
 
 * API này chỉ áp dụng cho role Jockey.
-* Không sửa AuthController.
-* Không sửa Owner invitation flow ở giai đoạn này.
-* Không sửa Admin.
-* Không ảnh hưởng Owner/Admin/Staff.
+* Không sửa AuthController nếu không bắt buộc.
+* Không sửa Owner/Admin/Staff flow.
+* Không ảnh hưởng Dashboard, Notifications, Invitations nếu không cần.
 
 Test cần đạt:
 
-* Jockey Active gọi GET /api/jockey/notifications => 200 OK.
-* Jockey Pending gọi => 403.
-* Owner/Admin gọi => 403.
-* status=Unread chỉ trả notification chưa đọc.
-* status=Read chỉ trả notification đã đọc.
-* date lọc đúng theo CreatedAt.
-* sort=Newest trả mới nhất trước.
-* sort=Oldest trả cũ nhất trước.
-* page/pageSize trả đúng phân trang.
-* summary trả đúng totalAlerts, unread, invitations.
-* detail notification thuộc Jockey trả đúng.
-* detail notification của user khác không được xem.
-* mark read set IsRead = true.
-* read-all cập nhật tất cả notification chưa đọc của Jockey.
-* delete chỉ xóa notification của chính Jockey nếu có làm DELETE.
+* Jockey Active gọi GET /api/jockey/calendar => 200 OK.
+* Jockey chưa verify email gọi calendar => 403.
+* Jockey Pending chờ duyệt gọi calendar => 403.
+* Jockey bị reject/inactive gọi calendar => 403.
+* Owner/Admin gọi calendar => 403.
+* Jockey có race ReadyToRace => ngày đó hiện race.
+* Jockey chỉ có invitation Pending nhưng chưa accept => race chưa hiện trong Calendar.
+* Available Days lấy đúng từ jockey_availabilities nếu bảng/entity có sẵn.
 * Build không lỗi.
+
+Nếu thiếu entity/table/status:
+
+* Không tự bịa database.
+* Dùng đúng field hiện có.
+* Ghi rõ phần thiếu và cần làm ở giai đoạn DB riêng.
 
 Sau khi sửa xong chỉ trả lời tối đa 10 dòng:
 
 1. File đã tạo/sửa
-2. Route list notifications
-3. Route summary
-4. Route detail
-5. Route mark read/read-all
-6. Route delete có làm không
-7. raceDetail có map được không
+2. Route calendar
+3. Query params đã dùng
+4. Điều kiện chặn Jockey chưa Active
+5. Available Days lấy từ đâu
+6. Racing Day lấy từ đâu
+7. Race chỉ hiện sau accept/ReadyToRace chưa
 8. Có ảnh hưởng role khác không
 9. Build command
 10. Lỗi còn lại nếu có
