@@ -86,6 +86,21 @@ public class JockeyAvailabilitiesController : ControllerBase
             return BadRequest(new { message = "Danh sách availability không được rỗng." });
         }
 
+        var duplicateDates = request.Items
+            .GroupBy(i => i.Date)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key.ToString("yyyy-MM-dd"))
+            .ToList();
+
+        if (duplicateDates.Count > 0)
+        {
+            return BadRequest(new
+            {
+                message = "Request không được chứa ngày trùng lặp.",
+                duplicateDates
+            });
+        }
+
         var invalidStatus = request.Items
             .FirstOrDefault(i => !JockeyAvailabilityStatuses.IsPersistedStatus(i.Status));
 

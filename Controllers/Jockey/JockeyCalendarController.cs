@@ -14,6 +14,12 @@ namespace Eliteracingleague.API.Controllers.Jockey;
 [Authorize(Roles = UserRoles.Jockey)]
 public class JockeyCalendarController : ControllerBase
 {
+    private static readonly string[] CalendarRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
+    };
+
     private readonly EliteRacingLeagueContext _context;
 
     public JockeyCalendarController(EliteRacingLeagueContext context)
@@ -60,7 +66,7 @@ public class JockeyCalendarController : ControllerBase
         var raceItems = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r => r.JockeyId == jockeyId.Value
-                && r.Status == RaceRegistrationStatuses.ReadyToRace
+                && CalendarRegistrationStatuses.Contains(r.Status)
                 && r.Race.RaceDate >= startDateTime
                 && r.Race.RaceDate < endDateTime
                 && r.Race.Status != RaceStatuses.Cancelled)
@@ -119,19 +125,24 @@ public class JockeyCalendarController : ControllerBase
             .ToList();
 
         var now = DateTime.UtcNow;
-        var nextRaces = raceItems
-            .Where(r => r.RaceDate >= now)
-            .OrderBy(r => r.RaceDate)
+        var nextRaces = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r => r.JockeyId == jockeyId.Value
+                && r.Status == RaceRegistrationStatuses.ReadyToRace
+                && r.Race.RaceDate >= now
+                && r.Race.Status != RaceStatuses.Cancelled)
+            .OrderBy(r => r.Race.RaceDate)
+            .Take(2)
             .Select(r => new JockeyNextRaceResponse
             {
                 RaceId = r.RaceId,
-                RaceName = r.RaceName,
-                RaceDate = r.RaceDate,
-                Location = r.Location,
-                HorseName = r.HorseName,
+                RaceName = r.Race.RaceName,
+                RaceDate = r.Race.RaceDate,
+                Location = r.Race.Location,
+                HorseName = r.Horse.HorseName,
                 PrizeText = null
             })
-            .ToList();
+            .ToListAsync();
 
         return Ok(new JockeyCalendarResponse
         {
