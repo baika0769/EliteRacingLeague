@@ -1,133 +1,129 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn 5: tạo Jockey Lookup API cho trang Jockey Settings.
+Giai đoạn 8: làm Jockey Dashboard.
+
+Chỉ làm API dashboard cho Jockey. Không sửa Settings, không sửa Admin approve/reject, không sửa Auth nếu không bắt buộc, không sửa database, không migration, không sửa frontend, không refactor lớn, không in code dài ra terminal.
+
+API cần tạo:
+GET /api/jockey/dashboard
 
 Mục tiêu:
 
-* Frontend không hard-code health status, distance, skill level, horse breed.
-* Tạo API lookup cho frontend/Figma.
-* Không sửa API GET profile/me.
-* Không sửa API PUT verification.
-* Không sửa AuthController.
-* Không sửa AdminController.
-* Không sửa database.
-* Không migration.
-* Không sửa frontend.
-* Không refactor lớn.
-* Không in code dài ra terminal.
+* Chỉ Jockey đã được Admin approve mới gọi dashboard thành công.
+* Jockey Pending hoặc chưa Active phải bị chặn.
+* API chỉ đọc dữ liệu, không ghi database.
 
-API cần có:
+Trước khi sửa:
 
-1. GET /api/jockey/lookups/settings-options
+* Kiểm tra controller Jockey hiện có.
+* Kiểm tra auth pattern lấy userId từ token.
+* Kiểm tra entity/model/table liên quan:
 
-Response cần có dạng:
+  * users
+  * jockeys
+  * jockey_invitations
+  * race_registrations
+  * races
+* Kiểm tra status constants hiện có cho invitation, race registration, race.
+* Nếu tên bảng/entity/status khác mô tả, dùng đúng tên hiện có trong project.
+
+Quyền truy cập:
+
+* Token thiếu/sai: 401 theo pattern hiện có.
+* User không phải Jockey: 403 Forbidden.
+* Jockey chưa được approve:
+
+  * user.Status != Active hoặc jockey.IsActive != true
+  * trả 403 Forbidden hoặc response lỗi theo pattern hiện có.
+* Jockey Active:
+
+  * user.Status = Active
+  * jockey.IsActive = true
+  * được xem dashboard.
+
+Response gợi ý:
 
 {
-"healthStatuses": [
-"Healthy",
-"NeedsCheck",
-"Sick",
-"Injured",
-"Recovering",
-"UnfitToRace"
-],
-"distanceOptions": [
-{
-"distanceMeters": 1000,
-"label": "1000m Sprint"
-},
-{
-"distanceMeters": 1500,
-"label": "1500m Mid"
-},
-{
-"distanceMeters": 2400,
-"label": "2400m Endurance"
-}
-],
-"skillLevels": [
-"NoExperience",
-"Basic",
-"Good",
-"Expert"
-]
+"pendingInvitations": 3,
+"acceptedRaces": 2,
+"upcomingRaces": 1,
+"completedRaces": 5,
+"profileStatus": "Active",
+"healthStatus": "Healthy"
 }
 
-2. GET /api/jockey/lookups/horse-breeds
+Dữ liệu cần tính:
 
-Response:
+1. pendingInvitations
 
-* Trả danh sách giống ngựa từ DB.
-* Mỗi item gồm:
+* Đếm từ jockey_invitations.
+* Chỉ đếm lời mời của Jockey hiện tại.
+* Chỉ đếm status Pending hoặc status tương đương hiện có.
 
-  * breedId
-  * breedName
-* Nếu bảng horse_breeds có IsActive/Status thì chỉ trả breed active.
-* Nếu bảng horse_breeds không có IsActive/Status thì trả toàn bộ breed.
+2. acceptedRaces
 
-File cần thêm/sửa:
+* Đếm từ race_registrations.
+* Chỉ đếm registration của Jockey hiện tại.
+* Chỉ đếm status Accepted/Approved/Confirmed hoặc status tương đương hiện có.
 
-* Controllers/Jockey/JockeyLookupsController.cs
-* Constants/JockeyDistances.cs
-* Constants/JockeySkillLevels.cs
-* Constants/JockeyHealthStatuses.cs
-* DTO lookup response nếu project có convention DTO riêng.
+3. upcomingRaces
 
-Yêu cầu constants:
+* Đếm races sắp tới liên quan đến Jockey qua race_registrations.
+* Race sắp tới là race date/time > now nếu DB có field thời gian.
+* Nếu project có status race thì không đếm race Cancelled/Completed.
 
-1. JockeyDistances
+4. completedRaces
 
-* 1000 => 1000m Sprint
-* 1500 => 1500m Mid
-* 2400 => 2400m Endurance
+* Đếm race đã hoàn thành của Jockey qua race_registrations + races.
+* Dựa vào race status Completed nếu có.
+* Nếu không có status Completed thì dùng race date/time < now theo field hiện có.
 
-2. JockeySkillLevels
+5. profileStatus
 
-* NoExperience
-* Basic
-* Good
-* Expert
+* Lấy từ users.Status.
 
-3. JockeyHealthStatuses
+6. healthStatus
 
-* Healthy
-* NeedsCheck
-* Sick
-* Injured
-* Recovering
-* UnfitToRace
+* Lấy từ jockeys.HealthStatus.
 
-Yêu cầu code:
+DTO cần tạo nếu chưa có:
 
-* Kiểm tra project đã có constants tương tự chưa.
-* Nếu đã có constants thì dùng lại hoặc bổ sung, không tạo trùng.
-* Kiểm tra convention controller route hiện có.
-* Route nên là:
+* DTOs/Jockey/JockeyDashboardResponse.cs
 
-  * [Route("api/jockey/lookups")]
-  * [HttpGet("settings-options")]
-  * [HttpGet("horse-breeds")]
-* Dùng DbContext/repository theo pattern hiện có.
-* Không làm thay đổi role/login flow.
-* Không làm thay đổi status/isActive của Jockey.
-* API lookup chỉ đọc dữ liệu, không ghi database.
-* Nếu project đang dùng Authorize cho Jockey API thì áp dụng Authorize theo convention hiện có.
-* Nếu lookup hiện tại của project public thì giữ theo convention hiện có.
+Controller:
+
+* Có thể thêm action vào JockeyProfileController nếu project đang gom Jockey APIs ở đó.
+* Hoặc tạo Controllers/Jockey/JockeyDashboardController.cs nếu convention tách controller rõ hơn.
+* Route phải là GET /api/jockey/dashboard.
+
+Yêu cầu bảo vệ role khác:
+
+* API này chỉ áp dụng cho role Jockey.
+* Không sửa login/me của Owner/Admin/Staff.
+* Không query dashboard cho role khác.
+* Không thay đổi flow Admin/Owner.
 
 Test cần đạt:
 
-* Gọi GET /api/jockey/lookups/settings-options trả đúng healthStatuses, distanceOptions, skillLevels.
-* Gọi GET /api/jockey/lookups/horse-breeds trả breed active từ DB.
-* Frontend có thể lấy breed từ DB, không cần hard-code breed.
+* Jockey Active gọi GET /api/jockey/dashboard => 200 OK.
+* Jockey Pending gọi dashboard => bị chặn.
+* Owner/Admin gọi dashboard => 403 Forbidden.
+* pendingInvitations đếm đúng lời mời Pending.
+* acceptedRaces đếm đúng race đã nhận.
+* upcomingRaces đếm đúng race sắp tới.
+* completedRaces đếm đúng race đã hoàn thành.
 * Build không lỗi.
 
-Sau khi sửa xong chỉ trả lời tối đa 8 dòng:
+Nếu thiếu entity/table/status để tính chính xác, không tự bịa database. Hãy dùng field hiện có và ghi rõ giả định.
+
+Sau khi sửa xong chỉ trả lời tối đa 9 dòng:
 
 1. File đã tạo/sửa
-2. Route settings-options
-3. Route horse-breeds
-4. Constants đã tạo/sửa
-5. Horse breeds lấy active hay toàn bộ
-6. Có ảnh hưởng role/login không
-7. Build command
-8. Lỗi còn lại nếu có
+2. Route dashboard
+3. DTO đã tạo/sửa
+4. Điều kiện chặn Pending
+5. Cách đếm invitation
+6. Cách đếm races
+7. Có ảnh hưởng role khác không
+8. Build command
+9. Lỗi còn lại nếu có
