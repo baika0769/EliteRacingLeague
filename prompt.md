@@ -1,129 +1,167 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn 8: làm Jockey Dashboard.
-
-Chỉ làm API dashboard cho Jockey. Không sửa Settings, không sửa Admin approve/reject, không sửa Auth nếu không bắt buộc, không sửa database, không migration, không sửa frontend, không refactor lớn, không in code dài ra terminal.
-
-API cần tạo:
-GET /api/jockey/dashboard
+Giai đoạn 9: làm Pending Invitations cho Jockey.
 
 Mục tiêu:
 
-* Chỉ Jockey đã được Admin approve mới gọi dashboard thành công.
-* Jockey Pending hoặc chưa Active phải bị chặn.
-* API chỉ đọc dữ liệu, không ghi database.
+* Jockey xem được danh sách lời mời đang chờ từ Owner.
+* Jockey có thể accept hoặc reject lời mời.
+* Khi accept, cập nhật invitation và gắn Jockey vào race registration.
+* Khi reject, cập nhật invitation để Owner có thể mời Jockey khác.
+* Chỉ Jockey Active mới được dùng API này.
+* Không sửa database.
+* Không migration.
+* Không sửa frontend.
+* Không refactor lớn.
+* Không in code dài ra terminal.
+
+API cần có:
+
+1. GET /api/jockey/invitations/pending
+2. PUT /api/jockey/invitations/{id}/accept
+3. PUT /api/jockey/invitations/{id}/reject
 
 Trước khi sửa:
 
 * Kiểm tra controller Jockey hiện có.
-* Kiểm tra auth pattern lấy userId từ token.
-* Kiểm tra entity/model/table liên quan:
+* Kiểm tra auth pattern lấy userId/currentJockeyId từ token.
+* Kiểm tra entity/model:
 
-  * users
-  * jockeys
-  * jockey_invitations
-  * race_registrations
-  * races
-* Kiểm tra status constants hiện có cho invitation, race registration, race.
-* Nếu tên bảng/entity/status khác mô tả, dùng đúng tên hiện có trong project.
+  * User
+  * Jockey
+  * JockeyInvitation hoặc jockey_invitations
+  * RaceRegistration hoặc race_registrations
+  * Race hoặc races
+  * Owner/User nếu invitation có owner info
+* Kiểm tra constants/status hiện có cho:
 
-Quyền truy cập:
+  * invitation Pending/Accepted/Rejected
+  * race registration ReadyToRace/Accepted/Confirmed/Pending hoặc trạng thái tương ứng
+* Nếu tên entity/status khác mô tả, dùng đúng tên hiện có trong project.
+
+Quyền truy cập chung:
 
 * Token thiếu/sai: 401 theo pattern hiện có.
 * User không phải Jockey: 403 Forbidden.
-* Jockey chưa được approve:
+* Jockey chưa được Admin approve:
 
   * user.Status != Active hoặc jockey.IsActive != true
-  * trả 403 Forbidden hoặc response lỗi theo pattern hiện có.
-* Jockey Active:
+  * trả 403 Forbidden.
+* Jockey Active mới được gọi API.
 
-  * user.Status = Active
-  * jockey.IsActive = true
-  * được xem dashboard.
+API 1: GET /api/jockey/invitations/pending
 
-Response gợi ý:
+Logic:
 
-{
-"pendingInvitations": 3,
-"acceptedRaces": 2,
-"upcomingRaces": 1,
-"completedRaces": 5,
-"profileStatus": "Active",
-"healthStatus": "Healthy"
-}
+* Lấy currentJockeyId từ token.
+* Chỉ trả invitations của Jockey hiện tại.
+* Chỉ trả invitations có Status = Pending hoặc trạng thái pending tương ứng hiện có.
+* Include đủ thông tin để frontend render:
 
-Dữ liệu cần tính:
-
-1. pendingInvitations
-
-* Đếm từ jockey_invitations.
-* Chỉ đếm lời mời của Jockey hiện tại.
-* Chỉ đếm status Pending hoặc status tương đương hiện có.
-
-2. acceptedRaces
-
-* Đếm từ race_registrations.
-* Chỉ đếm registration của Jockey hiện tại.
-* Chỉ đếm status Accepted/Approved/Confirmed hoặc status tương đương hiện có.
-
-3. upcomingRaces
-
-* Đếm races sắp tới liên quan đến Jockey qua race_registrations.
-* Race sắp tới là race date/time > now nếu DB có field thời gian.
-* Nếu project có status race thì không đếm race Cancelled/Completed.
-
-4. completedRaces
-
-* Đếm race đã hoàn thành của Jockey qua race_registrations + races.
-* Dựa vào race status Completed nếu có.
-* Nếu không có status Completed thì dùng race date/time < now theo field hiện có.
-
-5. profileStatus
-
-* Lấy từ users.Status.
-
-6. healthStatus
-
-* Lấy từ jockeys.HealthStatus.
+  * invitationId
+  * raceId nếu có
+  * raceName/title nếu có
+  * raceDate/raceTime nếu có
+  * location nếu có
+  * ownerId/ownerName nếu có
+  * status
+  * createdAt/sentAt nếu có
+  * registrationId nếu có
 
 DTO cần tạo nếu chưa có:
 
-* DTOs/Jockey/JockeyDashboardResponse.cs
+* DTOs/Jockey/JockeyPendingInvitationResponse.cs
 
-Controller:
+API 2: PUT /api/jockey/invitations/{id}/accept
 
-* Có thể thêm action vào JockeyProfileController nếu project đang gom Jockey APIs ở đó.
-* Hoặc tạo Controllers/Jockey/JockeyDashboardController.cs nếu convention tách controller rõ hơn.
-* Route phải là GET /api/jockey/dashboard.
+Logic bắt buộc:
+
+1. Lấy currentJockeyId từ token.
+2. Kiểm tra invitation tồn tại.
+3. Invitation phải thuộc currentJockeyId.
+4. Invitation phải đang Pending, nếu không thì trả BadRequest/Conflict theo pattern hiện có.
+5. Cập nhật jockey_invitations:
+
+   * Status = Accepted
+   * RespondedAt = now
+6. Cập nhật race_registrations liên quan:
+
+   * JockeyId = currentJockeyId
+   * Status = ReadyToRace hoặc trạng thái tương ứng hiện có như Accepted/Confirmed/Approved.
+7. Nếu project có nhiều invitation cho cùng raceRegistration, sau khi accept có thể reject/cancel các invitation pending còn lại cho cùng registration để tránh nhiều Jockey nhận cùng slot.
+8. Dùng transaction nếu pattern project cho phép, để invitation và race_registration update đồng bộ.
+9. SaveChanges.
+10. Trả response message thành công.
+
+Response gợi ý:
+{
+"message": "Đã chấp nhận lời mời.",
+"status": "Accepted"
+}
+
+API 3: PUT /api/jockey/invitations/{id}/reject
+
+Logic bắt buộc:
+
+1. Lấy currentJockeyId từ token.
+2. Kiểm tra invitation tồn tại.
+3. Invitation phải thuộc currentJockeyId.
+4. Invitation phải đang Pending, nếu không thì trả BadRequest/Conflict theo pattern hiện có.
+5. Cập nhật jockey_invitations:
+
+   * Status = Rejected
+   * RespondedAt = now
+6. Không gắn Jockey vào race_registrations.
+7. Nếu race_registration đang giữ currentJockeyId do invitation này thì clear JockeyId hoặc đưa status về trạng thái chờ mời lại theo pattern hiện có.
+8. Mục tiêu sau reject: Owner có thể mời Jockey khác.
+9. SaveChanges.
+10. Trả response message thành công.
+
+Response gợi ý:
+{
+"message": "Đã từ chối lời mời.",
+"status": "Rejected"
+}
 
 Yêu cầu bảo vệ role khác:
 
 * API này chỉ áp dụng cho role Jockey.
-* Không sửa login/me của Owner/Admin/Staff.
-* Không query dashboard cho role khác.
-* Không thay đổi flow Admin/Owner.
+* Không sửa flow Owner tạo invitation nếu không bắt buộc.
+* Không sửa AuthController nếu không cần.
+* Không sửa AdminController.
+* Không ảnh hưởng Owner/Admin/Staff.
+
+Yêu cầu code:
+
+* Giữ route convention hiện có.
+* Có thể tạo Controllers/Jockey/JockeyInvitationsController.cs nếu chưa có.
+* Có thể tạo DTO response nếu project có convention DTO.
+* Có thể tạo constants invitation/registration status nếu chưa có, nhưng không tạo trùng nếu đã có.
+* Không tự bịa field DB. Nếu field khác tên, dùng đúng field hiện có.
+* Không in toàn bộ code ra terminal.
 
 Test cần đạt:
 
-* Jockey Active gọi GET /api/jockey/dashboard => 200 OK.
-* Jockey Pending gọi dashboard => bị chặn.
-* Owner/Admin gọi dashboard => 403 Forbidden.
-* pendingInvitations đếm đúng lời mời Pending.
-* acceptedRaces đếm đúng race đã nhận.
-* upcomingRaces đếm đúng race sắp tới.
-* completedRaces đếm đúng race đã hoàn thành.
+* Owner gửi lời mời => Jockey thấy trong GET /api/jockey/invitations/pending.
+* Jockey Active gọi pending => 200 OK.
+* Jockey Pending gọi pending => 403.
+* Owner/Admin gọi pending => 403.
+* Jockey accept invitation => invitation Status = Accepted, RespondedAt có giá trị.
+* Jockey accept invitation => race_registration gắn JockeyId = currentJockeyId.
+* Jockey accept lại invitation đã accept/reject => bị chặn.
+* Jockey reject invitation => invitation Status = Rejected, RespondedAt có giá trị.
+* Jockey reject => Owner có thể mời Jockey khác.
 * Build không lỗi.
 
-Nếu thiếu entity/table/status để tính chính xác, không tự bịa database. Hãy dùng field hiện có và ghi rõ giả định.
-
-Sau khi sửa xong chỉ trả lời tối đa 9 dòng:
+Sau khi sửa xong chỉ trả lời tối đa 10 dòng:
 
 1. File đã tạo/sửa
-2. Route dashboard
-3. DTO đã tạo/sửa
-4. Điều kiện chặn Pending
-5. Cách đếm invitation
-6. Cách đếm races
-7. Có ảnh hưởng role khác không
-8. Build command
-9. Lỗi còn lại nếu có
+2. Route pending invitations
+3. Route accept
+4. Route reject
+5. Accept đã update invitation chưa
+6. Accept đã update race registration chưa
+7. Reject có cho Owner mời người khác chưa
+8. Có ảnh hưởng Owner/Admin/Staff không
+9. Build command
+10. Lỗi còn lại nếu có
