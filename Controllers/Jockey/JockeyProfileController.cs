@@ -20,6 +20,7 @@ public class JockeyProfileController : ControllerBase
         _context = context;
     }
 
+    [HttpGet("me")]
     [HttpGet("settings")]
     public async Task<IActionResult> GetSettings()
     {
@@ -157,6 +158,9 @@ public class JockeyProfileController : ControllerBase
                 nextStep = AuthNextSteps.ContactSupport
             });
         }
+
+        request.DistanceExperiences ??= new();
+        request.BreedExperiences ??= new();
 
         if (request.WeightKg <= 0)
         {
@@ -313,7 +317,7 @@ public class JockeyProfileController : ControllerBase
 
         return Ok(new
         {
-            message = "Đã lưu hồ sơ. Vui lòng chờ Admin duyệt.",
+            message = "Đã gửi hồ sơ. Vui lòng chờ admin duyệt.",
             status = user.Status,
             isActive = jockey.IsActive,
             nextStep = AuthNextSteps.WaitForActivation
@@ -332,12 +336,12 @@ public class JockeyProfileController : ControllerBase
             return AuthNextSteps.CompleteJockeyProfile;
         }
 
-        if (user.Status == UserStatuses.Pending)
+        if (user.Status == UserStatuses.Pending || !jockey.IsActive)
         {
             return AuthNextSteps.WaitForActivation;
         }
 
-        if (user.Status == UserStatuses.Active)
+        if (user.Status == UserStatuses.Active && jockey.IsActive)
         {
             return AuthNextSteps.GoToDashboard;
         }
