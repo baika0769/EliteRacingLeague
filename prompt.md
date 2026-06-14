@@ -1,167 +1,134 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn 9: làm Pending Invitations cho Jockey.
+Giai đoạn 3: hoàn chỉnh Dashboard và Pending Invitations cho Jockey.
 
 Mục tiêu:
 
-* Jockey xem được danh sách lời mời đang chờ từ Owner.
-* Jockey có thể accept hoặc reject lời mời.
-* Khi accept, cập nhật invitation và gắn Jockey vào race registration.
-* Khi reject, cập nhật invitation để Owner có thể mời Jockey khác.
-* Chỉ Jockey Active mới được dùng API này.
+* Kiểm tra lại API Dashboard và Pending Invitations đã có.
+* Chỉ sửa lỗi hoặc bổ sung phần còn thiếu.
+* Không làm lại controller từ đầu nếu đã có.
+* Bổ sung notification cho Jockey khi Owner gửi invitation nếu hệ thống đã có bảng/entity Notification.
 * Không sửa database.
 * Không migration.
 * Không sửa frontend.
 * Không refactor lớn.
 * Không in code dài ra terminal.
 
-API cần có:
+API đã có cần kiểm tra:
 
-1. GET /api/jockey/invitations/pending
-2. PUT /api/jockey/invitations/{id}/accept
-3. PUT /api/jockey/invitations/{id}/reject
+* GET /api/jockey/dashboard
+* GET /api/jockey/invitations/pending
+* PUT /api/jockey/invitations/{id}/accept
+* PUT /api/jockey/invitations/{id}/reject
 
-Trước khi sửa:
+Phần 1: kiểm tra GET /api/jockey/dashboard
 
-* Kiểm tra controller Jockey hiện có.
-* Kiểm tra auth pattern lấy userId/currentJockeyId từ token.
-* Kiểm tra entity/model:
+Dashboard cần trả đúng:
 
-  * User
-  * Jockey
-  * JockeyInvitation hoặc jockey_invitations
-  * RaceRegistration hoặc race_registrations
-  * Race hoặc races
-  * Owner/User nếu invitation có owner info
-* Kiểm tra constants/status hiện có cho:
+* pendingInvitations: số lời mời đang chờ của Jockey hiện tại.
+* acceptedRaces: số race đã nhận.
+* upcomingRaces: số race sắp tới.
+* completedRaces: số race đã hoàn thành.
+* profileStatus: users.Status.
+* healthStatus: jockeys.HealthStatus.
 
-  * invitation Pending/Accepted/Rejected
-  * race registration ReadyToRace/Accepted/Confirmed/Pending hoặc trạng thái tương ứng
-* Nếu tên entity/status khác mô tả, dùng đúng tên hiện có trong project.
+Yêu cầu:
 
-Quyền truy cập chung:
+* Chỉ Jockey Active mới gọi được dashboard.
+* Nếu user.Role không phải Jockey => 403.
+* Nếu user.Status != Active hoặc jockey.IsActive != true => 403.
+* API chỉ đọc dữ liệu, không ghi database.
+* Không ảnh hưởng Owner/Admin/Staff.
 
-* Token thiếu/sai: 401 theo pattern hiện có.
-* User không phải Jockey: 403 Forbidden.
-* Jockey chưa được Admin approve:
+Phần 2: kiểm tra Pending Invitations
 
-  * user.Status != Active hoặc jockey.IsActive != true
-  * trả 403 Forbidden.
-* Jockey Active mới được gọi API.
+GET /api/jockey/invitations/pending:
 
-API 1: GET /api/jockey/invitations/pending
+* Chỉ Jockey Active gọi được.
+* Chỉ trả invitation của Jockey hiện tại.
+* Chỉ trả invitation Status = Pending hoặc trạng thái pending tương ứng hiện có.
+* Response cần đủ dữ liệu để frontend hiển thị: invitationId, raceId, raceName/title nếu có, raceDate nếu có, location nếu có, ownerName nếu có, status, createdAt/sentAt nếu có.
 
-Logic:
+PUT /api/jockey/invitations/{id}/accept:
 
-* Lấy currentJockeyId từ token.
-* Chỉ trả invitations của Jockey hiện tại.
-* Chỉ trả invitations có Status = Pending hoặc trạng thái pending tương ứng hiện có.
-* Include đủ thông tin để frontend render:
+* Chỉ Jockey Active gọi được.
+* Invitation phải thuộc Jockey hiện tại.
+* Invitation phải đang Pending.
+* Update jockey_invitations:
 
-  * invitationId
-  * raceId nếu có
-  * raceName/title nếu có
-  * raceDate/raceTime nếu có
-  * location nếu có
-  * ownerId/ownerName nếu có
-  * status
-  * createdAt/sentAt nếu có
-  * registrationId nếu có
+  * Status = Accepted
+  * RespondedAt = now
+* Update race_registrations liên quan:
 
-DTO cần tạo nếu chưa có:
+  * JockeyId = currentJockeyId
+  * Status = ReadyToRace hoặc trạng thái tương ứng hiện có.
+* Không accept lại invitation đã accept/reject.
+* Nếu có transaction pattern thì dùng transaction.
 
-* DTOs/Jockey/JockeyPendingInvitationResponse.cs
+PUT /api/jockey/invitations/{id}/reject:
 
-API 2: PUT /api/jockey/invitations/{id}/accept
+* Chỉ Jockey Active gọi được.
+* Invitation phải thuộc Jockey hiện tại.
+* Invitation phải đang Pending.
+* Update jockey_invitations:
 
-Logic bắt buộc:
+  * Status = Rejected
+  * RespondedAt = now
+* Không gắn Jockey vào race_registrations.
+* Sau reject, Owner phải có thể mời Jockey khác theo logic hiện có.
 
-1. Lấy currentJockeyId từ token.
-2. Kiểm tra invitation tồn tại.
-3. Invitation phải thuộc currentJockeyId.
-4. Invitation phải đang Pending, nếu không thì trả BadRequest/Conflict theo pattern hiện có.
-5. Cập nhật jockey_invitations:
+Phần 3: bổ sung Notification khi Owner gửi invitation
 
-   * Status = Accepted
-   * RespondedAt = now
-6. Cập nhật race_registrations liên quan:
+Nhiệm vụ:
 
-   * JockeyId = currentJockeyId
-   * Status = ReadyToRace hoặc trạng thái tương ứng hiện có như Accepted/Confirmed/Approved.
-7. Nếu project có nhiều invitation cho cùng raceRegistration, sau khi accept có thể reject/cancel các invitation pending còn lại cho cùng registration để tránh nhiều Jockey nhận cùng slot.
-8. Dùng transaction nếu pattern project cho phép, để invitation và race_registration update đồng bộ.
-9. SaveChanges.
-10. Trả response message thành công.
+* Tìm API/controller/service nơi Owner gửi invitation cho Jockey.
+* Khi Owner tạo JockeyInvitation thành công, nếu project đã có Notification entity/table/service thì tạo thêm notification cho Jockey.
+* Không tạo migration mới.
+* Không tự bịa bảng Notification nếu project chưa có.
+* Nếu chưa có Notification entity/table, chỉ ghi rõ “Chưa có Notification infrastructure, cần làm giai đoạn riêng”.
 
-Response gợi ý:
-{
-"message": "Đã chấp nhận lời mời.",
-"status": "Accepted"
-}
+Logic notification mong muốn:
+Owner gửi invitation
+=> Insert JockeyInvitation
+=> Insert Notification cho user của Jockey
 
-API 3: PUT /api/jockey/invitations/{id}/reject
+Notification nên có nội dung tương đương:
 
-Logic bắt buộc:
-
-1. Lấy currentJockeyId từ token.
-2. Kiểm tra invitation tồn tại.
-3. Invitation phải thuộc currentJockeyId.
-4. Invitation phải đang Pending, nếu không thì trả BadRequest/Conflict theo pattern hiện có.
-5. Cập nhật jockey_invitations:
-
-   * Status = Rejected
-   * RespondedAt = now
-6. Không gắn Jockey vào race_registrations.
-7. Nếu race_registration đang giữ currentJockeyId do invitation này thì clear JockeyId hoặc đưa status về trạng thái chờ mời lại theo pattern hiện có.
-8. Mục tiêu sau reject: Owner có thể mời Jockey khác.
-9. SaveChanges.
-10. Trả response message thành công.
-
-Response gợi ý:
-{
-"message": "Đã từ chối lời mời.",
-"status": "Rejected"
-}
+* Receiver/UserId = userId của Jockey
+* Title = "Bạn có lời mời tham gia cuộc đua"
+* Message = Owner hoặc race đã mời bạn tham gia cuộc đua
+* Type = Invitation hoặc giá trị tương ứng hiện có
+* IsRead = false
+* CreatedAt = now
+* Link/ReferenceId = invitationId hoặc raceId nếu DB có field
 
 Yêu cầu bảo vệ role khác:
 
-* API này chỉ áp dụng cho role Jockey.
-* Không sửa flow Owner tạo invitation nếu không bắt buộc.
-* Không sửa AuthController nếu không cần.
-* Không sửa AdminController.
-* Không ảnh hưởng Owner/Admin/Staff.
-
-Yêu cầu code:
-
-* Giữ route convention hiện có.
-* Có thể tạo Controllers/Jockey/JockeyInvitationsController.cs nếu chưa có.
-* Có thể tạo DTO response nếu project có convention DTO.
-* Có thể tạo constants invitation/registration status nếu chưa có, nhưng không tạo trùng nếu đã có.
-* Không tự bịa field DB. Nếu field khác tên, dùng đúng field hiện có.
-* Không in toàn bộ code ra terminal.
+* Không sửa logic login/me.
+* Không sửa Admin approve/reject.
+* Không sửa Jockey Settings/Profile.
+* Không ảnh hưởng Owner/Admin/Staff ngoài việc Owner gửi invitation có thêm notification.
 
 Test cần đạt:
 
-* Owner gửi lời mời => Jockey thấy trong GET /api/jockey/invitations/pending.
-* Jockey Active gọi pending => 200 OK.
-* Jockey Pending gọi pending => 403.
-* Owner/Admin gọi pending => 403.
-* Jockey accept invitation => invitation Status = Accepted, RespondedAt có giá trị.
-* Jockey accept invitation => race_registration gắn JockeyId = currentJockeyId.
-* Jockey accept lại invitation đã accept/reject => bị chặn.
-* Jockey reject invitation => invitation Status = Rejected, RespondedAt có giá trị.
-* Jockey reject => Owner có thể mời Jockey khác.
+* Jockey Active gọi dashboard => 200 OK.
+* Jockey Pending gọi dashboard => 403.
+* Dashboard count pendingInvitations đúng.
+* Jockey thấy pending invitation khi Owner đã gửi lời mời.
+* Jockey accept => invitation Accepted, race_registration gắn Jockey.
+* Jockey reject => invitation Rejected, Owner có thể mời người khác.
+* Owner gửi invitation => Jockey có notification nếu project có Notification.
 * Build không lỗi.
 
-Sau khi sửa xong chỉ trả lời tối đa 10 dòng:
+Sau khi xong chỉ trả lời tối đa 10 dòng:
 
-1. File đã tạo/sửa
-2. Route pending invitations
-3. Route accept
-4. Route reject
-5. Accept đã update invitation chưa
-6. Accept đã update race registration chưa
-7. Reject có cho Owner mời người khác chưa
-8. Có ảnh hưởng Owner/Admin/Staff không
+1. File đã kiểm tra
+2. File đã sửa
+3. Dashboard đã đúng chưa
+4. Pending invitations đã đúng chưa
+5. Accept đã update invitation/race registration chưa
+6. Reject có cho Owner mời lại chưa
+7. Notification đã tạo được chưa
+8. Có ảnh hưởng role khác không
 9. Build command
 10. Lỗi còn lại nếu có

@@ -15,7 +15,6 @@ public class JockeyDashboardController : ControllerBase
 {
     private static readonly string[] AcceptedRegistrationStatuses =
     {
-        RaceRegistrationStatuses.JockeyInvited,
         RaceRegistrationStatuses.ReadyToRace
     };
 
@@ -50,6 +49,14 @@ public class JockeyDashboardController : ControllerBase
         }
 
         var user = jockey.JockeyNavigation;
+
+        if (user.Role != UserRoles.Jockey)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Tài khoản không có quyền Jockey."
+            });
+        }
 
         if (!user.EmailVerified)
         {

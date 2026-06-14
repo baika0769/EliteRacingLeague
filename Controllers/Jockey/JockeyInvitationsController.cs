@@ -200,6 +200,7 @@ public class JockeyInvitationsController : ControllerBase
             .Select(j => new
             {
                 j.IsActive,
+                j.JockeyNavigation.Role,
                 UserStatus = j.JockeyNavigation.Status,
                 j.JockeyNavigation.EmailVerified
             })
@@ -210,6 +211,14 @@ public class JockeyInvitationsController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 message = "Không tìm thấy hồ sơ jockey."
+            });
+        }
+
+        if (data.Role != UserRoles.Jockey)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Tài khoản không có quyền Jockey."
             });
         }
 
