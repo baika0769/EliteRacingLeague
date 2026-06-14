@@ -80,9 +80,11 @@ public class JockeyProfileController : ControllerBase
         {
             UserId = user.UserId,
             JockeyId = jockey.JockeyId,
+            JockeyCode = null,
             FullName = user.FullName,
             Email = user.Email,
             Phone = user.Phone,
+            Role = user.Role,
             Status = user.Status,
             EmailVerified = user.EmailVerified,
             NextStep = GetNextStep(user, jockey),
@@ -102,8 +104,11 @@ public class JockeyProfileController : ControllerBase
                 {
                     JockeyDistanceExperienceId = e.JockeyDistanceExperienceId,
                     DistanceMeters = e.DistanceMeters,
-                    DistanceLabel = JockeyDistanceMeters.Labels.TryGetValue(e.DistanceMeters, out var label)
+                    Label = JockeyDistanceMeters.Labels.TryGetValue(e.DistanceMeters, out var label)
                         ? label
+                        : $"{e.DistanceMeters}m",
+                    DistanceLabel = JockeyDistanceMeters.Labels.TryGetValue(e.DistanceMeters, out var distanceLabel)
+                        ? distanceLabel
                         : $"{e.DistanceMeters}m",
                     SkillLevel = e.SkillLevel
                 })
