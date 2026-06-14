@@ -4,6 +4,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Auth;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -282,12 +283,14 @@ public class AuthController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        var nextStep = await GetNextStepAsync(user);
+
         return Ok(new
         {
             message = "Xác thực email thành công.",
             role = user.Role,
             status = user.Status,
-            nextStep = GetNextStep(user)
+            nextStep
         });
     }
 
@@ -445,11 +448,13 @@ public class AuthController : ControllerBase
 
         var token = GenerateJwtToken(user);
         var expiresInMinutes = int.Parse(_configuration["Jwt:ExpireMinutes"]!);
-        var nextStep = GetNextStep(user);
+        var nextStep = await GetNextStepAsync(user);
 
         var response = new LoginResponse
         {
-            Message = user.Status == UserStatuses.Pending
+            Message = user.Role == UserRoles.Jockey
+                && user.Status == UserStatuses.Pending
+                && nextStep == AuthNextSteps.CompleteJockeyProfile
                 ? "Đăng nhập thành công. Vui lòng hoàn thiện hồ sơ."
                 : "Đăng nhập thành công.",
             Token = token,
@@ -498,6 +503,8 @@ public class AuthController : ControllerBase
             });
         }
 
+        var nextStep = await GetNextStepAsync(user);
+
         return Ok(new
         {
             userId = user.UserId,
@@ -507,7 +514,7 @@ public class AuthController : ControllerBase
             role = user.Role,
             status = user.Status,
             emailVerified = user.EmailVerified,
-            nextStep = GetNextStep(user)
+            nextStep
         });
     }
 
@@ -625,7 +632,37 @@ public class AuthController : ControllerBase
     }
 
 
-    private static string GetNextStep(User user)
+    private async Task<string> GetNextStepAsync(User user)
+    {
+        var jockey = await LoadJockeyForNextStepAsync(user);
+
+        return GetNextStep(user, jockey);
+    }
+
+    private async Task<Eliteracingleague.API.Models.Jockey?> LoadJockeyForNextStepAsync(User user)
+    {
+        if (user.Role != UserRoles.Jockey)
+        {
+            return null;
+        }
+
+        return await _context.Jockeys
+            .AsNoTracking()
+            .Include(j => j.JockeyDistanceExperiences)
+            .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
+    }
+
+    private static string GetNextStep(User user, Eliteracingleague.API.Models.Jockey? jockey)
+    {
+        if (user.Role != UserRoles.Jockey)
+        {
+            return GetNextStepForNonJockey(user);
+        }
+
+        return GetNextStepForJockey(user, jockey);
+    }
+
+    private static string GetNextStepForNonJockey(User user)
     {
         if (!user.EmailVerified)
         {
@@ -640,11 +677,6 @@ public class AuthController : ControllerBase
         if (user.Status == UserStatuses.Pending && user.Role == UserRoles.HorseOwner)
         {
             return AuthNextSteps.AddHorse;
-        }
-
-        if (user.Status == UserStatuses.Pending && user.Role == UserRoles.Jockey)
-        {
-            return AuthNextSteps.CompleteJockeyProfile;
         }
 
         if (user.Status == UserStatuses.Pending)
@@ -665,7 +697,40 @@ public class AuthController : ControllerBase
         return AuthNextSteps.Unknown;
     }
 
+    private static string GetNextStepForJockey(User user, Eliteracingleague.API.Models.Jockey? jockey)
+    {
+        if (!user.EmailVerified)
+        {
+            return AuthNextSteps.VerifyEmail;
+        }
 
+        if (user.Status == UserStatuses.Inactive)
+        {
+            return AuthNextSteps.ContactSupport;
+        }
+
+        if (user.Status == UserStatuses.Banned)
+        {
+            return AuthNextSteps.AccountBlocked;
+        }
+
+        if (user.Status != UserStatuses.Active && user.Status != UserStatuses.Pending)
+        {
+            return AuthNextSteps.Unknown;
+        }
+
+        if (jockey == null || !JockeyProfileService.IsJockeyProfileCompleted(jockey))
+        {
+            return AuthNextSteps.CompleteJockeyProfile;
+        }
+
+        if (user.Status == UserStatuses.Pending || !jockey.IsActive)
+        {
+            return AuthNextSteps.WaitForActivation;
+        }
+
+        return AuthNextSteps.GoToDashboard;
+    }
 
     private string GenerateJwtToken(User user)
     {

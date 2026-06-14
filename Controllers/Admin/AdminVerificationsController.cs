@@ -231,6 +231,22 @@ namespace Eliteracingleague.API.Controllers.Admin
             user.EmailVerified = true;
             user.UpdatedAt = DateTime.UtcNow;
 
+            if (user.Role == UserRoles.Jockey)
+            {
+                var jockey = await _context.Jockeys.FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
+
+                if (jockey == null)
+                {
+                    return NotFound(new AdminActionResponse
+                    {
+                        Message = "Jockey profile not found",
+                        Id = id
+                    });
+                }
+
+                jockey.IsActive = true;
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
@@ -267,6 +283,22 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             user.Status = UserStatuses.Inactive;
             user.UpdatedAt = DateTime.UtcNow;
+
+            if (user.Role == UserRoles.Jockey)
+            {
+                var jockey = await _context.Jockeys.FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
+
+                if (jockey == null)
+                {
+                    return NotFound(new AdminActionResponse
+                    {
+                        Message = "Jockey profile not found",
+                        Id = id
+                    });
+                }
+
+                jockey.IsActive = false;
+            }
 
             await _context.SaveChangesAsync();
 
