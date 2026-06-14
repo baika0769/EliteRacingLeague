@@ -47,6 +47,7 @@ public class JockeyProfileController : ControllerBase
 
         var jockey = await _context.Jockeys
             .AsNoTracking()
+            .Include(j => j.JockeyDistanceExperiences)
             .FirstOrDefaultAsync(j => j.JockeyId == jockeyId);
 
         if (jockey == null)
@@ -227,6 +228,15 @@ public class JockeyProfileController : ControllerBase
             });
         }
 
+        if (!HasRequiredDistanceExperiences(request.DistanceExperiences))
+        {
+            return BadRequest(new
+            {
+                message = "Vui lòng bổ sung đầy đủ kinh nghiệm theo cự ly bắt buộc.",
+                nextStep = AuthNextSteps.CompleteJockeyProfile
+            });
+        }
+
         if (request.BreedExperiences.Any(e => !JockeyBreedSkillLevels.IsValid(e.ExperienceLevel)))
         {
             return BadRequest(new
@@ -331,7 +341,7 @@ public class JockeyProfileController : ControllerBase
             return AuthNextSteps.VerifyEmail;
         }
 
-        if (!IsProfileCompleted(jockey))
+        if (!IsJockeyProfileCompleted(jockey))
         {
             return AuthNextSteps.CompleteJockeyProfile;
         }
@@ -349,13 +359,17 @@ public class JockeyProfileController : ControllerBase
         return AuthNextSteps.ContactSupport;
     }
 
-    private static bool IsProfileCompleted(Eliteracingleague.API.Models.Jockey jockey)
+    private static bool IsJockeyProfileCompleted(Eliteracingleague.API.Models.Jockey jockey)
     {
         return !string.IsNullOrWhiteSpace(jockey.ProfileImageUrl)
             && !string.IsNullOrWhiteSpace(jockey.IdCardFrontUrl)
             && !string.IsNullOrWhiteSpace(jockey.IdCardBackUrl)
             && !string.IsNullOrWhiteSpace(jockey.CertificateFileUrl)
-            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl);
+            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl)
+            && jockey.WeightKg > 0
+            && jockey.YearsOfExperience >= 0
+            && HorseHealthStatuses.IsValid(jockey.HealthStatus)
+            && HasRequiredDistanceExperiences(jockey.JockeyDistanceExperiences);
     }
 
     private static bool HasRequiredDocuments(UpdateJockeyVerificationRequest request)
@@ -365,5 +379,23 @@ public class JockeyProfileController : ControllerBase
             && !string.IsNullOrWhiteSpace(request.IdCardBackUrl)
             && !string.IsNullOrWhiteSpace(request.CertificateFileUrl)
             && !string.IsNullOrWhiteSpace(request.HealthCertificateUrl);
+    }
+
+    private static bool HasRequiredDistanceExperiences(IEnumerable<Eliteracingleague.API.Models.JockeyDistanceExperience> distanceExperiences)
+    {
+        var distances = distanceExperiences.Select(e => e.DistanceMeters).Distinct().ToHashSet();
+
+        return JockeyDistanceMeters.All.All(distances.Contains)
+            && distanceExperiences.All(e => JockeyDistanceMeters.IsValid(e.DistanceMeters)
+                && JockeyDistanceSkillLevels.IsValid(e.SkillLevel));
+    }
+
+    private static bool HasRequiredDistanceExperiences(IEnumerable<JockeyDistanceExperienceRequest> distanceExperiences)
+    {
+        var distances = distanceExperiences.Select(e => e.DistanceMeters).Distinct().ToHashSet();
+
+        return JockeyDistanceMeters.All.All(distances.Contains)
+            && distanceExperiences.All(e => JockeyDistanceMeters.IsValid(e.DistanceMeters)
+                && JockeyDistanceSkillLevels.IsValid(e.SkillLevel));
     }
 }

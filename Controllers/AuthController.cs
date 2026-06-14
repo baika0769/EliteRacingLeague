@@ -647,6 +647,7 @@ public class AuthController : ControllerBase
 
         return await _context.Jockeys
             .AsNoTracking()
+            .Include(j => j.JockeyDistanceExperiences)
             .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
     }
 
@@ -736,7 +737,20 @@ public class AuthController : ControllerBase
             && !string.IsNullOrWhiteSpace(jockey.IdCardFrontUrl)
             && !string.IsNullOrWhiteSpace(jockey.IdCardBackUrl)
             && !string.IsNullOrWhiteSpace(jockey.CertificateFileUrl)
-            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl);
+            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl)
+            && jockey.WeightKg > 0
+            && jockey.YearsOfExperience >= 0
+            && HorseHealthStatuses.IsValid(jockey.HealthStatus)
+            && HasRequiredDistanceExperiences(jockey.JockeyDistanceExperiences);
+    }
+
+    private static bool HasRequiredDistanceExperiences(IEnumerable<Eliteracingleague.API.Models.JockeyDistanceExperience> distanceExperiences)
+    {
+        var distances = distanceExperiences.Select(e => e.DistanceMeters).Distinct().ToHashSet();
+
+        return JockeyDistanceMeters.All.All(distances.Contains)
+            && distanceExperiences.All(e => JockeyDistanceMeters.IsValid(e.DistanceMeters)
+                && JockeyDistanceSkillLevels.IsValid(e.SkillLevel));
     }
 
 

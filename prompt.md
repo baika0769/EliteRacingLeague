@@ -1,39 +1,76 @@
 Tôi đồng ý cho sửa.
 
-Làm lại Giai đoạn 7: sửa Auth nextStep cho Jockey.
+Giai đoạn ưu tiên: sửa lỗi nghiêm trọng Jockey không được tự Active.
 
-Chỉ sửa AuthController hoặc file auth liên quan thật sự cần thiết. Không sửa database, không migration, không frontend, không refactor lớn.
+Nhiệm vụ:
 
-Mục tiêu:
+* Kiểm tra và sửa luồng Jockey update hồ sơ, Auth nextStep, Admin approve/reject.
+* Chỉ sửa file thật sự cần thiết.
+* Không sửa database.
+* Không migration.
+* Không sửa frontend.
+* Không refactor lớn.
+* Không in code dài ra terminal.
 
-* Login/me phải trả nextStep đúng cho Jockey.
-* AuthController.GetNextStep(user) hiện chưa biết Jockey đã điền hồ sơ hay chưa.
-* Chỉ áp dụng logic hồ sơ cho user.Role == Jockey.
-* Các role khác ngoài Jockey phải giữ nguyên logic login/me hiện tại.
+File cần kiểm tra/sửa nếu liên quan:
 
-Yêu cầu bảo vệ role khác:
+* Controllers/Jockey/JockeyProfileController.cs
+* Controllers/AuthController.cs
+* Controllers/Admin/AdminVerificationsController.cs
+* DTO/constants liên quan nếu cần, nhưng không sửa lan man.
 
-* Không áp dụng CompleteJockeyProfile cho Owner/Admin/Staff.
-* Không áp dụng WaitForActivation cho Owner/Admin/Staff.
-* LoadJockeyForNextStepAsync chỉ query Jockey khi user.Role == Jockey.
-* GetNextStep phải branch rõ:
+Logic sai cần loại bỏ:
 
-  * Nếu không phải Jockey: giữ logic cũ.
-  * Nếu là Jockey: mới kiểm tra hồ sơ Jockey.
-* Không làm thay đổi response contract của login/me ngoài giá trị nextStep.
-* Message “Vui lòng hoàn thiện hồ sơ” chỉ dùng cho Jockey Pending chưa đủ hồ sơ.
+* Jockey update hồ sơ xong mà backend set user.Status = Active.
+* Jockey update hồ sơ xong mà backend set jockey.IsActive = true.
+* Jockey update hồ sơ xong mà response trả nextStep = GoToDashboard.
 
-Logic nextStep:
+Logic đúng bắt buộc:
+
+1. Khi Jockey PUT /api/jockey/profile/verification hoặc API save hồ sơ:
+
+* Update thông tin hồ sơ Jockey.
+* Update/replace distance experiences.
+* Update/replace breed experiences nếu có.
+* Sau khi hồ sơ đủ:
+
+  * user.Status = Pending
+  * jockey.IsActive = false
+  * nextStep = WaitForActivation
+* Không được set Active ở API này.
+* Không được trả GoToDashboard ở API này.
+* Response đúng:
+  message = "Đã gửi hồ sơ. Vui lòng chờ admin duyệt."
+  status = "Pending"
+  isActive = false
+  nextStep = "WaitForActivation"
+
+2. Auth login/me nextStep:
 
 * EmailVerified = false => VerifyEmail.
-* Banned => AccountBlocked.
-* Inactive => ContactSupport.
-* Jockey Pending và chưa đủ hồ sơ => CompleteJockeyProfile.
-* Jockey Pending và đã đủ hồ sơ => WaitForActivation.
-* Jockey Active và jockey.IsActive = true => GoToDashboard.
-* Role khác Jockey giữ logic cũ.
+* User/Jockey Banned => AccountBlocked.
+* User/Jockey Inactive => ContactSupport hoặc Rejected nếu project đã có nextStep Rejected.
+* Role Jockey + Pending + chưa đủ hồ sơ => CompleteJockeyProfile.
+* Role Jockey + Pending + đã đủ hồ sơ => WaitForActivation.
+* Role Jockey + Active + jockey.IsActive = true => GoToDashboard.
+* Role khác Jockey giữ logic cũ, không áp dụng CompleteJockeyProfile/WaitForActivation.
 
-Tạo/sửa helper:
+3. Admin approve:
+
+* Chỉ Admin approve mới được:
+
+  * user.Status = Active
+  * jockey.IsActive = true
+  * nextStep login/me sau đó mới là GoToDashboard.
+
+4. Admin reject:
+
+* Khi Admin reject thì đồng bộ trạng thái với bảng Jockey.
+* user.Status = Inactive hoặc status reject hiện có của project.
+* jockey.IsActive = false.
+* nextStep sau login/me là ContactSupport hoặc Rejected theo constants hiện có.
+
+Helper cần kiểm tra/tạo:
 private static bool IsJockeyProfileCompleted(Jockey jockey)
 
 Điều kiện hồ sơ Jockey đủ:
@@ -49,11 +86,24 @@ private static bool IsJockeyProfileCompleted(Jockey jockey)
 * Distance experience có dữ liệu hợp lệ, tốt nhất đủ 3 cự ly 1000, 1500, 2400.
 * Breed experience không bắt buộc.
 
-Không in code dài. Sau khi sửa chỉ trả lời tối đa 8 dòng:
+Yêu cầu bảo vệ role khác:
 
-1. File đã sửa
-2. Method đã sửa
-3. Helper đã tạo/sửa
-4. Role khác có giữ nguyên không
-5. Build command cần chạy
-6. Lỗi còn lại nếu có
+* Logic đặc biệt chỉ áp dụng cho user.Role == Jockey.
+* Owner/Admin/Staff giữ nguyên luồng login/me hiện tại.
+* Không thay đổi response contract ngoài giá trị nextStep/message nếu cần.
+
+Sau khi sửa:
+
+* Chạy build nếu được phép.
+* Chỉ trả lời tối đa 10 dòng:
+
+  1. File đã sửa
+  2. Đã bỏ tự Active ở PUT chưa
+  3. PUT trả WaitForActivation chưa
+  4. Auth nextStep Jockey Pending chưa đủ hồ sơ
+  5. Auth nextStep Jockey Pending đủ hồ sơ
+  6. Admin approve set Active đúng chưa
+  7. Admin reject sync đúng chưa
+  8. Role khác có giữ nguyên không
+  9. Build command
+  10. Lỗi còn lại nếu có
