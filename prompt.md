@@ -1,89 +1,59 @@
 Tôi đồng ý cho sửa.
 
-Nhiệm vụ: kiểm tra lại Giai đoạn 6 cũ đã làm cho Jockey Settings, sau đó chỉ bổ sung phần còn thiếu. Không làm lại từ đầu nếu code đã có.
+Làm lại Giai đoạn 7: sửa Auth nextStep cho Jockey.
 
-Phạm vi:
+Chỉ sửa AuthController hoặc file auth liên quan thật sự cần thiết. Không sửa database, không migration, không frontend, không refactor lớn.
 
-* Kiểm tra API PUT /api/jockey/profile/verification hiện tại.
-* Kiểm tra API GET /api/jockey/profile/me hiện tại.
-* Kiểm tra lookup APIs:
+Mục tiêu:
 
-  * GET /api/jockey/lookups/settings-options
-  * GET /api/jockey/lookups/horse-breeds
-* Kiểm tra DTO/constants liên quan.
+* Login/me phải trả nextStep đúng cho Jockey.
+* AuthController.GetNextStep(user) hiện chưa biết Jockey đã điền hồ sơ hay chưa.
+* Chỉ áp dụng logic hồ sơ cho user.Role == Jockey.
+* Các role khác ngoài Jockey phải giữ nguyên logic login/me hiện tại.
 
-Quy tắc quan trọng:
+Yêu cầu bảo vệ role khác:
 
-* Không refactor lớn.
-* Không sửa database.
-* Không tạo migration.
-* Không sửa frontend.
-* Không in code dài ra terminal.
-* Không đổi route cũ nếu đã có route hợp lý.
-* Chỉ sửa phần thiếu hoặc sai.
-* Nếu API/DTO nào đã đúng thì giữ nguyên.
+* Không áp dụng CompleteJockeyProfile cho Owner/Admin/Staff.
+* Không áp dụng WaitForActivation cho Owner/Admin/Staff.
+* LoadJockeyForNextStepAsync chỉ query Jockey khi user.Role == Jockey.
+* GetNextStep phải branch rõ:
 
-Yêu cầu kiểm tra PUT /api/jockey/profile/verification:
+  * Nếu không phải Jockey: giữ logic cũ.
+  * Nếu là Jockey: mới kiểm tra hồ sơ Jockey.
+* Không làm thay đổi response contract của login/me ngoài giá trị nextStep.
+* Message “Vui lòng hoàn thiện hồ sơ” chỉ dùng cho Jockey Pending chưa đủ hồ sơ.
 
-* Lấy userId/jockeyId từ token.
-* User phải tồn tại.
-* Role phải là Jockey, sai role trả 403.
-* Email chưa verify thì trả nextStep = VerifyEmail.
-* Validate weightKg > 0.
-* Validate yearsOfExperience >= 0.
-* Validate healthStatus hợp lệ.
-* Validate document bắt buộc nếu DB có field.
-* Validate distanceMeters chỉ nhận 1000, 1500, 2400.
-* Validate distance skill chỉ nhận NoExperience, Basic, Good, Expert.
-* Validate breed experience chỉ nhận Basic, Good, Expert.
-* Validate breedId tồn tại và active nếu DB có trạng thái active.
-* Update bảng jockeys.
-* Replace hoặc upsert jockey_distance_experiences.
-* Replace hoặc upsert jockey_breed_experiences.
-* Sau khi save: user.Status phải là Pending, jockey.IsActive phải là false.
-* Tuyệt đối không set Active.
-* Tuyệt đối không trả nextStep = GoToDashboard ở PUT.
-* Response sau PUT:
-  message = "Đã gửi hồ sơ. Vui lòng chờ admin duyệt."
-  status = "Pending"
-  isActive = false
-  nextStep = "WaitForActivation"
+Logic nextStep:
 
-Yêu cầu kiểm tra GET /api/jockey/profile/me:
+* EmailVerified = false => VerifyEmail.
+* Banned => AccountBlocked.
+* Inactive => ContactSupport.
+* Jockey Pending và chưa đủ hồ sơ => CompleteJockeyProfile.
+* Jockey Pending và đã đủ hồ sơ => WaitForActivation.
+* Jockey Active và jockey.IsActive = true => GoToDashboard.
+* Role khác Jockey giữ logic cũ.
 
-* Trả đủ dữ liệu để render trang Jockey Settings.
-* Có userId, jockeyCode nếu DB có, fullName, email, phone, status, isActive, nextStep.
-* Có weightKg, healthStatus, yearsOfExperience, certificateNo, certificateFileUrl, profileImageUrl, idCardFrontUrl, idCardBackUrl, healthCertificateUrl nếu DB có.
-* Có distanceExperiences gồm distanceMeters, label, skillLevel.
-* Có breedExperiences gồm breedId, breedName, experienceLevel.
-* Logic nextStep:
+Tạo/sửa helper:
+private static bool IsJockeyProfileCompleted(Jockey jockey)
 
-  * Chưa verify email: VerifyEmail
-  * Hồ sơ chưa đủ: CompleteJockeyProfile
-  * Hồ sơ đủ nhưng Pending hoặc isActive false: WaitForActivation
-  * Chỉ khi user.Status Active và jockey.IsActive true: GoToDashboard
+Điều kiện hồ sơ Jockey đủ:
 
-Yêu cầu lookup:
+* ProfileImageUrl có giá trị.
+* IdCardFrontUrl có giá trị.
+* IdCardBackUrl có giá trị.
+* CertificateFileUrl có giá trị.
+* HealthCertificateUrl có giá trị.
+* WeightKg > 0.
+* YearsOfExperience >= 0.
+* HealthStatus hợp lệ.
+* Distance experience có dữ liệu hợp lệ, tốt nhất đủ 3 cự ly 1000, 1500, 2400.
+* Breed experience không bắt buộc.
 
-* GET /api/jockey/lookups/settings-options trả:
+Không in code dài. Sau khi sửa chỉ trả lời tối đa 8 dòng:
 
-  * healthStatuses: Healthy, NeedsCheck, Sick, Injured, Recovering, UnfitToRace
-  * distanceOptions: 1000/1000m Sprint, 1500/1500m Mid, 2400/2400m Endurance
-  * distanceSkillLevels: NoExperience, Basic, Good, Expert
-  * breedExperienceLevels: Basic, Good, Expert
-* GET /api/jockey/lookups/horse-breeds trả breedId, breedName.
-* Nếu horse_breeds có isActive/status thì chỉ lấy active, nếu không có thì lấy toàn bộ.
-
-Sau khi xong chỉ trả lời tối đa 12 dòng:
-
-1. Phần đã có sẵn
-2. Phần đã sửa/bổ sung
-3. File đã sửa
-4. Route GET profile
-5. Route PUT verification
-6. Route lookup options
-7. Route lookup horse breeds
-8. Đã đảm bảo PUT không Active hay chưa
-9. Build command
-10. Lỗi còn lại nếu có
-11. Bước tiếp theo
+1. File đã sửa
+2. Method đã sửa
+3. Helper đã tạo/sửa
+4. Role khác có giữ nguyên không
+5. Build command cần chạy
+6. Lỗi còn lại nếu có
