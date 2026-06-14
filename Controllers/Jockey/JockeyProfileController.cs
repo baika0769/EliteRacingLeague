@@ -1,6 +1,7 @@
 ﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Jockey;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -440,7 +441,7 @@ public class JockeyProfileController : ControllerBase
             return AuthNextSteps.ContactSupport;
         }
 
-        if (!IsJockeyProfileCompleted(jockey))
+        if (!JockeyProfileService.IsJockeyProfileCompleted(jockey))
         {
             return AuthNextSteps.CompleteJockeyProfile;
         }
@@ -458,35 +459,14 @@ public class JockeyProfileController : ControllerBase
         return AuthNextSteps.ContactSupport;
     }
 
-    private static bool IsJockeyProfileCompleted(Eliteracingleague.API.Models.Jockey jockey)
-    {
-        return !string.IsNullOrWhiteSpace(jockey.ProfileImageUrl)
-            && !string.IsNullOrWhiteSpace(jockey.IdCardFrontUrl)
-            && !string.IsNullOrWhiteSpace(jockey.IdCardBackUrl)
-            && !string.IsNullOrWhiteSpace(jockey.CertificateFileUrl)
-            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl)
-            && jockey.WeightKg > 0
-            && jockey.YearsOfExperience >= 0
-            && HorseHealthStatuses.IsValid(jockey.HealthStatus)
-            && HasRequiredDistanceExperiences(jockey.JockeyDistanceExperiences);
-    }
-
     private static bool HasRequiredDocuments(UpdateJockeyVerificationRequest request)
     {
         return !string.IsNullOrWhiteSpace(request.ProfileImageUrl)
             && !string.IsNullOrWhiteSpace(request.IdCardFrontUrl)
             && !string.IsNullOrWhiteSpace(request.IdCardBackUrl)
+            && !string.IsNullOrWhiteSpace(request.CertificateNo)
             && !string.IsNullOrWhiteSpace(request.CertificateFileUrl)
             && !string.IsNullOrWhiteSpace(request.HealthCertificateUrl);
-    }
-
-    private static bool HasRequiredDistanceExperiences(IEnumerable<Eliteracingleague.API.Models.JockeyDistanceExperience> distanceExperiences)
-    {
-        var distances = distanceExperiences.Select(e => e.DistanceMeters).Distinct().ToHashSet();
-
-        return JockeyDistanceMeters.All.All(distances.Contains)
-            && distanceExperiences.All(e => JockeyDistanceMeters.IsValid(e.DistanceMeters)
-                && JockeyDistanceSkillLevels.IsValid(e.SkillLevel));
     }
 
     private static bool HasRequiredDistanceExperiences(IEnumerable<JockeyDistanceExperienceRequest> distanceExperiences)

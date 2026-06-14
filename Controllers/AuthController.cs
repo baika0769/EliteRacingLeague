@@ -4,6 +4,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Auth;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -718,7 +719,7 @@ public class AuthController : ControllerBase
             return AuthNextSteps.Unknown;
         }
 
-        if (jockey == null || !IsJockeyProfileCompleted(jockey))
+        if (jockey == null || !JockeyProfileService.IsJockeyProfileCompleted(jockey))
         {
             return AuthNextSteps.CompleteJockeyProfile;
         }
@@ -730,30 +731,6 @@ public class AuthController : ControllerBase
 
         return AuthNextSteps.GoToDashboard;
     }
-
-    private static bool IsJockeyProfileCompleted(Eliteracingleague.API.Models.Jockey jockey)
-    {
-        return !string.IsNullOrWhiteSpace(jockey.ProfileImageUrl)
-            && !string.IsNullOrWhiteSpace(jockey.IdCardFrontUrl)
-            && !string.IsNullOrWhiteSpace(jockey.IdCardBackUrl)
-            && !string.IsNullOrWhiteSpace(jockey.CertificateFileUrl)
-            && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl)
-            && jockey.WeightKg > 0
-            && jockey.YearsOfExperience >= 0
-            && HorseHealthStatuses.IsValid(jockey.HealthStatus)
-            && HasRequiredDistanceExperiences(jockey.JockeyDistanceExperiences);
-    }
-
-    private static bool HasRequiredDistanceExperiences(IEnumerable<Eliteracingleague.API.Models.JockeyDistanceExperience> distanceExperiences)
-    {
-        var distances = distanceExperiences.Select(e => e.DistanceMeters).Distinct().ToHashSet();
-
-        return JockeyDistanceMeters.All.All(distances.Contains)
-            && distanceExperiences.All(e => JockeyDistanceMeters.IsValid(e.DistanceMeters)
-                && JockeyDistanceSkillLevels.IsValid(e.SkillLevel));
-    }
-
-
 
     private string GenerateJwtToken(User user)
     {
