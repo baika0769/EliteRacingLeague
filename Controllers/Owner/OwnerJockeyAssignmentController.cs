@@ -306,6 +306,36 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
+        var raceDate = DateOnly.FromDateTime(registration.Race.RaceDate.Date);
+        var isUnavailable = await _context.JockeyAvailabilities
+            .AsNoTracking()
+            .AnyAsync(a =>
+                a.JockeyId == request.JockeyId &&
+                a.AvailableDate == raceDate &&
+                a.Status == JockeyAvailabilityStatuses.Unavailable);
+
+        if (isUnavailable)
+        {
+            return BadRequest(new { message = "Jockey is unavailable on race day" });
+        }
+
+        var raceDateStart = registration.Race.RaceDate.Date;
+        var raceDateEnd = raceDateStart.AddDays(1);
+        var hasRaceOnSameDay = await _context.RaceRegistrations
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RegistrationId != registrationId &&
+                r.JockeyId == request.JockeyId &&
+                BusyRegistrationStatuses.Contains(r.Status) &&
+                r.Race.RaceDate >= raceDateStart &&
+                r.Race.RaceDate < raceDateEnd &&
+                r.Race.Status != RaceStatuses.Cancelled);
+
+        if (hasRaceOnSameDay)
+        {
+            return BadRequest(new { message = "Jockey already has a race on this day" });
+        }
+
         var existingInvitation = await _context.JockeyInvitations
             .AsNoTracking()
             .Where(i =>
@@ -346,6 +376,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             JockeyId = request.JockeyId,
             InvitedByOwnerId = ownerId.Value,
             Status = InvitationStatuses.Pending,
+            FeeAmount = request.FeeAmount,
             Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
             SentAt = now
         };
@@ -361,7 +392,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         {
             UserId = request.JockeyId,
             Title = "Bạn có lời mời tham gia cuộc đua",
-            Message = $"{ownerName} đã mời bạn tham gia cuộc đua {registration.Race.RaceName}.",
+            Message = string.IsNullOrWhiteSpace(request.Message)
+                ? $"{ownerName} đã mời bạn tham gia cuộc đua {registration.Race.RaceName}."
+                : request.Message.Trim(),
             IsRead = false,
             CreatedAt = now
         });
@@ -371,9 +404,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
         return Ok(new
         {
-            message = "Đã gửi lời mời jockey.",
+            message = "Đã gửi lời mời cho Jockey.",
             invitationId = invitation.InvitationId,
-            status = invitation.Status
+            invitationStatus = invitation.Status
         });
     }
 
@@ -525,12 +558,22 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
     {
         if (candidate.UserStatus != UserStatuses.Active || !candidate.IsActive)
         {
-            return "Jockey is not active";
+            return "Jockey is inactive";
+        }
+
+        if (candidate.InvitationStatus == InvitationStatuses.Pending)
+        {
+            return "Invitation pending";
+        }
+
+        if (candidate.InvitationStatus == InvitationStatuses.Accepted)
+        {
+            return "Jockey already assigned";
         }
 
         if (registration.AssignedJockeyId != null)
         {
-            return "Registration already has an assigned jockey";
+            return "This registration already has an assigned jockey";
         }
 
         if (registration.RaceStatus == RaceStatuses.Completed ||
@@ -539,21 +582,19 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Race is completed or cancelled";
         }
 
-        if (candidate.AvailabilityStatus == JockeyAvailabilityStatuses.Unavailable ||
-            candidate.AvailabilityStatus == JockeyAvailabilityStatuses.RacingDay)
+        if (candidate.AvailabilityStatus == JockeyAvailabilityStatuses.Unavailable)
         {
             return "Jockey is unavailable on race day";
+        }
+
+        if (candidate.AvailabilityStatus == JockeyAvailabilityStatuses.RacingDay)
+        {
+            return "Jockey already has a race on this day";
         }
 
         if (!HorseHealthStatuses.CanRace(candidate.HealthStatus))
         {
             return "Jockey health status is not eligible";
-        }
-
-        if (candidate.InvitationStatus == InvitationStatuses.Pending ||
-            candidate.InvitationStatus == InvitationStatuses.Accepted)
-        {
-            return "Jockey has already been invited";
         }
 
         if (candidate.InvitationStatus != null)

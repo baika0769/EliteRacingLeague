@@ -13,6 +13,12 @@ namespace Eliteracingleague.API.Controllers.Owner;
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerRacesController : OwnerBaseController
 {
+    private static readonly string[] BusyRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
+    };
+
     public OwnerRacesController(EliteRacingLeagueContext context) : base(context)
     {
     }
@@ -161,16 +167,77 @@ public class OwnerRacesController : OwnerBaseController
             });
         }
 
-        var invitationExists = await _context.JockeyInvitations
-            .AnyAsync(i =>
-                i.RegistrationId == registrationId &&
-                i.JockeyId == request.JockeyId);
-
-        if (invitationExists)
+        if (!HorseHealthStatuses.CanRace(jockey.HealthStatus))
         {
             return BadRequest(new
             {
-                message = "Jockey này đã được mời cho đăng ký race này."
+                message = "Jockey health status is not eligible",
+                healthStatus = jockey.HealthStatus
+            });
+        }
+
+        var raceDate = DateOnly.FromDateTime(registration.Race.RaceDate.Date);
+        var isUnavailable = await _context.JockeyAvailabilities
+            .AsNoTracking()
+            .AnyAsync(a =>
+                a.JockeyId == request.JockeyId &&
+                a.AvailableDate == raceDate &&
+                a.Status == JockeyAvailabilityStatuses.Unavailable);
+
+        if (isUnavailable)
+        {
+            return BadRequest(new { message = "Jockey is unavailable on race day" });
+        }
+
+        var raceDateStart = registration.Race.RaceDate.Date;
+        var raceDateEnd = raceDateStart.AddDays(1);
+        var hasRaceOnSameDay = await _context.RaceRegistrations
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RegistrationId != registrationId &&
+                r.JockeyId == request.JockeyId &&
+                BusyRegistrationStatuses.Contains(r.Status) &&
+                r.Race.RaceDate >= raceDateStart &&
+                r.Race.RaceDate < raceDateEnd &&
+                r.Race.Status != RaceStatuses.Cancelled);
+
+        if (hasRaceOnSameDay)
+        {
+            return BadRequest(new { message = "Jockey already has a race on this day" });
+        }
+
+        var existingInvitationStatus = await _context.JockeyInvitations
+            .AsNoTracking()
+            .Where(i =>
+                i.RegistrationId == registrationId &&
+                i.JockeyId == request.JockeyId)
+            .Select(i => i.Status)
+            .FirstOrDefaultAsync();
+
+        if (existingInvitationStatus == InvitationStatuses.Pending)
+        {
+            return BadRequest(new
+            {
+                message = "Invitation pending",
+                invitationStatus = existingInvitationStatus
+            });
+        }
+
+        if (existingInvitationStatus == InvitationStatuses.Accepted)
+        {
+            return BadRequest(new
+            {
+                message = "Jockey already assigned",
+                invitationStatus = existingInvitationStatus
+            });
+        }
+
+        if (existingInvitationStatus != null)
+        {
+            return BadRequest(new
+            {
+                message = "Jockey này đã từng được mời cho đăng ký race này, không thể tạo trùng theo ràng buộc hiện có.",
+                invitationStatus = existingInvitationStatus
             });
         }
 
@@ -193,13 +260,19 @@ public class OwnerRacesController : OwnerBaseController
         };
 
         _context.JockeyInvitations.Add(invitation);
-        registration.Status = RaceRegistrationStatuses.JockeyInvited;
+
+        if (registration.Status == RaceRegistrationStatuses.Approved)
+        {
+            registration.Status = RaceRegistrationStatuses.JockeyInvited;
+        }
 
         _context.Notifications.Add(new Notification
         {
             UserId = request.JockeyId,
             Title = "Bạn có lời mời tham gia cuộc đua",
-            Message = $"{ownerName} đã mời bạn tham gia cuộc đua {registration.Race.RaceName}.",
+            Message = string.IsNullOrWhiteSpace(request.Message)
+                ? $"{ownerName} đã mời bạn tham gia cuộc đua {registration.Race.RaceName}."
+                : request.Message.Trim(),
             IsRead = false,
             CreatedAt = now
         });
@@ -209,9 +282,9 @@ public class OwnerRacesController : OwnerBaseController
 
         return Ok(new
         {
-            message = "Đã gửi lời mời jockey.",
+            message = "Đã gửi lời mời cho Jockey.",
             invitationId = invitation.InvitationId,
-            status = invitation.Status
+            invitationStatus = invitation.Status
         });
     }
 }

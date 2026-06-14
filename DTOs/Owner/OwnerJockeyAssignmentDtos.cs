@@ -59,9 +59,3 @@ public class OwnerJockeyCandidateListResponse
     public int TotalPages { get; set; }
     public List<OwnerJockeyCandidateResponse> Items { get; set; } = new();
 }
-
-public class SendJockeyInvitationRequest
-{
-    public int JockeyId { get; set; }
-    public string? Message { get; set; }
-}
