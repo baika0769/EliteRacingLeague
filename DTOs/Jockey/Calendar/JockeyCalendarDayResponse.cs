@@ -3,8 +3,8 @@ namespace Eliteracingleague.API.DTOs.Jockey.Calendar;
 public class JockeyCalendarDayResponse
 {
     public DateOnly Date { get; set; }
-    public bool IsAvailable { get; set; }
-    public string? AvailabilityStatus { get; set; }
-    public bool HasRace { get; set; }
-    public List<JockeyCalendarItemResponse> Items { get; set; } = new();
+    public int DayNumber { get; set; }
+    public string Status { get; set; } = null!;
+    public bool IsCurrentMonth { get; set; }
+    public List<JockeyCalendarRaceResponse> Races { get; set; } = new();
 }

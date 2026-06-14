@@ -4,6 +4,7 @@ using Eliteracingleague.API.DTOs.Jockey.Calendar;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Jockey;
@@ -21,7 +22,7 @@ public class JockeyCalendarController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetCalendar([FromQuery] int? month, [FromQuery] int? year)
+    public async Task<IActionResult> GetCalendar([FromQuery] string? month)
     {
         var jockeyId = GetCurrentJockeyId();
 
@@ -30,59 +31,31 @@ public class JockeyCalendarController : ControllerBase
             return InvalidToken();
         }
 
-        var jockey = await _context.Jockeys
-            .AsNoTracking()
-            .Where(j => j.JockeyId == jockeyId.Value)
-            .Select(j => new
-            {
-                j.IsActive,
-                j.JockeyNavigation.Role,
-                UserStatus = j.JockeyNavigation.Status,
-                j.JockeyNavigation.EmailVerified
-            })
-            .FirstOrDefaultAsync();
-
-        if (jockey == null)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Không tìm thấy hồ sơ jockey."
-            });
-        }
-
-        var profileError = ValidateActiveJockey(jockey.Role, jockey.UserStatus, jockey.EmailVerified, jockey.IsActive);
+        var profileError = await LoadActiveJockeyProfileAsync(jockeyId.Value);
 
         if (profileError != null)
         {
             return profileError;
         }
 
-        var now = DateTime.UtcNow;
-        var calendarMonth = month ?? now.Month;
-        var calendarYear = year ?? now.Year;
-
-        if (calendarMonth < 1 || calendarMonth > 12)
+        if (!TryResolveMonth(month, out var startDate, out var monthText))
         {
-            return BadRequest(new { message = "Month không hợp lệ." });
+            return BadRequest(new { message = "Month không hợp lệ. Định dạng hợp lệ: yyyy-MM." });
         }
 
-        if (calendarYear < 1)
-        {
-            return BadRequest(new { message = "Year không hợp lệ." });
-        }
-
-        var startDate = new DateOnly(calendarYear, calendarMonth, 1);
-        var daysInMonth = DateTime.DaysInMonth(calendarYear, calendarMonth);
+        var daysInMonth = DateTime.DaysInMonth(startDate.Year, startDate.Month);
         var endDate = startDate.AddDays(daysInMonth);
         var startDateTime = startDate.ToDateTime(TimeOnly.MinValue);
         var endDateTime = endDate.ToDateTime(TimeOnly.MinValue);
 
-        var availabilityByDate = await _context.JockeyAvailabilities
+        var unavailableDates = await _context.JockeyAvailabilities
             .AsNoTracking()
             .Where(a => a.JockeyId == jockeyId.Value
                 && a.AvailableDate >= startDate
-                && a.AvailableDate < endDate)
-            .ToDictionaryAsync(a => a.AvailableDate, a => a.Status);
+                && a.AvailableDate < endDate
+                && a.Status == JockeyAvailabilityStatuses.Unavailable)
+            .Select(a => a.AvailableDate)
+            .ToListAsync();
 
         var raceItems = await _context.RaceRegistrations
             .AsNoTracking()
@@ -93,53 +66,80 @@ public class JockeyCalendarController : ControllerBase
                 && r.Race.Status != RaceStatuses.Cancelled)
             .Select(r => new
             {
-                RaceDateOnly = DateOnly.FromDateTime(r.Race.RaceDate),
-                Item = new JockeyCalendarItemResponse
-                {
-                    RaceId = r.RaceId,
-                    RaceName = r.Race.RaceName,
-                    RaceDate = r.Race.RaceDate,
-                    Location = r.Race.Location,
-                    HorseId = r.HorseId,
-                    HorseName = r.Horse.HorseName,
-                    OwnerId = r.OwnerId,
-                    OwnerName = r.Owner.Owner.FullName,
-                    RegistrationStatus = r.Status
-                }
+                r.RaceId,
+                r.Race.RaceName,
+                r.Race.RaceDate,
+                r.Race.Location,
+                r.Horse.HorseName,
+                RegistrationStatus = r.Status
             })
             .ToListAsync();
 
         var raceItemsByDate = raceItems
-            .GroupBy(r => r.RaceDateOnly)
-            .ToDictionary(g => g.Key, g => g.Select(r => r.Item).ToList());
+            .GroupBy(r => DateOnly.FromDateTime(r.RaceDate))
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(r => new JockeyCalendarRaceResponse
+                {
+                    RaceId = r.RaceId,
+                    RaceName = r.RaceName,
+                    RaceDate = r.RaceDate,
+                    Location = r.Location,
+                    HorseName = r.HorseName,
+                    Status = r.RegistrationStatus
+                }).ToList());
+
+        var racingDates = raceItemsByDate.Keys.ToHashSet();
+        var unavailableDateSet = unavailableDates.ToHashSet();
+        var unavailableWithoutRace = unavailableDateSet.Count(d => !racingDates.Contains(d));
 
         var days = Enumerable.Range(0, daysInMonth)
             .Select(offset =>
             {
                 var date = startDate.AddDays(offset);
-                availabilityByDate.TryGetValue(date, out var availabilityStatus);
-                raceItemsByDate.TryGetValue(date, out var items);
+                raceItemsByDate.TryGetValue(date, out var races);
 
-                items ??= new List<JockeyCalendarItemResponse>();
+                races ??= new List<JockeyCalendarRaceResponse>();
+
+                var status = races.Count > 0
+                    ? JockeyAvailabilityStatuses.RacingDay
+                    : unavailableDateSet.Contains(date)
+                        ? JockeyAvailabilityStatuses.Unavailable
+                        : JockeyAvailabilityStatuses.Available;
 
                 return new JockeyCalendarDayResponse
                 {
                     Date = date,
-                    IsAvailable = availabilityStatus != null && !IsUnavailableStatus(availabilityStatus),
-                    AvailabilityStatus = availabilityStatus,
-                    HasRace = items.Count > 0,
-                    Items = items
+                    DayNumber = date.Day,
+                    Status = status,
+                    IsCurrentMonth = true,
+                    Races = races
                 };
+            })
+            .ToList();
+
+        var now = DateTime.UtcNow;
+        var nextRaces = raceItems
+            .Where(r => r.RaceDate >= now)
+            .OrderBy(r => r.RaceDate)
+            .Select(r => new JockeyNextRaceResponse
+            {
+                RaceId = r.RaceId,
+                RaceName = r.RaceName,
+                RaceDate = r.RaceDate,
+                Location = r.Location,
+                HorseName = r.HorseName,
+                PrizeText = null
             })
             .ToList();
 
         return Ok(new JockeyCalendarResponse
         {
-            Month = calendarMonth,
-            Year = calendarYear,
-            ProfileStatus = jockey.UserStatus,
-            IsActive = jockey.IsActive,
-            Days = days
+            Month = monthText,
+            AvailableDays = daysInMonth - racingDates.Count - unavailableWithoutRace,
+            RacingDays = racingDates.Count,
+            Days = days,
+            NextRaces = nextRaces
         });
     }
 
@@ -153,6 +153,31 @@ public class JockeyCalendarController : ControllerBase
     private IActionResult InvalidToken()
     {
         return Unauthorized(new { message = "Token không hợp lệ." });
+    }
+
+    private async Task<IActionResult?> LoadActiveJockeyProfileAsync(int jockeyId)
+    {
+        var data = await _context.Jockeys
+            .AsNoTracking()
+            .Where(j => j.JockeyId == jockeyId)
+            .Select(j => new
+            {
+                j.IsActive,
+                j.JockeyNavigation.Role,
+                UserStatus = j.JockeyNavigation.Status,
+                j.JockeyNavigation.EmailVerified
+            })
+            .FirstOrDefaultAsync();
+
+        if (data == null)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "Không tìm thấy hồ sơ jockey."
+            });
+        }
+
+        return ValidateActiveJockey(data.Role, data.UserStatus, data.EmailVerified, data.IsActive);
     }
 
     private IActionResult? ValidateActiveJockey(
@@ -210,10 +235,30 @@ public class JockeyCalendarController : ControllerBase
         return null;
     }
 
-    private static bool IsUnavailableStatus(string status)
+    private static bool TryResolveMonth(string? month, out DateOnly startDate, out string monthText)
     {
-        return string.Equals(status, "Unavailable", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(status, "Inactive", StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(month))
+        {
+            var now = DateTime.UtcNow;
+            startDate = new DateOnly(now.Year, now.Month, 1);
+            monthText = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        if (DateTime.TryParseExact(
+            month,
+            "yyyy-MM",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsedMonth))
+        {
+            startDate = new DateOnly(parsedMonth.Year, parsedMonth.Month, 1);
+            monthText = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        startDate = default;
+        monthText = string.Empty;
+        return false;
     }
 }
