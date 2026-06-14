@@ -1,7 +1,9 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.DTOs.Jockey;
 using Eliteracingleague.API.DTOs.Jockey.Calendar;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,10 +17,12 @@ namespace Eliteracingleague.API.Controllers.Jockey;
 public class JockeyAvailabilitiesController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
+    private readonly JockeyAccessService _jockeyAccess;
 
-    public JockeyAvailabilitiesController(EliteRacingLeagueContext context)
+    public JockeyAvailabilitiesController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
     {
         _context = context;
+        _jockeyAccess = jockeyAccess;
     }
 
     [HttpGet]
@@ -184,9 +188,7 @@ public class JockeyAvailabilitiesController : ControllerBase
 
     private int? GetCurrentJockeyId()
     {
-        var jockeyIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        return int.TryParse(jockeyIdText, out var jockeyId) ? jockeyId : null;
+        return _jockeyAccess.GetCurrentUserId(User);
     }
 
     private IActionResult InvalidToken()
@@ -196,6 +198,12 @@ public class JockeyAvailabilitiesController : ControllerBase
 
     private async Task<IActionResult?> ValidateActiveJockeyAsync(int jockeyId)
     {
+        if (_jockeyAccess != null)
+        {
+            var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+            return access.Succeeded ? null : AccessError(access);
+        }
+
         var data = await _context.Jockeys
             .AsNoTracking()
             .Where(j => j.JockeyId == jockeyId)
@@ -263,5 +271,19 @@ public class JockeyAvailabilitiesController : ControllerBase
         }
 
         return null;
+    }
+
+    private IActionResult AccessError(JockeyAccessResult access)
+    {
+        if (access.StatusCode == StatusCodes.Status401Unauthorized)
+        {
+            return Unauthorized(new { message = access.Message });
+        }
+
+        return StatusCode(access.StatusCode, new
+        {
+            message = access.Message,
+            nextStep = access.NextStep
+        });
     }
 }

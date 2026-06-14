@@ -1,10 +1,10 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Jockey;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Jockey;
 
@@ -19,82 +19,27 @@ public class JockeyDashboardController : ControllerBase
     };
 
     private readonly EliteRacingLeagueContext _context;
+    private readonly JockeyAccessService _jockeyAccess;
 
-    public JockeyDashboardController(EliteRacingLeagueContext context)
+    public JockeyDashboardController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
     {
         _context = context;
+        _jockeyAccess = jockeyAccess;
     }
 
     [HttpGet]
     public async Task<IActionResult> GetDashboard()
     {
-        var jockeyIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
 
-        if (!int.TryParse(jockeyIdText, out var jockeyId))
+        if (!access.Succeeded)
         {
-            return Unauthorized(new { message = "Token không hợp lệ." });
+            return AccessError(access);
         }
 
-        var jockey = await _context.Jockeys
-            .AsNoTracking()
-            .Include(j => j.JockeyNavigation)
-            .FirstOrDefaultAsync(j => j.JockeyId == jockeyId);
-
-        if (jockey == null)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Không tìm thấy hồ sơ jockey."
-            });
-        }
-
-        var user = jockey.JockeyNavigation;
-
-        if (user.Role != UserRoles.Jockey)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Tài khoản không có quyền Jockey."
-            });
-        }
-
-        if (!user.EmailVerified)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Email chưa được xác thực.",
-                nextStep = AuthNextSteps.VerifyEmail
-            });
-        }
-
-        if (user.Status == UserStatuses.Banned)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Tài khoản đã bị khóa.",
-                nextStep = AuthNextSteps.AccountBlocked
-            });
-        }
-
-        if (user.Status == UserStatuses.Inactive)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Tài khoản đang bị vô hiệu hóa.",
-                nextStep = AuthNextSteps.ContactSupport
-            });
-        }
-
-        if (user.Status != UserStatuses.Active || !jockey.IsActive)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                message = "Tài khoản jockey chưa được kích hoạt.",
-                status = user.Status,
-                isActive = jockey.IsActive,
-                nextStep = AuthNextSteps.WaitForActivation
-            });
-        }
+        var user = access.User!;
+        var jockey = access.Jockey!;
+        var jockeyId = jockey.JockeyId;
 
         var now = DateTime.UtcNow;
 
@@ -136,6 +81,20 @@ public class JockeyDashboardController : ControllerBase
             CompletedRaces = completedRaces,
             ProfileStatus = user.Status,
             HealthStatus = jockey.HealthStatus
+        });
+    }
+
+    private IActionResult AccessError(JockeyAccessResult access)
+    {
+        if (access.StatusCode == StatusCodes.Status401Unauthorized)
+        {
+            return Unauthorized(new { message = access.Message });
+        }
+
+        return StatusCode(access.StatusCode, new
+        {
+            message = access.Message,
+            nextStep = access.NextStep
         });
     }
 }

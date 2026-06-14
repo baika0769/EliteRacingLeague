@@ -1,6 +1,8 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Jockey.Notifications;
+using Eliteracingleague.API.DTOs.Jockey;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -17,10 +19,12 @@ public class JockeyNotificationsController : ControllerBase
     private const int MaxPageSize = 50;
 
     private readonly EliteRacingLeagueContext _context;
+    private readonly JockeyAccessService _jockeyAccess;
 
-    public JockeyNotificationsController(EliteRacingLeagueContext context)
+    public JockeyNotificationsController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
     {
         _context = context;
+        _jockeyAccess = jockeyAccess;
     }
 
     [HttpGet]
@@ -312,9 +316,7 @@ public class JockeyNotificationsController : ControllerBase
 
     private int? GetCurrentJockeyId()
     {
-        var jockeyIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        return int.TryParse(jockeyIdText, out var jockeyId) ? jockeyId : null;
+        return _jockeyAccess.GetCurrentUserId(User);
     }
 
     private IActionResult InvalidToken()
@@ -324,6 +326,12 @@ public class JockeyNotificationsController : ControllerBase
 
     private async Task<IActionResult?> ValidateActiveJockeyAsync(int jockeyId)
     {
+        if (_jockeyAccess != null)
+        {
+            var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+            return access.Succeeded ? null : AccessError(access);
+        }
+
         var data = await _context.Jockeys
             .AsNoTracking()
             .Where(j => j.JockeyId == jockeyId)
@@ -391,6 +399,20 @@ public class JockeyNotificationsController : ControllerBase
         }
 
         return null;
+    }
+
+    private IActionResult AccessError(JockeyAccessResult access)
+    {
+        if (access.StatusCode == StatusCodes.Status401Unauthorized)
+        {
+            return Unauthorized(new { message = access.Message });
+        }
+
+        return StatusCode(access.StatusCode, new
+        {
+            message = access.Message,
+            nextStep = access.NextStep
+        });
     }
 
     private async Task<JockeyNotificationRaceDetailResponse?> FindRaceDetailAsync(

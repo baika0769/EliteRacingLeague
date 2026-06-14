@@ -1,6 +1,8 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.DTOs.Jockey;
 using Eliteracingleague.API.DTOs.Jockey.Calendar;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,10 +23,12 @@ public class JockeyCalendarController : ControllerBase
     };
 
     private readonly EliteRacingLeagueContext _context;
+    private readonly JockeyAccessService _jockeyAccess;
 
-    public JockeyCalendarController(EliteRacingLeagueContext context)
+    public JockeyCalendarController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
     {
         _context = context;
+        _jockeyAccess = jockeyAccess;
     }
 
     [HttpGet]
@@ -156,9 +160,7 @@ public class JockeyCalendarController : ControllerBase
 
     private int? GetCurrentJockeyId()
     {
-        var jockeyIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        return int.TryParse(jockeyIdText, out var jockeyId) ? jockeyId : null;
+        return _jockeyAccess.GetCurrentUserId(User);
     }
 
     private IActionResult InvalidToken()
@@ -168,6 +170,12 @@ public class JockeyCalendarController : ControllerBase
 
     private async Task<IActionResult?> LoadActiveJockeyProfileAsync(int jockeyId)
     {
+        if (_jockeyAccess != null)
+        {
+            var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+            return access.Succeeded ? null : AccessError(access);
+        }
+
         var data = await _context.Jockeys
             .AsNoTracking()
             .Where(j => j.JockeyId == jockeyId)
@@ -189,6 +197,20 @@ public class JockeyCalendarController : ControllerBase
         }
 
         return ValidateActiveJockey(data.Role, data.UserStatus, data.EmailVerified, data.IsActive);
+    }
+
+    private IActionResult AccessError(JockeyAccessResult access)
+    {
+        if (access.StatusCode == StatusCodes.Status401Unauthorized)
+        {
+            return Unauthorized(new { message = access.Message });
+        }
+
+        return StatusCode(access.StatusCode, new
+        {
+            message = access.Message,
+            nextStep = access.NextStep
+        });
     }
 
     private IActionResult? ValidateActiveJockey(
