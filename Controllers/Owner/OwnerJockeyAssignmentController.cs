@@ -19,6 +19,12 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         RaceRegistrationStatuses.JockeyInvited
     };
 
+    private static readonly string[] BusyRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
+    };
+
     public OwnerJockeyAssignmentController(EliteRacingLeagueContext context) : base(context)
     {
     }
@@ -139,6 +145,8 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         }
 
         var raceDate = DateOnly.FromDateTime(registration.RaceDate.Date);
+        var raceDateStart = registration.RaceDate.Date;
+        var raceDateEnd = raceDateStart.AddDays(1);
         var query = _context.Jockeys
             .AsNoTracking()
             .Where(j =>
@@ -169,10 +177,16 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 HealthStatus = j.HealthStatus,
                 IsActive = j.IsActive,
                 UserStatus = j.JockeyNavigation.Status,
-                AvailabilityStatus = j.JockeyAvailabilities
-                    .Where(a => a.AvailableDate == raceDate)
-                    .Select(a => a.Status)
-                    .FirstOrDefault(),
+                AvailabilityStatus = j.RaceRegistrations.Any(r =>
+                        BusyRegistrationStatuses.Contains(r.Status) &&
+                        r.Race.RaceDate >= raceDateStart &&
+                        r.Race.RaceDate < raceDateEnd &&
+                        r.Race.Status != RaceStatuses.Cancelled)
+                    ? JockeyAvailabilityStatuses.RacingDay
+                    : j.JockeyAvailabilities
+                        .Where(a => a.AvailableDate == raceDate)
+                        .Select(a => a.Status)
+                        .FirstOrDefault(),
                 DistanceSkillLevel = j.JockeyDistanceExperiences
                     .Where(e => e.DistanceMeters == registration.DistanceMeters)
                     .Select(e => e.SkillLevel)
@@ -470,12 +484,13 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         AssignmentRegistrationData registration)
     {
         var distanceSkillLevel = candidate.DistanceSkillLevel ?? JockeyDistanceSkillLevels.NoExperience;
-        var availabilityScore = candidate.AvailabilityStatus == JockeyAvailabilityStatuses.Unavailable ? 0 : 100;
-        var weightScore = 100;
-        var experienceScore = Math.Min(100, Math.Max(0, candidate.YearsOfExperience * 10));
+        var normalizedAvailability = candidate.AvailabilityStatus ?? JockeyAvailabilityStatuses.Available;
+        var availabilityScore = normalizedAvailability == JockeyAvailabilityStatuses.Available ? 30 : 0;
+        var weightScore = ScoreWeight(candidate.WeightKg);
+        var experienceScore = ScoreExperience(candidate.YearsOfExperience);
         var distanceScore = ScoreDistanceSkill(distanceSkillLevel);
         var breedExperienceScore = ScoreBreedSkill(candidate.BreedSkillLevel);
-        var totalScore = (availabilityScore + weightScore + experienceScore + distanceScore + breedExperienceScore) / 5;
+        var totalScore = availabilityScore + distanceScore + breedExperienceScore + experienceScore + weightScore;
         var cannotInviteReason = GetCannotInviteReason(candidate, registration);
 
         return new OwnerJockeyCandidateResponse
@@ -488,7 +503,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             HealthStatus = candidate.HealthStatus,
             IsActive = candidate.IsActive,
             UserStatus = candidate.UserStatus,
-            AvailabilityStatus = candidate.AvailabilityStatus ?? JockeyAvailabilityStatuses.Available,
+            AvailabilityStatus = normalizedAvailability,
             DistanceSkillLevel = distanceSkillLevel,
             BreedSkillLevel = candidate.BreedSkillLevel,
             AvailabilityScore = availabilityScore,
@@ -498,6 +513,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             BreedExperienceScore = breedExperienceScore,
             TotalScore = totalScore,
             RecommendationLevel = GetRecommendationLevel(totalScore),
+            PrimaryReason = GetPrimaryReason(availabilityScore, distanceScore, breedExperienceScore, experienceScore),
             AlreadyInvited = candidate.InvitationStatus != null,
             InvitationStatus = candidate.InvitationStatus,
             CanInvite = cannotInviteReason == null,
@@ -509,39 +525,40 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
     {
         if (candidate.UserStatus != UserStatuses.Active || !candidate.IsActive)
         {
-            return "Jockey chưa Active.";
-        }
-
-        if (!HorseHealthStatuses.CanRace(candidate.HealthStatus))
-        {
-            return "Jockey không đủ điều kiện sức khỏe.";
+            return "Jockey is not active";
         }
 
         if (registration.AssignedJockeyId != null)
         {
-            return "Đăng ký race đã có jockey.";
+            return "Registration already has an assigned jockey";
         }
 
         if (registration.RaceStatus == RaceStatuses.Completed ||
             registration.RaceStatus == RaceStatuses.Cancelled)
         {
-            return "Race đã hoàn thành hoặc đã bị hủy.";
+            return "Race is completed or cancelled";
         }
 
-        if (candidate.AvailabilityStatus == JockeyAvailabilityStatuses.Unavailable)
+        if (candidate.AvailabilityStatus == JockeyAvailabilityStatuses.Unavailable ||
+            candidate.AvailabilityStatus == JockeyAvailabilityStatuses.RacingDay)
         {
-            return "Jockey không rảnh vào ngày race.";
+            return "Jockey is unavailable on race day";
+        }
+
+        if (!HorseHealthStatuses.CanRace(candidate.HealthStatus))
+        {
+            return "Jockey health status is not eligible";
         }
 
         if (candidate.InvitationStatus == InvitationStatuses.Pending ||
             candidate.InvitationStatus == InvitationStatuses.Accepted)
         {
-            return "Jockey đã có lời mời cho đăng ký này.";
+            return "Jockey has already been invited";
         }
 
         if (candidate.InvitationStatus != null)
         {
-            return "Jockey đã từng được mời cho đăng ký này.";
+            return "Jockey has already been invited";
         }
 
         return null;
@@ -551,9 +568,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
     {
         return skillLevel switch
         {
-            JockeyDistanceSkillLevels.Expert => 100,
-            JockeyDistanceSkillLevels.Good => 75,
-            JockeyDistanceSkillLevels.Basic => 50,
+            JockeyDistanceSkillLevels.Expert => 25,
+            JockeyDistanceSkillLevels.Good => 18,
+            JockeyDistanceSkillLevels.Basic => 10,
             _ => 0
         };
     }
@@ -562,26 +579,100 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
     {
         return skillLevel switch
         {
-            JockeyBreedSkillLevels.Expert => 100,
-            JockeyBreedSkillLevels.Good => 75,
-            JockeyBreedSkillLevels.Basic => 50,
+            JockeyBreedSkillLevels.Expert => 20,
+            JockeyBreedSkillLevels.Good => 14,
+            JockeyBreedSkillLevels.Basic => 8,
             _ => 0
         };
+    }
+
+    private static int ScoreExperience(int yearsOfExperience)
+    {
+        if (yearsOfExperience >= 5)
+        {
+            return 15;
+        }
+
+        if (yearsOfExperience >= 3)
+        {
+            return 10;
+        }
+
+        if (yearsOfExperience >= 1)
+        {
+            return 5;
+        }
+
+        return 0;
+    }
+
+    private static int ScoreWeight(decimal weightKg)
+    {
+        if (weightKg >= 45 && weightKg <= 60)
+        {
+            return 10;
+        }
+
+        if (weightKg > 60 && weightKg <= 65)
+        {
+            return 7;
+        }
+
+        return 4;
     }
 
     private static string GetRecommendationLevel(int totalScore)
     {
         if (totalScore >= 80)
         {
-            return "HighlyRecommended";
+            return "Excellent";
         }
 
         if (totalScore >= 60)
         {
-            return "Recommended";
+            return "Good";
         }
 
-        return "Normal";
+        if (totalScore >= 40)
+        {
+            return "Fair";
+        }
+
+        return "Low";
+    }
+
+    private static string GetPrimaryReason(
+        int availabilityScore,
+        int distanceScore,
+        int breedExperienceScore,
+        int experienceScore)
+    {
+        if (distanceScore >= 18 && breedExperienceScore >= 14)
+        {
+            return "Strong distance skill and breed experience";
+        }
+
+        if (availabilityScore == 0)
+        {
+            return "Jockey is not available on race day";
+        }
+
+        if (distanceScore >= 18)
+        {
+            return "Strong distance skill";
+        }
+
+        if (breedExperienceScore >= 14)
+        {
+            return "Strong breed experience";
+        }
+
+        if (experienceScore >= 10)
+        {
+            return "Experienced jockey";
+        }
+
+        return "Basic match";
     }
 
     private static bool IsInactiveFilter(string? status)

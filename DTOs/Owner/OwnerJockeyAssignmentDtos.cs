@@ -44,6 +44,7 @@ public class OwnerJockeyCandidateResponse
     public int TotalScore { get; set; }
     public int RankNo { get; set; }
     public string RecommendationLevel { get; set; } = null!;
+    public string PrimaryReason { get; set; } = null!;
     public bool AlreadyInvited { get; set; }
     public string? InvitationStatus { get; set; }
     public bool CanInvite { get; set; }
