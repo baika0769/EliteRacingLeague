@@ -80,7 +80,7 @@ public class JockeyProfileController : ControllerBase
         {
             UserId = user.UserId,
             JockeyId = jockey.JockeyId,
-            JockeyCode = null,
+            JockeyCode = $"J-{jockey.JockeyId:D5}",
             FullName = user.FullName,
             Email = user.Email,
             Phone = user.Phone,
