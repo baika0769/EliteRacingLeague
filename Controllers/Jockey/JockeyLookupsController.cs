@@ -29,6 +29,7 @@ public class JockeyLookupsController : ControllerBase
                 distanceMeters,
                 label = JockeyDistanceMeters.Labels[distanceMeters]
             }),
+            skillLevels = JockeyDistanceSkillLevels.All,
             distanceSkillLevels = JockeyDistanceSkillLevels.All,
             breedExperienceLevels = JockeyBreedSkillLevels.All
         });
