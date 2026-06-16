@@ -12,8 +12,7 @@ public static class UserStatuses
         Pending,
         Active,
         Inactive,
-        Banned,
-        Pending
+        Banned
     };
 
     public static bool IsValid(string? status)
