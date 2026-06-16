@@ -4,7 +4,8 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
-
+using System.Security.Claims;
+ 
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -90,7 +91,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var adminId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
             registration.Status = RaceRegistrationStatuses.Approved;
+            registration.ReviewedBy = adminId;
             registration.ReviewedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
