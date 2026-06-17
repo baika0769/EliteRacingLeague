@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep
+
 # User-specific files
 *.rsuser
 *.suo
