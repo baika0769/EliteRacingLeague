@@ -43,10 +43,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
-
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
-
                     EntriesText =
                         _context.RaceRegistrations
                             .Count(r => r.Race.TournamentId == t.TournamentId)
@@ -80,10 +78,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
-
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
-
                     EntriesText =
                         _context.RaceRegistrations
                             .Count(r => r.Race.TournamentId == t.TournamentId)
@@ -106,6 +102,22 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpPost]
         public async Task<IActionResult> CreateTournament([FromBody] AdminTournamentRequest request)
         {
+            if (string.IsNullOrWhiteSpace(request.TournamentName))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Tournament name is required"
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Location))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Location is required"
+                });
+            }
+
             if (request.RegistrationDeadline >= request.RaceDate)
             {
                 return BadRequest(new AdminActionResponse
@@ -114,19 +126,21 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.MaxHorses < 1 || request.MaxHorses > 16)
+            if (request.MaxHorses < 1 || request.MaxHorses > 20)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Max horses must be between 1 and 16"
+                    Message = "Max horses must be between 1 and 20"
                 });
             }
 
-            if (request.DistanceMeters <= 0)
+            if (request.DistanceMeters != 1000 &&
+                request.DistanceMeters != 1500 &&
+                request.DistanceMeters != 2400)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Distance must be greater than 0"
+                    Message = "Distance must be 1000, 1500, or 2400 meters"
                 });
             }
 
@@ -148,7 +162,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 {
                     TournamentName = request.TournamentName.Trim(),
                     Description = request.Description,
-                    Location = request.Location ?? string.Empty,
+                    Location = request.Location.Trim(),
                     StartDate = request.RegistrationDeadline,
                     EndDate = request.RaceDate,
                     MaxHorses = request.MaxHorses,
@@ -175,7 +189,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     DistanceMeters = request.DistanceMeters,
                     Location = tournament.Location,
                     MaxHorses = request.MaxHorses,
-                    Status = RaceStatuses.Open,
+                    Status = RaceStatuses.Scheduled,
                     JockeySelectionDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue),
                     PredictionDeadline = request.RaceDate.ToDateTime(TimeOnly.MinValue).AddHours(-1),
                     CreatedAt = DateTime.UtcNow,
@@ -187,12 +201,13 @@ namespace Eliteracingleague.API.Controllers.Admin
 
                 await transaction.CommitAsync();
 
-                return Ok(new AdminActionResponse
+                return Ok(new
                 {
-                    Message = "Tournament and race created successfully",
-                    Id = tournament.TournamentId,
-                    Name = tournament.TournamentName,
-                    Status = tournament.Status
+                    message = "Tournament and race created successfully",
+                    tournamentId = tournament.TournamentId,
+                    raceId = race.RaceId,
+                    name = tournament.TournamentName,
+                    status = tournament.Status
                 });
             }
             catch
@@ -217,6 +232,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (string.IsNullOrWhiteSpace(request.Location))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Location is required",
+                    Id = id
+                });
+            }
+
             if (request.RegistrationDeadline >= request.RaceDate)
             {
                 return BadRequest(new AdminActionResponse
@@ -230,18 +254,14 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Max horses must be between 1 and 20"
+                    Message = "Max horses must be between 1 and 20",
+                    Id = id
                 });
             }
 
-            tournament.TournamentName = request.TournamentName;
+            tournament.TournamentName = request.TournamentName.Trim();
             tournament.Description = request.Description;
-            if (string.IsNullOrWhiteSpace(request.Location))
-            {
-                return BadRequest("Location is required");
-            }
-
-            tournament.Location = request.Location;
+            tournament.Location = request.Location.Trim();
             tournament.StartDate = request.RegistrationDeadline;
             tournament.EndDate = request.RaceDate;
             tournament.MaxHorses = request.MaxHorses;
@@ -251,12 +271,28 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.MinHorseWeightKg = request.MinHorseWeightKg;
             tournament.MaxHorseWeightKg = request.MaxHorseWeightKg;
             tournament.Rules = request.Rules;
+
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
                 tournament.Status = request.Status;
             }
 
             tournament.UpdatedAt = DateTime.UtcNow;
+
+            var race = await _context.Races
+                .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
+
+            if (race != null)
+            {
+                race.RaceName = tournament.TournamentName;
+                race.RaceDate = request.RaceDate.ToDateTime(TimeOnly.MinValue);
+                race.DistanceMeters = request.DistanceMeters;
+                race.Location = tournament.Location;
+                race.MaxHorses = request.MaxHorses;
+                race.JockeySelectionDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
+                race.PredictionDeadline = request.RaceDate.ToDateTime(TimeOnly.MinValue).AddHours(-1);
+                race.UpdatedAt = DateTime.UtcNow;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -297,6 +333,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = tournament.Status
             });
         }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteTournament(int id)
         {
