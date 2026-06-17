@@ -1,172 +1,141 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn BE: tạo API upload file cho ảnh ngựa và hồ sơ Jockey.
+Giai đoạn sửa lỗi: Jockey health_status đang dùng sai constants của Horse.
 
 Mục tiêu:
 
-* Tạo API upload file dùng chung cho FE.
-* FE upload file lên BE, BE lưu file vào wwwroot/uploads/{category}.
-* BE trả về URL để FE lưu vào database thông qua các API hiện có.
+1. Tạo constants riêng cho Jockey health status.
+2. Sửa JockeyProfileController validate bằng constants mới.
+3. Sửa JockeyLookupsController trả health status đúng cho Jockey.
+4. Sửa các controller Owner đang kiểm tra Jockey có thể đua hay không.
+5. Kiểm tra AuthController khi tạo Jockey mặc định healthStatus phải là Unknown.
+
+Không được làm:
+
 * Không sửa database.
 * Không migration.
-* Không sửa frontend.
+* Không sửa constraint DB.
 * Không refactor lớn.
+* Không sửa HorseHealthStatuses.
+* Không sửa frontend.
 * Không in code dài ra terminal.
 
-File cần tạo/sửa:
+File cần tạo:
 
-1. Controllers/UploadsController.cs
-2. Program.cs
-3. .gitignore
-4. Tạo folder wwwroot/uploads
-5. Tạo file rỗng wwwroot/uploads/.gitkeep nếu cần
+* Constants/JockeyHealthStatuses.cs
 
-API cần tạo:
-POST /api/uploads
+Nội dung logic constants:
 
-Authorize:
+* Fit
+* Injured
+* Suspended
+* Unknown
 
-* API cần có [Authorize].
-* Token hợp lệ mới được upload.
+Constants cần có:
 
-Request:
-Content-Type: multipart/form-data
+* All
+* IsValid(string? status)
+* Normalize(string? status)
+* CanRace(string? status)
 
-Form-data:
+Yêu cầu:
 
-* file: File
-* category: Text
+* Normalize cho phép FE gửi fit, FIT, Fit nhưng backend lưu đúng chuẩn DB là Fit.
+* CanRace chỉ trả true khi healthStatus = Fit.
 
-Category hợp lệ:
+File cần sửa 1:
+Controllers/Jockey/JockeyProfileController.cs
 
-* horses
-* jockeys
+Trong hàm UpdateVerification:
 
-Rule upload:
+* Không được dùng HorseHealthStatuses để validate request.HealthStatus.
+* Phải dùng JockeyHealthStatuses.Normalize(request.HealthStatus).
+* Nếu Normalize trả null thì BadRequest:
+  message = "Tình trạng sức khỏe Jockey không hợp lệ."
+  allowedValues = JockeyHealthStatuses.All
+  nextStep = AuthNextSteps.CompleteJockeyProfile
+* Khi gán DB:
+  jockey.HealthStatus = normalizedHealthStatus;
+* Không lưu trực tiếp request.HealthStatus chưa normalize.
 
-* category = horses: chỉ cho ảnh
+File cần sửa 2:
+Controllers/Jockey/JockeyLookupsController.cs
 
-  * .jpg
-  * .jpeg
-  * .png
-  * .webp
-* category = jockeys: cho ảnh hoặc pdf
+Yêu cầu:
 
-  * .jpg
-  * .jpeg
-  * .png
-  * .webp
-  * .pdf
-* Dung lượng tối đa: 10MB.
-* Nếu file null hoặc rỗng: 400 BadRequest.
-* Nếu category sai: 400 BadRequest.
-* Nếu extension sai: 400 BadRequest.
-* Tên file lưu bằng Guid để tránh trùng.
-* Lưu file vào:
+* Nếu đang trả healthStatuses = HorseHealthStatuses.All thì đổi sang JockeyHealthStatuses.All.
+* Jockey Settings lookup phải trả:
+  Fit
+  Injured
+  Suspended
+  Unknown
+* Không trả health status của Horse như Healthy, NeedsCheck, Sick, Recovering, UnfitToRace.
 
-  * wwwroot/uploads/horses
-  * wwwroot/uploads/jockeys
-* Trả relative URL dạng:
+File cần sửa 3:
+Các controller Owner liên quan chọn/mời Jockey:
 
-  * /uploads/horses/{fileName}
-  * /uploads/jockeys/{fileName}
-* Trả thêm absoluteUrl.
+* Controllers/Owner/OwnerJockeyAssignmentController.cs
+* Controllers/Owner/OwnerRacesController.cs nếu có liên quan
 
-Code controller cần theo style project hiện có, nhưng logic chính tương đương:
+Yêu cầu:
 
-* Inject IWebHostEnvironment.
-* Nếu _env.WebRootPath null thì fallback về Directory.GetCurrentDirectory()/wwwroot.
-* Tạo folder nếu chưa tồn tại.
-* Lưu file bằng FileStream.
-* Response Ok gồm:
+* Tìm các chỗ đang dùng HorseHealthStatuses.CanRace(jockey.HealthStatus) hoặc candidate.HealthStatus để kiểm tra Jockey.
+* Nếu logic đó dùng cho Jockey thì đổi sang JockeyHealthStatuses.CanRace(...).
+* Jockey chỉ được đua khi health_status = Fit.
+* Những chỗ dùng HorseHealthStatuses cho Horse thì giữ nguyên.
 
-  * message
-  * url
-  * absoluteUrl
-  * fileName
-  * contentType
-  * size
+File cần kiểm tra 4:
+Controllers/AuthController.cs
 
-Response thành công ví dụ:
-{
-"message": "Upload file thành công.",
-"url": "/uploads/horses/abc123.jpg",
-"absoluteUrl": "http://localhost:5146/uploads/horses/abc123.jpg",
-"fileName": "abc123.jpg",
-"contentType": "image/jpeg",
-"size": 12345
-}
+Yêu cầu:
 
-Sửa Program.cs:
+* Khi register role Jockey và tạo profile Jockey, HealthStatus mặc định phải là:
+  JockeyHealthStatuses.Unknown
+* Nếu chưa import constants thì thêm using đúng.
+* Không được để Jockey HealthStatus = HorseHealthStatuses.Healthy.
+* Không được để giá trị mặc định làm lỗi CK_jockeys_health_status.
 
-* Tìm pipeline hiện có.
-* Đảm bảo có app.UseStaticFiles(); trước app.UseAuthentication().
-* Thứ tự mong muốn:
-  app.UseHttpsRedirection();
-  app.UseCors("AllowFrontend");
-  app.UseStaticFiles();
-  app.UseAuthentication();
-  app.UseAuthorization();
-  app.MapControllers();
+Search toàn project:
 
-Sửa .gitignore:
-Thêm:
-wwwroot/uploads/*
-!wwwroot/uploads/.gitkeep
-
-Tạo:
-
-* wwwroot/uploads/.gitkeep
-
-Yêu cầu bảo vệ:
-
-* Không sửa API horse hiện có.
-* Không sửa API jockey hiện có.
-* Không sửa entity/model.
-* Không sửa database.
-* Không sửa appsettings.json hoặc connection string.
-* Không ảnh hưởng Owner/Jockey/Admin flow khác.
+* Search HorseHealthStatuses.
+* Nếu dòng nào dùng cho Horse thì giữ nguyên.
+* Nếu dòng nào dùng cho jockey.HealthStatus, candidate.HealthStatus, request.HealthStatus trong JockeyProfileController thì đổi sang JockeyHealthStatuses.
 
 Test cần đạt:
 
-1. Upload horse image:
-   POST /api/uploads
-   Authorization: Bearer <token owner>
-   form-data:
+1. Register Jockey mới:
 
-* file = horse.jpg
-* category = horses
-  => 200 OK, trả url /uploads/horses/...
+* Không lỗi CK_jockeys_health_status.
+* jockeys.health_status = Unknown.
 
-2. Upload jockey pdf:
-   POST /api/uploads
-   Authorization: Bearer <token jockey>
-   form-data:
+2. Update hồ sơ Jockey với healthStatus = "Fit":
 
-* file = certificate.pdf
-* category = jockeys
-  => 200 OK, trả url /uploads/jockeys/...
+* Pass validate.
+* DB lưu Fit.
 
-3. Upload horses với pdf:
-   => 400 BadRequest.
+3. Update hồ sơ Jockey với healthStatus = "fit" hoặc "FIT":
 
-4. Upload category sai:
-   => 400 BadRequest.
+* Pass validate.
+* DB lưu Fit.
 
-5. Upload file trên 10MB:
-   => 400 BadRequest.
+4. Update hồ sơ Jockey với healthStatus = "Healthy":
 
-6. Sau upload, mở absoluteUrl trên browser phải xem được file.
+* Bị reject 400 vì Healthy là status của Horse, không phải Jockey.
 
-7. dotnet build không lỗi.
+5. Owner chọn Jockey:
 
-Sau khi sửa xong chỉ trả lời tối đa 8 dòng:
+* Jockey Fit => được chọn/mời nếu các điều kiện khác hợp lệ.
+* Jockey Unknown/Injured/Suspended => không được chọn/mời.
+
+Sau khi sửa xong chỉ trả lời tối đa 10 dòng:
 
 1. File đã tạo/sửa
-2. Route upload
-3. Category hỗ trợ
-4. Static files đã bật chưa
-5. .gitignore đã thêm chưa
-6. Test Postman cần chạy
-7. Build command
-8. Lỗi còn lại nếu có
+2. Constants JockeyHealthStatuses đã tạo chưa
+3. JockeyProfileController đã dùng Normalize chưa
+4. JockeyLookupsController đã trả đúng status Jockey chưa
+5. Owner controller đã dùng JockeyHealthStatuses.CanRace chưa
+6. AuthController register Jockey mặc định Unknown chưa
+7. Có giữ nguyên HorseHealthStatuses không
+8. Search HorseHealthStatuses còn sót chỗ Jockey nào không
+9. Build command
+10. Lỗi còn lại nếu có

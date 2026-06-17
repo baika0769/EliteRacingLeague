@@ -167,7 +167,7 @@ public class OwnerRacesController : OwnerBaseController
             });
         }
 
-        if (!HorseHealthStatuses.CanRace(jockey.HealthStatus))
+        if (!JockeyHealthStatuses.CanRace(jockey.HealthStatus))
         {
             return BadRequest(new
             {

@@ -538,7 +538,7 @@ public class AuthController : ControllerBase
                     JockeyId = user.UserId,
                     WeightKg = 50m,
                     YearsOfExperience = 0,
-                    HealthStatus = "Unknown",
+                    HealthStatus = JockeyHealthStatuses.Unknown,
                     CertificateNo = null,
                     CertificateFileUrl = null,
                     ProfileImageUrl = null,
