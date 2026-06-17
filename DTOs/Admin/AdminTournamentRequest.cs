@@ -9,6 +9,7 @@ public class AdminTournamentRequest
     public DateOnly RaceDate { get; set; }
     public DateOnly RegistrationDeadline { get; set; }
 
+    public int DistanceMeters { get; set; }
     public int MaxHorses { get; set; }
     public decimal PrizePool { get; set; }
 
