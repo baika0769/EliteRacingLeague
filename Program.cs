@@ -4,6 +4,7 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 using Eliteracingleague.API.Data;
 using Microsoft.EntityFrameworkCore;
+using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Email;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,6 +37,7 @@ builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<JockeyAccessService>();
 
 // JWT Authentication configuration
 builder.Services.AddAuthentication(options =>
@@ -110,6 +112,8 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
+
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
