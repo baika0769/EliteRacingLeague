@@ -440,6 +440,23 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
 
+        [HttpGet("referees")]
+        public async Task<IActionResult> GetRaceReferees()
+        {
+            var referees = await _context.Users
+                .Where(u => u.Role == UserRoles.RaceReferee && u.Status == UserStatuses.Active)
+                .Select(u => new
+                {
+                    refereeId = u.UserId,
+                    fullName = u.FullName,
+                    email = u.Email
+                })
+                .OrderBy(u => u.fullName)
+                .ToListAsync();
+
+            return Ok(referees);
+        }
+
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelTournament(int id)
         {
