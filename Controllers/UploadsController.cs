@@ -34,7 +34,8 @@ public class UploadsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Upload([FromForm] IFormFile? file, [FromForm] string? category)
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Upload(IFormFile? file, [FromForm] string? category)
     {
         if (file == null || file.Length == 0)
         {
