@@ -23,7 +23,7 @@ public class JockeyLookupsController : ControllerBase
     {
         return Ok(new
         {
-            healthStatuses = HorseHealthStatuses.All,
+            healthStatuses = JockeyHealthStatuses.All,
             distanceOptions = JockeyDistanceMeters.All.Select(distanceMeters => new
             {
                 distanceMeters,

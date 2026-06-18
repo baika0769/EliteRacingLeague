@@ -276,11 +276,13 @@ public class JockeyProfileController : ControllerBase
             });
         }
 
-        if (!HorseHealthStatuses.IsValid(request.HealthStatus))
+        var normalizedHealthStatus = JockeyHealthStatuses.Normalize(request.HealthStatus);
+        if (normalizedHealthStatus == null)
         {
             return BadRequest(new
             {
-                message = "Tình trạng sức khỏe không hợp lệ.",
+                message = "Tình trạng sức khỏe Jockey không hợp lệ.",
+                allowedValues = JockeyHealthStatuses.All,
                 nextStep = AuthNextSteps.CompleteJockeyProfile
             });
         }
@@ -374,7 +376,7 @@ public class JockeyProfileController : ControllerBase
 
         jockey.WeightKg = request.WeightKg;
         jockey.YearsOfExperience = request.YearsOfExperience;
-        jockey.HealthStatus = request.HealthStatus!;
+        jockey.HealthStatus = normalizedHealthStatus;
         jockey.CertificateNo = request.CertificateNo;
         jockey.CertificateFileUrl = request.CertificateFileUrl;
         jockey.ProfileImageUrl = request.ProfileImageUrl;

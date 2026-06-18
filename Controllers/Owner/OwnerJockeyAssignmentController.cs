@@ -297,7 +297,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
-        if (!HorseHealthStatuses.CanRace(jockey.HealthStatus))
+        if (!JockeyHealthStatuses.CanRace(jockey.HealthStatus))
         {
             return BadRequest(new
             {
@@ -592,7 +592,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Jockey already has a race on this day";
         }
 
-        if (!HorseHealthStatuses.CanRace(candidate.HealthStatus))
+        if (!JockeyHealthStatuses.CanRace(candidate.HealthStatus))
         {
             return "Jockey health status is not eligible";
         }
