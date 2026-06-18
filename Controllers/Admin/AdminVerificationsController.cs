@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.DTOs.Admin;
+using Eliteracingleague.API.Services;
+using JockeyEntity = Eliteracingleague.API.Models.Jockey;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
@@ -22,10 +24,9 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet]
         public async Task<IActionResult> GetVerifications()
         {
-            var users = await _context.Users
-                .Where(u =>
-                    u.Status == UserStatuses.Pending &&
-                    (u.Role == UserRoles.HorseOwner || u.Role == UserRoles.Jockey))
+            var owners = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.Status == UserStatuses.Pending && u.Role == UserRoles.HorseOwner)
                 .Select(u => new AdminVerificationResponse
                 {
                     UserId = u.UserId,
@@ -40,42 +41,22 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Address = _context.HorseOwners
                         .Where(o => o.OwnerId == u.UserId)
                         .Select(o => o.Address)
-                        .FirstOrDefault(),
-
-                    WeightKg = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (decimal?)j.WeightKg)
-                        .FirstOrDefault(),
-
-                    YearsOfExperience = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (int?)j.YearsOfExperience)
-                        .FirstOrDefault(),
-
-                    HealthStatus = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.HealthStatus)
-                        .FirstOrDefault(),
-
-                    CertificateNo = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateNo)
-                        .FirstOrDefault(),
-
-                    CertificateFileUrl = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateFileUrl)
                         .FirstOrDefault()
                 })
                 .ToListAsync();
 
-            return Ok(users);
+            var jockeys = await LoadPendingCompletedJockeyVerificationsAsync();
+
+            return Ok(owners.Concat(jockeys)
+                .OrderByDescending(v => v.CreatedAt)
+                .ToList());
         }
 
         [HttpGet("owners")]
         public async Task<IActionResult> GetOwnerVerifications()
         {
             var users = await _context.Users
+                .AsNoTracking()
                 .Where(u => u.Status == UserStatuses.Pending && u.Role == UserRoles.HorseOwner)
                 .Select(u => new AdminVerificationResponse
                 {
@@ -101,46 +82,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet("jockeys")]
         public async Task<IActionResult> GetJockeyVerifications()
         {
-            var users = await _context.Users
-                .Where(u => u.Status == UserStatuses.Pending && u.Role == UserRoles.Jockey)
-                .Select(u => new AdminVerificationResponse
-                {
-                    UserId = u.UserId,
-                    FullName = u.FullName,
-                    Email = u.Email,
-                    Phone = u.Phone,
-                    Role = u.Role,
-                    Status = u.Status,
-                    EmailVerified = u.EmailVerified,
-                    CreatedAt = u.CreatedAt,
-
-                    WeightKg = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (decimal?)j.WeightKg)
-                        .FirstOrDefault(),
-
-                    YearsOfExperience = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (int?)j.YearsOfExperience)
-                        .FirstOrDefault(),
-
-                    HealthStatus = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.HealthStatus)
-                        .FirstOrDefault(),
-
-                    CertificateNo = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateNo)
-                        .FirstOrDefault(),
-
-                    CertificateFileUrl = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateFileUrl)
-                        .FirstOrDefault()
-                })
-                .ToListAsync();
-
+            var users = await LoadPendingCompletedJockeyVerificationsAsync();
             return Ok(users);
         }
 
@@ -148,49 +90,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetVerificationById(int id)
         {
             var user = await _context.Users
-                .Where(u => u.UserId == id)
-                .Select(u => new AdminVerificationResponse
-                {
-                    UserId = u.UserId,
-                    FullName = u.FullName,
-                    Email = u.Email,
-                    Phone = u.Phone,
-                    Role = u.Role,
-                    Status = u.Status,
-                    EmailVerified = u.EmailVerified,
-                    CreatedAt = u.CreatedAt,
-
-                    Address = _context.HorseOwners
-                        .Where(o => o.OwnerId == u.UserId)
-                        .Select(o => o.Address)
-                        .FirstOrDefault(),
-
-                    WeightKg = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (decimal?)j.WeightKg)
-                        .FirstOrDefault(),
-
-                    YearsOfExperience = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => (int?)j.YearsOfExperience)
-                        .FirstOrDefault(),
-
-                    HealthStatus = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.HealthStatus)
-                        .FirstOrDefault(),
-
-                    CertificateNo = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateNo)
-                        .FirstOrDefault(),
-
-                    CertificateFileUrl = _context.Jockeys
-                        .Where(j => j.JockeyId == u.UserId)
-                        .Select(j => j.CertificateFileUrl)
-                        .FirstOrDefault()
-                })
-                .FirstOrDefaultAsync();
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.UserId == id);
 
             if (user == null)
             {
@@ -201,7 +102,51 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            return Ok(user);
+            if (user.Role == UserRoles.Jockey)
+            {
+                var jockey = await LoadJockeyVerificationQuery()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(j => j.JockeyId == id);
+
+                if (jockey == null)
+                {
+                    return NotFound(new AdminActionResponse
+                    {
+                        Message = "Jockey profile not found",
+                        Id = id
+                    });
+                }
+
+                return Ok(MapJockeyVerification(jockey));
+            }
+
+            if (user.Role == UserRoles.HorseOwner)
+            {
+                var ownerAddress = await _context.HorseOwners
+                    .AsNoTracking()
+                    .Where(o => o.OwnerId == user.UserId)
+                    .Select(o => o.Address)
+                    .FirstOrDefaultAsync();
+
+                return Ok(new AdminVerificationResponse
+                {
+                    UserId = user.UserId,
+                    FullName = user.FullName,
+                    Email = user.Email,
+                    Phone = user.Phone,
+                    Role = user.Role,
+                    Status = user.Status,
+                    EmailVerified = user.EmailVerified,
+                    CreatedAt = user.CreatedAt,
+                    Address = ownerAddress
+                });
+            }
+
+            return BadRequest(new AdminActionResponse
+            {
+                Message = "Only HorseOwner or Jockey can be verified",
+                Id = id
+            });
         }
 
         [HttpPut("{id}/approve")]
@@ -227,13 +172,13 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            user.Status = UserStatuses.Active;
-            user.EmailVerified = true;
-            user.UpdatedAt = DateTime.UtcNow;
+            bool? isActive = null;
 
             if (user.Role == UserRoles.Jockey)
             {
-                var jockey = await _context.Jockeys.FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
+                var jockey = await _context.Jockeys
+                    .Include(j => j.JockeyDistanceExperiences)
+                    .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
 
                 if (jockey == null)
                 {
@@ -244,8 +189,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                     });
                 }
 
+                if (!JockeyProfileService.IsJockeyProfileCompleted(jockey))
+                {
+                    return BadRequest(new AdminActionResponse
+                    {
+                        Message = "Jockey profile is not completed",
+                        Id = id,
+                        Status = user.Status,
+                        IsActive = jockey.IsActive
+                    });
+                }
+
                 jockey.IsActive = true;
+                isActive = jockey.IsActive;
             }
+
+            user.Status = UserStatuses.Active;
+            user.EmailVerified = true;
+            user.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -254,7 +215,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Message = "Verification approved successfully",
                 Id = user.UserId,
                 Name = user.FullName,
-                Status = user.Status
+                Status = user.Status,
+                IsActive = isActive
             });
         }
 
@@ -281,12 +243,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            user.Status = UserStatuses.Inactive;
-            user.UpdatedAt = DateTime.UtcNow;
+            bool? isActive = null;
 
             if (user.Role == UserRoles.Jockey)
             {
-                var jockey = await _context.Jockeys.FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
+                var jockey = await _context.Jockeys
+                    .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
 
                 if (jockey == null)
                 {
@@ -298,7 +260,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 }
 
                 jockey.IsActive = false;
+                isActive = jockey.IsActive;
             }
+
+            user.Status = UserStatuses.Inactive;
+            user.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -307,8 +273,95 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Message = "Verification rejected successfully",
                 Id = user.UserId,
                 Name = user.FullName,
-                Status = user.Status
+                Status = user.Status,
+                IsActive = isActive
             });
+        }
+
+        private async Task<List<AdminVerificationResponse>> LoadPendingCompletedJockeyVerificationsAsync()
+        {
+            var jockeys = await LoadJockeyVerificationQuery()
+                .AsNoTracking()
+                .Where(j =>
+                    j.JockeyNavigation.Role == UserRoles.Jockey &&
+                    j.JockeyNavigation.Status == UserStatuses.Pending &&
+                    !j.IsActive)
+                .OrderByDescending(j => j.JockeyNavigation.CreatedAt)
+                .ToListAsync();
+
+            return jockeys
+                .Where(j => JockeyProfileService.IsJockeyProfileCompleted(j))
+                .Select(j => MapJockeyVerification(j))
+                .ToList();
+        }
+
+        private IQueryable<JockeyEntity> LoadJockeyVerificationQuery()
+        {
+            return _context.Jockeys
+                .Include(j => j.JockeyNavigation)
+                .Include(j => j.JockeyDistanceExperiences)
+                .Include(j => j.JockeyBreedExperiences)
+                    .ThenInclude(e => e.Breed);
+        }
+
+        private static AdminVerificationResponse MapJockeyVerification(JockeyEntity jockey)
+        {
+            return new AdminVerificationResponse
+            {
+                UserId = jockey.JockeyId,
+                JockeyId = jockey.JockeyId,
+                JockeyCode = $"J-{jockey.JockeyId:D5}",
+
+                FullName = jockey.JockeyNavigation.FullName,
+                Email = jockey.JockeyNavigation.Email,
+                Phone = jockey.JockeyNavigation.Phone,
+                Role = jockey.JockeyNavigation.Role,
+                Status = jockey.JockeyNavigation.Status,
+                EmailVerified = jockey.JockeyNavigation.EmailVerified,
+                CreatedAt = jockey.JockeyNavigation.CreatedAt,
+
+                IsActive = jockey.IsActive,
+                ProfileImageUrl = jockey.ProfileImageUrl,
+                IdCardFrontUrl = jockey.IdCardFrontUrl,
+                IdCardBackUrl = jockey.IdCardBackUrl,
+                CertificateNo = jockey.CertificateNo,
+                CertificateFileUrl = jockey.CertificateFileUrl,
+                HealthCertificateUrl = jockey.HealthCertificateUrl,
+                WeightKg = jockey.WeightKg,
+                HealthStatus = jockey.HealthStatus,
+                YearsOfExperience = jockey.YearsOfExperience,
+
+                DistanceExperiences = jockey.JockeyDistanceExperiences
+                    .OrderBy(e => e.DistanceMeters)
+                    .Select(e => new AdminVerificationDistanceExperienceResponse
+                    {
+                        DistanceMeters = e.DistanceMeters,
+                        Label = GetDistanceLabel(e.DistanceMeters),
+                        SkillLevel = e.SkillLevel
+                    })
+                    .ToList(),
+
+                BreedExperiences = jockey.JockeyBreedExperiences
+                    .OrderBy(e => e.Breed.BreedName)
+                    .Select(e => new AdminVerificationBreedExperienceResponse
+                    {
+                        BreedId = e.BreedId,
+                        BreedName = e.Breed.BreedName,
+                        ExperienceLevel = e.ExperienceLevel
+                    })
+                    .ToList()
+            };
+        }
+
+        private static string GetDistanceLabel(int distanceMeters)
+        {
+            return distanceMeters switch
+            {
+                1000 => "1000m Sprint",
+                1500 => "1500m Mid",
+                2400 => "2400m Endurance",
+                _ => $"{distanceMeters}m"
+            };
         }
     }
 }
