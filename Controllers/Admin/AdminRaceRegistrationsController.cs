@@ -107,6 +107,31 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
 
+        [HttpGet("pending")]
+        public async Task<IActionResult> GetPendingRegistrations()
+        {
+            var registrations = await _context.RaceRegistrations
+                .Where(r => r.Status == RaceRegistrationStatuses.Pending)
+                .Select(r => new AdminRegistrationResponse
+                {
+                    RegistrationId = r.RegistrationId,
+                    RaceId = r.RaceId,
+                    HorseId = r.HorseId,
+                    OwnerId = r.OwnerId,
+                    JockeyId = r.JockeyId,
+                    Status = r.Status,
+                    SubmittedAt = r.SubmittedAt,
+                    ReviewedBy = r.ReviewedBy,
+                    ReviewedAt = r.ReviewedAt,
+                    JockeyConfirmedAt = r.JockeyConfirmedAt,
+                    AdminNote = r.AdminNote
+                })
+                .ToListAsync();
+
+            return Ok(registrations);
+        }
+
+
         [HttpPut("{id}/reject")]
         public async Task<IActionResult> RejectRegistration(int id)
         {
