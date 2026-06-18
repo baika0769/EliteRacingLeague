@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.DTOs.Admin;
-using Eliteracingleague.API.Services;
 using JockeyEntity = Eliteracingleague.API.Models.Jockey;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -24,261 +23,137 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet]
         public async Task<IActionResult> GetVerifications()
         {
-            var owners = await _context.Users
-                .AsNoTracking()
-                .Where(u => u.Status == UserStatuses.Pending && u.Role == UserRoles.HorseOwner)
-                .Select(u => new AdminVerificationResponse
-                {
-                    UserId = u.UserId,
-                    FullName = u.FullName,
-                    Email = u.Email,
-                    Phone = u.Phone,
-                    Role = u.Role,
-                    Status = u.Status,
-                    EmailVerified = u.EmailVerified,
-                    CreatedAt = u.CreatedAt,
-
-                    Address = _context.HorseOwners
-                        .Where(o => o.OwnerId == u.UserId)
-                        .Select(o => o.Address)
-                        .FirstOrDefault()
-                })
-                .ToListAsync();
-
-            var jockeys = await LoadPendingCompletedJockeyVerificationsAsync();
-
-            return Ok(owners.Concat(jockeys)
-                .OrderByDescending(v => v.CreatedAt)
-                .ToList());
+            var jockeys = await LoadPendingJockeyVerificationsAsync();
+            return Ok(jockeys);
         }
 
         [HttpGet("owners")]
-        public async Task<IActionResult> GetOwnerVerifications()
+        public IActionResult GetOwnerVerifications()
         {
-            var users = await _context.Users
-                .AsNoTracking()
-                .Where(u => u.Status == UserStatuses.Pending && u.Role == UserRoles.HorseOwner)
-                .Select(u => new AdminVerificationResponse
-                {
-                    UserId = u.UserId,
-                    FullName = u.FullName,
-                    Email = u.Email,
-                    Phone = u.Phone,
-                    Role = u.Role,
-                    Status = u.Status,
-                    EmailVerified = u.EmailVerified,
-                    CreatedAt = u.CreatedAt,
-
-                    Address = _context.HorseOwners
-                        .Where(o => o.OwnerId == u.UserId)
-                        .Select(o => o.Address)
-                        .FirstOrDefault()
-                })
-                .ToListAsync();
-
-            return Ok(users);
+            // Flow mới: HorseOwner không cần Admin duyệt.
+            // Giữ endpoint này để FE cũ không lỗi.
+            return Ok(new List<AdminVerificationResponse>());
         }
 
         [HttpGet("jockeys")]
         public async Task<IActionResult> GetJockeyVerifications()
         {
-            var users = await LoadPendingCompletedJockeyVerificationsAsync();
-            return Ok(users);
+            var jockeys = await LoadPendingJockeyVerificationsAsync();
+            return Ok(jockeys);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetVerificationById(int id)
         {
-            var user = await _context.Users
+            var jockey = await LoadJockeyVerificationQuery()
                 .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.UserId == id);
+                .FirstOrDefaultAsync(j =>
+                    j.JockeyId == id &&
+                    j.JockeyNavigation.Role == UserRoles.Jockey);
 
-            if (user == null)
+            if (jockey == null)
             {
                 return NotFound(new AdminActionResponse
                 {
-                    Message = "Verification user not found",
+                    Message = "Jockey verification not found",
                     Id = id
                 });
             }
 
-            if (user.Role == UserRoles.Jockey)
-            {
-                var jockey = await LoadJockeyVerificationQuery()
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(j => j.JockeyId == id);
-
-                if (jockey == null)
-                {
-                    return NotFound(new AdminActionResponse
-                    {
-                        Message = "Jockey profile not found",
-                        Id = id
-                    });
-                }
-
-                return Ok(MapJockeyVerification(jockey));
-            }
-
-            if (user.Role == UserRoles.HorseOwner)
-            {
-                var ownerAddress = await _context.HorseOwners
-                    .AsNoTracking()
-                    .Where(o => o.OwnerId == user.UserId)
-                    .Select(o => o.Address)
-                    .FirstOrDefaultAsync();
-
-                return Ok(new AdminVerificationResponse
-                {
-                    UserId = user.UserId,
-                    FullName = user.FullName,
-                    Email = user.Email,
-                    Phone = user.Phone,
-                    Role = user.Role,
-                    Status = user.Status,
-                    EmailVerified = user.EmailVerified,
-                    CreatedAt = user.CreatedAt,
-                    Address = ownerAddress
-                });
-            }
-
-            return BadRequest(new AdminActionResponse
-            {
-                Message = "Only HorseOwner or Jockey can be verified",
-                Id = id
-            });
+            return Ok(MapJockeyVerification(jockey));
         }
 
         [HttpPut("{id}/approve")]
         public async Task<IActionResult> ApproveVerification(int id)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+            var jockey = await _context.Jockeys
+                .Include(j => j.JockeyNavigation)
+                .FirstOrDefaultAsync(j =>
+                    j.JockeyId == id &&
+                    j.JockeyNavigation.Role == UserRoles.Jockey);
 
-            if (user == null)
+            if (jockey == null)
             {
                 return NotFound(new AdminActionResponse
                 {
-                    Message = "User not found",
+                    Message = "Jockey verification not found",
                     Id = id
                 });
             }
 
-            if (user.Role != UserRoles.HorseOwner && user.Role != UserRoles.Jockey)
+            var user = jockey.JockeyNavigation;
+
+            if (user.Status == UserStatuses.Banned)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Only HorseOwner or Jockey can be verified",
-                    Id = id
+                    Message = "Banned account cannot be approved",
+                    Id = id,
+                    Name = user.FullName,
+                    Status = user.Status,
+                    IsActive = jockey.IsActive
                 });
             }
 
-            bool? isActive = null;
-
-            if (user.Role == UserRoles.Jockey)
-            {
-                var jockey = await _context.Jockeys
-                    .Include(j => j.JockeyDistanceExperiences)
-                    .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
-
-                if (jockey == null)
-                {
-                    return NotFound(new AdminActionResponse
-                    {
-                        Message = "Jockey profile not found",
-                        Id = id
-                    });
-                }
-
-                if (!JockeyProfileService.IsJockeyProfileCompleted(jockey))
-                {
-                    return BadRequest(new AdminActionResponse
-                    {
-                        Message = "Jockey profile is not completed",
-                        Id = id,
-                        Status = user.Status,
-                        IsActive = jockey.IsActive
-                    });
-                }
-
-                jockey.IsActive = true;
-                isActive = jockey.IsActive;
-            }
-
+            // Flow mới:
+            // Admin duyệt tài khoản Jockey trước.
+            // Không bắt Jockey hoàn thiện hồ sơ trước khi approve.
             user.Status = UserStatuses.Active;
             user.EmailVerified = true;
             user.UpdatedAt = DateTime.UtcNow;
+
+            jockey.IsActive = true;
 
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
             {
-                Message = "Verification approved successfully",
+                Message = "Jockey verification approved successfully",
                 Id = user.UserId,
                 Name = user.FullName,
                 Status = user.Status,
-                IsActive = isActive
+                IsActive = jockey.IsActive
             });
         }
 
         [HttpPut("{id}/reject")]
         public async Task<IActionResult> RejectVerification(int id)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == id);
+            var jockey = await _context.Jockeys
+                .Include(j => j.JockeyNavigation)
+                .FirstOrDefaultAsync(j =>
+                    j.JockeyId == id &&
+                    j.JockeyNavigation.Role == UserRoles.Jockey);
 
-            if (user == null)
+            if (jockey == null)
             {
                 return NotFound(new AdminActionResponse
                 {
-                    Message = "User not found",
+                    Message = "Jockey verification not found",
                     Id = id
                 });
             }
 
-            if (user.Role != UserRoles.HorseOwner && user.Role != UserRoles.Jockey)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Only HorseOwner or Jockey can be verified",
-                    Id = id
-                });
-            }
-
-            bool? isActive = null;
-
-            if (user.Role == UserRoles.Jockey)
-            {
-                var jockey = await _context.Jockeys
-                    .FirstOrDefaultAsync(j => j.JockeyId == user.UserId);
-
-                if (jockey == null)
-                {
-                    return NotFound(new AdminActionResponse
-                    {
-                        Message = "Jockey profile not found",
-                        Id = id
-                    });
-                }
-
-                jockey.IsActive = false;
-                isActive = jockey.IsActive;
-            }
+            var user = jockey.JockeyNavigation;
 
             user.Status = UserStatuses.Inactive;
             user.UpdatedAt = DateTime.UtcNow;
+
+            jockey.IsActive = false;
 
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
             {
-                Message = "Verification rejected successfully",
+                Message = "Jockey verification rejected successfully",
                 Id = user.UserId,
                 Name = user.FullName,
                 Status = user.Status,
-                IsActive = isActive
+                IsActive = jockey.IsActive
             });
         }
 
-        private async Task<List<AdminVerificationResponse>> LoadPendingCompletedJockeyVerificationsAsync()
+        private async Task<List<AdminVerificationResponse>> LoadPendingJockeyVerificationsAsync()
         {
             var jockeys = await LoadJockeyVerificationQuery()
                 .AsNoTracking()
@@ -290,8 +165,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 .ToListAsync();
 
             return jockeys
-                .Where(j => JockeyProfileService.IsJockeyProfileCompleted(j))
-                .Select(j => MapJockeyVerification(j))
+                .Select(MapJockeyVerification)
                 .ToList();
         }
 
