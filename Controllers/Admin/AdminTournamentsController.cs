@@ -457,6 +457,67 @@ namespace Eliteracingleague.API.Controllers.Admin
             return Ok(referees);
         }
 
+        [HttpPut("{id}/assign-referee")]
+        public async Task<IActionResult> AssignReferee(
+    int id,
+    [FromBody] AssignRefereeRequest request)
+        {
+            var race = await _context.Races
+                .FirstOrDefaultAsync(r => r.TournamentId == id);
+
+            if (race == null)
+            {
+                return NotFound(new
+                {
+                    message = "Race not found"
+                });
+            }
+
+            var referee = await _context.RaceReferees
+                .FirstOrDefaultAsync(r => r.RefereeId == request.RefereeId);
+
+            if (referee == null)
+            {
+                return BadRequest(new
+                {
+                    message = "Referee not found"
+                });
+            }
+
+            var existing = await _context.RefereeAssignments
+                .FirstOrDefaultAsync(x => x.RaceId == race.RaceId);
+
+            if (existing != null)
+            {
+                existing.RefereeId = request.RefereeId;
+                existing.AssignedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                var adminId = int.Parse(
+                    User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!
+                        .Value);
+
+                _context.RefereeAssignments.Add(
+                    new RefereeAssignment
+                    {
+                        RaceId = race.RaceId,
+                        RefereeId = request.RefereeId,
+                        AssignedBy = adminId,
+                        Status = "Assigned",
+                        AssignedAt = DateTime.UtcNow
+                    });
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = "Referee assigned successfully"
+            });
+        }
+
+
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelTournament(int id)
         {

@@ -132,7 +132,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
                 t.Race != null &&
-                t.Race.Status == RaceStatuses.Open &&
+                t.Race.Status == RaceStatuses.Scheduled &&
                 t.Race.RaceDate >= today)
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
@@ -226,7 +226,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             });
         }
 
-        if (race.Status != RaceStatuses.Open)
+        if (race.Status != RaceStatuses.Scheduled)
         {
             return BadRequest(new
             {
