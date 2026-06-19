@@ -20,5 +20,6 @@
         public DateTime CreatedAt { get; set; }
         public int EntriesCount { get; set; }
         public string EntriesText { get; set; } = string.Empty;
+        public string Referee { get; set; } = "Unassigned";
     }
 }

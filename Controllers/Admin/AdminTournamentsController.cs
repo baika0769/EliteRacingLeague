@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
+using System.Globalization;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
@@ -25,6 +26,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetTournaments()
         {
             var tournaments = await _context.Tournaments
+                .AsNoTracking()
                 .Select(t => new AdminTournamentResponse
                 {
                     TournamentId = t.TournamentId,
@@ -43,12 +45,21 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
+
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
+
                     EntriesText =
                         _context.RaceRegistrations
                             .Count(r => r.Race.TournamentId == t.TournamentId)
-                        + "/" + t.MaxHorses
+                        + "/" + t.MaxHorses,
+
+                    Referee = t.Race == null
+                        ? "Unassigned"
+                        : t.Race.RefereeAssignments
+                            .OrderByDescending(a => a.AssignedAt)
+                            .Select(a => a.Referee.Referee.FullName)
+                            .FirstOrDefault() ?? "Unassigned"
                 })
                 .OrderByDescending(t => t.TournamentId)
                 .ToListAsync();
@@ -148,7 +159,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 _context.Tournaments.Add(tournament);
                 await _context.SaveChangesAsync();
 
-                var raceDateTime = request.RaceDate.ToDateTime(TimeOnly.MinValue);
+                var raceDateTime = BuildRaceDateTime(request);
                 var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
                 var race = new Race
@@ -243,7 +254,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             var race = await _context.Races
                 .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
 
-            var raceDateTime = request.RaceDate.ToDateTime(TimeOnly.MinValue);
+            var raceDateTime = BuildRaceDateTime(request);
             var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
             if (race == null)
@@ -568,6 +579,38 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
 
+        private static readonly string[] RaceStartTimeFormats =
+{
+    "HH:mm",
+    "H:mm",
+    "HH:mm:ss",
+    "H:mm:ss"
+};
+
+        private static bool TryParseRaceStartTime(string? value, out TimeOnly raceStartTime)
+        {
+            raceStartTime = default;
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return TimeOnly.TryParseExact(
+                value.Trim(),
+                RaceStartTimeFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out raceStartTime);
+        }
+
+        private static DateTime BuildRaceDateTime(AdminTournamentRequest request)
+        {
+            TryParseRaceStartTime(request.RaceStartTime, out var raceStartTime);
+
+            return request.RaceDate.ToDateTime(raceStartTime);
+        }
+
         private IActionResult? ValidateTournamentRequest(AdminTournamentRequest request, int id)
         {
             if (string.IsNullOrWhiteSpace(request.TournamentName))
@@ -593,6 +636,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                 return BadRequest(new AdminActionResponse
                 {
                     Message = "Registration deadline must be before race date",
+                    Id = id
+                });
+            }
+
+            if (!TryParseRaceStartTime(request.RaceStartTime, out _))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Race start time is required and must be in HH:mm format. Example: 14:30",
                     Id = id
                 });
             }

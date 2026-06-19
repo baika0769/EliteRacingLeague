@@ -7,6 +7,7 @@ public class AdminTournamentRequest
     public string? Location { get; set; }
 
     public DateOnly RaceDate { get; set; }
+    public string RaceStartTime { get; set; } = string.Empty;
     public DateOnly RegistrationDeadline { get; set; }
 
     public int DistanceMeters { get; set; }
