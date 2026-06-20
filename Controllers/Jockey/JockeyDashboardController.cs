@@ -48,6 +48,11 @@ public class JockeyDashboardController : ControllerBase
             .CountAsync(i => i.JockeyId == jockeyId
                 && i.Status == InvitationStatuses.Pending);
 
+        var acceptedInvitations = await _context.JockeyInvitations
+            .AsNoTracking()
+            .CountAsync(i => i.JockeyId == jockeyId
+                && i.Status == InvitationStatuses.Accepted);
+
         var acceptedRaces = await _context.RaceRegistrations
             .AsNoTracking()
             .CountAsync(r => r.JockeyId == jockeyId
@@ -57,7 +62,7 @@ public class JockeyDashboardController : ControllerBase
             .AsNoTracking()
             .Where(r => r.JockeyId == jockeyId
                 && AcceptedRegistrationStatuses.Contains(r.Status)
-                && r.Race.RaceDate > now
+                && r.Race.RaceDate >= now
                 && r.Race.Status != RaceStatuses.Cancelled
                 && r.Race.Status != RaceStatuses.Completed)
             .Select(r => r.RaceId)
@@ -76,6 +81,7 @@ public class JockeyDashboardController : ControllerBase
         return Ok(new JockeyDashboardResponse
         {
             PendingInvitations = pendingInvitations,
+            AcceptedInvitations = acceptedInvitations,
             AcceptedRaces = acceptedRaces,
             UpcomingRaces = upcomingRaces,
             CompletedRaces = completedRaces,
