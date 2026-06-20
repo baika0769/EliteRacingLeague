@@ -1,5 +1,22 @@
 namespace Eliteracingleague.API.DTOs.Owner;
 
+public class OwnerJockeyAssignmentRegistrationResponse
+{
+    public int RegistrationId { get; set; }
+    public string TournamentName { get; set; } = null!;
+    public string RaceName { get; set; } = null!;
+    public DateTime RaceDate { get; set; }
+    public string? Location { get; set; }
+    public int DistanceMeters { get; set; }
+    public int HorseId { get; set; }
+    public string HorseName { get; set; } = null!;
+    public string? HorseImageUrl { get; set; }
+    public string RegistrationStatus { get; set; } = null!;
+    public bool HasOfficialJockey { get; set; }
+    public int? OfficialJockeyId { get; set; }
+    public string? OfficialJockeyName { get; set; }
+}
+
 public class OwnerJockeyAssignmentContextResponse
 {
     public int RegistrationId { get; set; }
