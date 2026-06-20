@@ -81,13 +81,19 @@ public class JockeyInvitationsController : ControllerBase
             return profileError;
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-
         var invitation = await LoadOwnedInvitationAsync(id, jockeyId.Value);
 
         if (invitation == null)
         {
             return NotFound(new { message = "Không tìm thấy lời mời." });
+        }
+
+        if (invitation.Registration.JockeyId != null)
+        {
+            return BadRequest(new
+            {
+                message = "Official jockey has already been selected for this registration."
+            });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -99,34 +105,14 @@ public class JockeyInvitationsController : ControllerBase
             });
         }
 
-        var now = DateTime.UtcNow;
-        var registration = invitation.Registration;
-
         invitation.Status = InvitationStatuses.Accepted;
-        invitation.RespondedAt = now;
-
-        registration.JockeyId = jockeyId.Value;
-        registration.Status = RaceRegistrationStatuses.ReadyToRace;
-        registration.JockeyConfirmedAt = now;
-
-        var otherPendingInvitations = await _context.JockeyInvitations
-            .Where(i => i.RegistrationId == invitation.RegistrationId
-                && i.InvitationId != invitation.InvitationId
-                && i.Status == InvitationStatuses.Pending)
-            .ToListAsync();
-
-        foreach (var otherInvitation in otherPendingInvitations)
-        {
-            otherInvitation.Status = InvitationStatuses.Cancelled;
-            otherInvitation.RespondedAt = now;
-        }
+        invitation.RespondedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-        await transaction.CommitAsync();
 
         return Ok(new
         {
-            message = "Đã chấp nhận lời mời.",
+            message = "Đã chấp nhận lời mời. Vui lòng chờ Owner xác nhận chính thức.",
             status = invitation.Status
         });
     }
@@ -166,13 +152,6 @@ public class JockeyInvitationsController : ControllerBase
 
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
-
-        if (invitation.Registration.JockeyId == jockeyId.Value)
-        {
-            invitation.Registration.JockeyId = null;
-            invitation.Registration.JockeyConfirmedAt = null;
-            invitation.Registration.Status = RaceRegistrationStatuses.JockeyInvited;
-        }
 
         await _context.SaveChangesAsync();
 

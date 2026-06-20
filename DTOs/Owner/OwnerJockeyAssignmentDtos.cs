@@ -21,6 +21,13 @@ public class OwnerJockeyAssignmentContextResponse
     public bool HorseIsActive { get; set; }
     public int? AssignedJockeyId { get; set; }
     public string? AssignedJockeyName { get; set; }
+    public bool HasOfficialJockey { get; set; }
+    public int? OfficialJockeyId { get; set; }
+    public string? OfficialJockeyName { get; set; }
+    public string AssignmentStatus { get; set; } = null!;
+    public bool CanSendInvitation { get; set; }
+    public bool CanSignJockey { get; set; }
+    public bool CanChangeTournament { get; set; }
 }
 
 public class OwnerJockeyCandidateResponse
@@ -58,4 +65,56 @@ public class OwnerJockeyCandidateListResponse
     public int TotalItems { get; set; }
     public int TotalPages { get; set; }
     public List<OwnerJockeyCandidateResponse> Items { get; set; } = new();
+}
+
+public class OwnerJockeyAssignmentSummaryResponse
+{
+    public int InvitedCount { get; set; }
+    public int PendingCount { get; set; }
+    public int AcceptedCount { get; set; }
+}
+
+public class OwnerJockeyInvitationResponse
+{
+    public int InvitationId { get; set; }
+    public int JockeyId { get; set; }
+    public string JockeyName { get; set; } = null!;
+    public string? ProfileImageUrl { get; set; }
+    public int? ExperienceYears { get; set; }
+    public DateTime SentAt { get; set; }
+    public DateTime? RespondedAt { get; set; }
+    public string Status { get; set; } = null!;
+    public bool CanSign { get; set; }
+    public bool IsOfficial { get; set; }
+}
+
+public class OwnerJockeyInvitationDetailResponse
+{
+    public int InvitationId { get; set; }
+    public int RegistrationId { get; set; }
+    public int JockeyId { get; set; }
+    public string JockeyName { get; set; } = null!;
+    public string? ProfileImageUrl { get; set; }
+    public int? ExperienceYears { get; set; }
+    public decimal? WeightKg { get; set; }
+    public string? HealthStatus { get; set; }
+    public DateTime SentAt { get; set; }
+    public DateTime? RespondedAt { get; set; }
+    public string Status { get; set; } = null!;
+    public string HorseName { get; set; } = null!;
+    public string TournamentName { get; set; } = null!;
+    public DateTime RaceDate { get; set; }
+    public string? Message { get; set; }
+    public string? ResponseNote { get; set; }
+    public bool CanSign { get; set; }
+    public bool IsOfficial { get; set; }
+}
+
+public class OfficialJockeySelectionResponse
+{
+    public string Message { get; set; } = null!;
+    public int RegistrationId { get; set; }
+    public int JockeyId { get; set; }
+    public string JockeyName { get; set; } = null!;
+    public string RegistrationStatus { get; set; } = null!;
 }
