@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Models;
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -118,6 +119,60 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             result.Status = RaceResultStatuses.AdminApproved;
             result.PublishedAt = DateTime.UtcNow;
+
+            if (result.FinishPosition.HasValue)
+            {
+                var registration = await _context.RaceRegistrations
+                    .FirstOrDefaultAsync(r => r.RegistrationId == result.RegistrationId);
+
+                var prizeRule = await _context.PrizeRules
+                    .FirstOrDefaultAsync(r =>
+                        r.RaceId == result.RaceId &&
+                        r.RankPosition == result.FinishPosition.Value);
+
+                if (registration != null && prizeRule != null)
+                {
+                    var prizeAward = await _context.PrizeAwards
+                        .FirstOrDefaultAsync(a =>
+                            a.RaceId == result.RaceId &&
+                            a.RankPosition == result.FinishPosition.Value);
+
+                    prizeAward ??= await _context.PrizeAwards
+                        .FirstOrDefaultAsync(a =>
+                            a.RaceId == result.RaceId &&
+                            a.RegistrationId == result.RegistrationId);
+
+                    if (prizeAward == null)
+                    {
+                        prizeAward = new PrizeAward
+                        {
+                            RaceId = result.RaceId,
+                            RegistrationId = result.RegistrationId,
+                            OwnerId = registration.OwnerId,
+                            JockeyId = registration.JockeyId,
+                            RankPosition = result.FinishPosition.Value,
+                            PrizeAmount = prizeRule.PrizeAmount,
+                            Status = PrizeAwardStatuses.ReadyToClaim,
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        _context.PrizeAwards.Add(prizeAward);
+                    }
+                    else
+                    {
+                        prizeAward.RegistrationId = result.RegistrationId;
+                        prizeAward.OwnerId = registration.OwnerId;
+                        prizeAward.JockeyId = registration.JockeyId;
+                        prizeAward.RankPosition = result.FinishPosition.Value;
+                        prizeAward.PrizeAmount = prizeRule.PrizeAmount;
+
+                        if (prizeAward.Status != PrizeAwardStatuses.Paid)
+                        {
+                            prizeAward.Status = PrizeAwardStatuses.ReadyToClaim;
+                        }
+                    }
+                }
+            }
 
             await _context.SaveChangesAsync();
 
