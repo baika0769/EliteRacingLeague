@@ -13,6 +13,13 @@ namespace Eliteracingleague.API.Controllers.Owner;
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerJockeyAssignmentController : OwnerBaseController
 {
+    private static readonly string[] AvailableRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.Approved,
+        RaceRegistrationStatuses.JockeyInvited,
+        RaceRegistrationStatuses.ReadyToRace
+    };
+
     private static readonly string[] AssignableRegistrationStatuses =
     {
         RaceRegistrationStatuses.Approved,
@@ -27,6 +34,52 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
     public OwnerJockeyAssignmentController(EliteRacingLeagueContext context) : base(context)
     {
+    }
+
+    [HttpGet("registrations")]
+    public async Task<IActionResult> GetRegistrations()
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var registrations = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.OwnerId == ownerId.Value &&
+                AvailableRegistrationStatuses.Contains(r.Status))
+            .OrderBy(r => r.Race.RaceDate)
+            .Select(r => new OwnerJockeyAssignmentRegistrationResponse
+            {
+                RegistrationId = r.RegistrationId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                RaceName = r.Race.RaceName,
+                RaceDate = r.Race.RaceDate,
+                Location = r.Race.Location,
+                DistanceMeters = r.Race.DistanceMeters,
+                HorseId = r.HorseId,
+                HorseName = r.Horse.HorseName,
+                HorseImageUrl = r.Horse.ImageUrl,
+                RegistrationStatus = r.Status,
+                HasOfficialJockey = r.JockeyId.HasValue,
+                OfficialJockeyId = r.JockeyId,
+                OfficialJockeyName = r.JockeyId.HasValue
+                    ? r.Jockey!.JockeyNavigation.FullName
+                    : null
+            })
+            .ToListAsync();
+
+        return Ok(registrations);
     }
 
     [HttpGet("{registrationId:int}/context")]
