@@ -45,7 +45,7 @@ public class OwnerRacesController : OwnerBaseController
             .Where(r =>
                 r.RaceId == raceId &&
                 (
-                    r.Status == "Open" ||
+                    RaceStatuses.CanRegister(r.Status) ||
                     r.RaceRegistrations.Any(rr => rr.OwnerId == ownerId.Value)
                 ))
             .Select(r => new
