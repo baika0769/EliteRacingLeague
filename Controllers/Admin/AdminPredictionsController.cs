@@ -40,7 +40,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                         ? "High Accuracy"
                         : p.IsCorrect == false
                             ? "Low Accuracy"
-                            : PredictionStatuses.Pending,
+                            : RacePredictionStatuses.Pending,
                     pointsAwarded = p.PointsAwarded,
                     rewardAmount = p.RewardAmount,
                     rewardStatus = p.RewardStatus,
@@ -67,7 +67,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (!PredictionStatuses.All.Contains(request.Status))
+            if (!RacePredictionStatuses.All.Contains(request.Status))
             {
                 return BadRequest(new
                 {
@@ -78,12 +78,12 @@ namespace Eliteracingleague.API.Controllers.Admin
             prediction.Status = request.Status;
             prediction.UpdatedAt = DateTime.UtcNow;
 
-            if (request.Status == PredictionStatuses.Locked)
+            if (request.Status == RacePredictionStatuses.Locked)
             {
                 prediction.LockedAt = DateTime.UtcNow;
             }
 
-            if (request.Status == PredictionStatuses.Evaluated)
+            if (request.Status == RacePredictionStatuses.Evaluated)
             {
                 prediction.EvaluatedAt = DateTime.UtcNow;
             }

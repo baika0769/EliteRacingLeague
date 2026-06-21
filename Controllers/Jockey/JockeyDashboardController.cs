@@ -13,6 +13,13 @@ namespace Eliteracingleague.API.Controllers.Jockey;
 [Authorize(Roles = UserRoles.Jockey)]
 public class JockeyDashboardController : ControllerBase
 {
+    private static readonly string[] CompletedRaceStatuses =
+    {
+        RaceStatuses.Finished,
+        RaceStatuses.ResultPending,
+        RaceStatuses.Published
+    };
+
     private static readonly string[] AcceptedRegistrationStatuses =
     {
         RaceRegistrationStatuses.ReadyToRace
@@ -64,7 +71,7 @@ public class JockeyDashboardController : ControllerBase
                 && AcceptedRegistrationStatuses.Contains(r.Status)
                 && r.Race.RaceDate >= now
                 && r.Race.Status != RaceStatuses.Cancelled
-                && r.Race.Status != RaceStatuses.Completed)
+                && !CompletedRaceStatuses.Contains(r.Race.Status))
             .Select(r => r.RaceId)
             .Distinct()
             .CountAsync();
@@ -73,7 +80,7 @@ public class JockeyDashboardController : ControllerBase
             .AsNoTracking()
             .Where(r => r.JockeyId == jockeyId
                 && (r.Status == RaceRegistrationStatuses.Completed
-                    || r.Race.Status == RaceStatuses.Completed))
+                    || CompletedRaceStatuses.Contains(r.Race.Status)))
             .Select(r => r.RaceId)
             .Distinct()
             .CountAsync();

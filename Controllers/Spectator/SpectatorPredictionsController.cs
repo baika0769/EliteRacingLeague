@@ -34,11 +34,7 @@ public class SpectatorPredictionsController : ControllerBase
         if (race == null)
             return NotFound("Race not found.");
 
-        if (race.Status == RaceStatuses.Cancelled ||
-            race.Status == RaceStatuses.Ongoing ||
-            race.Status == RaceStatuses.Completed ||
-            race.Status == RaceStatuses.ResultPending ||
-            race.Status == RaceStatuses.Published)
+        if (RaceStatuses.IsClosedForPrediction(race.Status))
             return BadRequest("Prediction is not allowed for this race status.");
 
         var registration = await _context.RaceRegistrations

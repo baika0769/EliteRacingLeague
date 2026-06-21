@@ -2,10 +2,6 @@
 
 public static class RaceStatuses
 {
-    public const string Open = "Open";
-    public const string Closed = "Closed";
-    public const string Completed = "Completed";
-
     public const string Scheduled = "Scheduled";
     public const string AssignedReferee = "AssignedReferee";
     public const string RefereeReady = "RefereeReady";
@@ -27,6 +23,29 @@ public static class RaceStatuses
         Cancelled
     };
 
-    public static bool IsValid(string status)
-        => All.Contains(status);
+    public static bool IsValid(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status)
+            && All.Contains(status);
+    }
+
+    public static bool CanRegister(string? status)
+    {
+        return status == Scheduled;
+    }
+
+    public static bool IsClosedForPrediction(string? status)
+    {
+        return status is Ongoing or Finished or ResultPending or Published or Cancelled;
+    }
+
+    public static bool IsClosedForJockeyAssignment(string? status)
+    {
+        return status is Ongoing or Finished or ResultPending or Published or Cancelled;
+    }
+
+    public static bool IsCompletedForDashboard(string? status)
+    {
+        return status is Finished or ResultPending or Published;
+    }
 }

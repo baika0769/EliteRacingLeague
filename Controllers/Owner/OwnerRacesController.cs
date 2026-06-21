@@ -136,8 +136,7 @@ public class OwnerRacesController : OwnerBaseController
             });
         }
 
-        if (registration.Race.Status == RaceStatuses.Cancelled ||
-            registration.Race.Status == RaceStatuses.Completed)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return BadRequest(new
             {
