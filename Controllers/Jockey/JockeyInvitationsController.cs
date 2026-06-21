@@ -267,6 +267,21 @@ public class JockeyInvitationsController : ControllerBase
         invitation.Status = InvitationStatuses.Accepted;
         invitation.RespondedAt = DateTime.UtcNow;
 
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
+
+        _context.Notifications.Add(new Notification
+        {
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Accepted",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} accepted invitation for {horseName}."
+                    : "A jockey accepted your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
+
         await _context.SaveChangesAsync();
 
         return Ok(new
@@ -311,6 +326,21 @@ public class JockeyInvitationsController : ControllerBase
 
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
+
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
+
+        _context.Notifications.Add(new Notification
+        {
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Rejected",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} rejected invitation for {horseName}."
+                    : "A jockey rejected your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
 
         await _context.SaveChangesAsync();
 
@@ -427,6 +457,10 @@ public class JockeyInvitationsController : ControllerBase
         return await _context.JockeyInvitations
             .Include(i => i.Registration)
                 .ThenInclude(r => r.Race)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Horse)
+            .Include(i => i.Jockey)
+                .ThenInclude(j => j.JockeyNavigation)
             .FirstOrDefaultAsync(i => i.InvitationId == invitationId
                 && i.JockeyId == jockeyId);
     }
