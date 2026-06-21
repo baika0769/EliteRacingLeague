@@ -33,7 +33,7 @@ namespace Eliteracingleague.API.Controllers.Admin
     .CountAsync(r => r.Status == RaceRegistrationStatuses.Pending);
 
             var pendingResults = await _context.RaceResults
-    .CountAsync(r => r.Status == RaceResultStatuses.Draft);
+    .CountAsync(r => r.Status == RaceResultStatuses.RefereeConfirmed);
 
             var response = new AdminDashboardResponse
             {

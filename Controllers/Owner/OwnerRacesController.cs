@@ -45,7 +45,7 @@ public class OwnerRacesController : OwnerBaseController
             .Where(r =>
                 r.RaceId == raceId &&
                 (
-                    r.Status == "Open" ||
+                    RaceStatuses.CanRegister(r.Status) ||
                     r.RaceRegistrations.Any(rr => rr.OwnerId == ownerId.Value)
                 ))
             .Select(r => new
@@ -136,8 +136,7 @@ public class OwnerRacesController : OwnerBaseController
             });
         }
 
-        if (registration.Race.Status == RaceStatuses.Cancelled ||
-            registration.Race.Status == RaceStatuses.Completed)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return BadRequest(new
             {

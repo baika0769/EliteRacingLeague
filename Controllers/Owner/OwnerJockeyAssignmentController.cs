@@ -753,8 +753,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
-        if (registration.Race.Status == RaceStatuses.Completed ||
-            registration.Race.Status == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return BadRequest(new
             {
@@ -856,8 +855,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
         return AssignableRegistrationStatuses.Contains(data.RegistrationStatus) &&
             data.AssignedJockeyId == null &&
-            data.RaceStatus != RaceStatuses.Completed &&
-            data.RaceStatus != RaceStatuses.Cancelled;
+            !RaceStatuses.IsClosedForJockeyAssignment(data.RaceStatus);
     }
 
     private static string? ValidateCanAssignJockey(AssignmentRegistrationData data)
@@ -878,8 +876,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Chỉ đăng ký Approved hoặc JockeyInvited mới có thể mời jockey.";
         }
 
-        if (data.RaceStatus == RaceStatuses.Completed ||
-            data.RaceStatus == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(data.RaceStatus))
         {
             return "Race đã hoàn thành hoặc đã bị hủy, không thể mời jockey.";
         }
@@ -905,8 +902,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Chỉ đăng ký Approved hoặc JockeyInvited mới có thể mời jockey.";
         }
 
-        if (registration.Race.Status == RaceStatuses.Completed ||
-            registration.Race.Status == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return "Race đã hoàn thành hoặc đã bị hủy, không thể mời jockey.";
         }
@@ -978,8 +974,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "This registration already has an assigned jockey";
         }
 
-        if (registration.RaceStatus == RaceStatuses.Completed ||
-            registration.RaceStatus == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.RaceStatus))
         {
             return "Race is completed or cancelled";
         }

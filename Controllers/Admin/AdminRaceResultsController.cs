@@ -84,7 +84,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetPendingResults()
         {
             var results = await _context.RaceResults
-                .Where(r => r.Status == RaceResultStatuses.Draft)
+                .Where(r => r.Status == RaceResultStatuses.RefereeConfirmed)
                 .Select(r => new AdminRaceResultResponse
                 {
                     ResultId = r.ResultId,
@@ -117,14 +117,48 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (result.Status != RaceResultStatuses.RefereeConfirmed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only referee-confirmed race results can be approved",
+                    Id = id,
+                    Status = result.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+            var registration = await _context.RaceRegistrations
+                .FirstOrDefaultAsync(r => r.RegistrationId == result.RegistrationId);
+
             result.Status = RaceResultStatuses.AdminApproved;
-            result.PublishedAt = DateTime.UtcNow;
+            result.PublishedAt = now;
+
+            if (registration != null)
+            {
+                registration.Status = RaceRegistrationStatuses.Completed;
+            }
+
+            var allOtherResultsApproved = !await _context.RaceResults
+                .AnyAsync(r =>
+                    r.RaceId == result.RaceId &&
+                    r.ResultId != result.ResultId &&
+                    r.Status != RaceResultStatuses.AdminApproved);
+
+            if (allOtherResultsApproved)
+            {
+                var race = await _context.Races
+                    .FirstOrDefaultAsync(r => r.RaceId == result.RaceId);
+
+                if (race != null)
+                {
+                    race.Status = RaceStatuses.Published;
+                    race.UpdatedAt = now;
+                }
+            }
 
             if (result.FinishPosition.HasValue)
             {
-                var registration = await _context.RaceRegistrations
-                    .FirstOrDefaultAsync(r => r.RegistrationId == result.RegistrationId);
-
                 var prizeRule = await _context.PrizeRules
                     .FirstOrDefaultAsync(r =>
                         r.RaceId == result.RaceId &&

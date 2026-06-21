@@ -267,10 +267,20 @@ public class JockeyInvitationsController : ControllerBase
         invitation.Status = InvitationStatuses.Accepted;
         invitation.RespondedAt = DateTime.UtcNow;
 
-        _context.Notifications.Add(CreateOwnerNotification(
-            invitation.InvitedByOwnerId,
-            "Invitation Accepted",
-            $"{invitation.Jockey.JockeyNavigation.FullName} accepted invitation for {invitation.Registration.Horse.HorseName}."));
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
+
+        _context.Notifications.Add(new Notification
+        {
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Accepted",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} accepted invitation for {horseName}."
+                    : "A jockey accepted your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
 
         await _context.SaveChangesAsync();
 
@@ -317,10 +327,20 @@ public class JockeyInvitationsController : ControllerBase
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
 
-        _context.Notifications.Add(CreateOwnerNotification(
-            invitation.InvitedByOwnerId,
-            "Invitation Rejected",
-            $"{invitation.Jockey.JockeyNavigation.FullName} rejected invitation for {invitation.Registration.Horse.HorseName}."));
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
+
+        _context.Notifications.Add(new Notification
+        {
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Rejected",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} rejected invitation for {horseName}."
+                    : "A jockey rejected your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
 
         await _context.SaveChangesAsync();
 
