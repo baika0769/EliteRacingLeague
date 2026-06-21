@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Models;
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -83,7 +84,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetPendingResults()
         {
             var results = await _context.RaceResults
-                .Where(r => r.Status == RaceResultStatuses.Draft)
+                .Where(r => r.Status == RaceResultStatuses.RefereeConfirmed)
                 .Select(r => new AdminRaceResultResponse
                 {
                     ResultId = r.ResultId,
@@ -116,8 +117,96 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (result.Status != RaceResultStatuses.RefereeConfirmed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only referee-confirmed race results can be approved",
+                    Id = id,
+                    Status = result.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+            var registration = await _context.RaceRegistrations
+                .FirstOrDefaultAsync(r => r.RegistrationId == result.RegistrationId);
+
             result.Status = RaceResultStatuses.AdminApproved;
-            result.PublishedAt = DateTime.UtcNow;
+            result.PublishedAt = now;
+
+            if (registration != null)
+            {
+                registration.Status = RaceRegistrationStatuses.Completed;
+            }
+
+            var allOtherResultsApproved = !await _context.RaceResults
+                .AnyAsync(r =>
+                    r.RaceId == result.RaceId &&
+                    r.ResultId != result.ResultId &&
+                    r.Status != RaceResultStatuses.AdminApproved);
+
+            if (allOtherResultsApproved)
+            {
+                var race = await _context.Races
+                    .FirstOrDefaultAsync(r => r.RaceId == result.RaceId);
+
+                if (race != null)
+                {
+                    race.Status = RaceStatuses.Published;
+                    race.UpdatedAt = now;
+                }
+            }
+
+            if (result.FinishPosition.HasValue)
+            {
+                var prizeRule = await _context.PrizeRules
+                    .FirstOrDefaultAsync(r =>
+                        r.RaceId == result.RaceId &&
+                        r.RankPosition == result.FinishPosition.Value);
+
+                if (registration != null && prizeRule != null)
+                {
+                    var prizeAward = await _context.PrizeAwards
+                        .FirstOrDefaultAsync(a =>
+                            a.RaceId == result.RaceId &&
+                            a.RankPosition == result.FinishPosition.Value);
+
+                    prizeAward ??= await _context.PrizeAwards
+                        .FirstOrDefaultAsync(a =>
+                            a.RaceId == result.RaceId &&
+                            a.RegistrationId == result.RegistrationId);
+
+                    if (prizeAward == null)
+                    {
+                        prizeAward = new PrizeAward
+                        {
+                            RaceId = result.RaceId,
+                            RegistrationId = result.RegistrationId,
+                            OwnerId = registration.OwnerId,
+                            JockeyId = registration.JockeyId,
+                            RankPosition = result.FinishPosition.Value,
+                            PrizeAmount = prizeRule.PrizeAmount,
+                            Status = PrizeAwardStatuses.ReadyToClaim,
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        _context.PrizeAwards.Add(prizeAward);
+                    }
+                    else
+                    {
+                        prizeAward.RegistrationId = result.RegistrationId;
+                        prizeAward.OwnerId = registration.OwnerId;
+                        prizeAward.JockeyId = registration.JockeyId;
+                        prizeAward.RankPosition = result.FinishPosition.Value;
+                        prizeAward.PrizeAmount = prizeRule.PrizeAmount;
+
+                        if (prizeAward.Status != PrizeAwardStatuses.Paid)
+                        {
+                            prizeAward.Status = PrizeAwardStatuses.ReadyToClaim;
+                        }
+                    }
+                }
+            }
 
             await _context.SaveChangesAsync();
 

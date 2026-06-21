@@ -325,7 +325,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             return BadRequest(new { message = "Tournament hiện không mở đăng ký." });
         }
 
-        if (race.Status != RaceStatuses.Open)
+        if (!RaceStatuses.CanRegister(race.Status))
         {
             return BadRequest(new { message = "Race hiện không mở đăng ký." });
         }
@@ -638,7 +638,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 3,
-                Key = "Approved",
+                Key = RaceRegistrationStatuses.Approved,
                 Label = "Đã được duyệt",
                 Description = "Đơn đăng ký đã được Admin duyệt.",
                 IsCompleted = currentStep >= 3 &&
@@ -649,7 +649,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 4,
-                Key = "JockeyInvited",
+                Key = RaceRegistrationStatuses.JockeyInvited,
                 Label = "Mời Jockey",
                 Description = "Owner đã mời Jockey tham gia race.",
                 IsCompleted = currentStep >= 4 &&
@@ -660,7 +660,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 5,
-                Key = "ReadyToRace",
+                Key = RaceRegistrationStatuses.ReadyToRace,
                 Label = "Sẵn sàng thi đấu",
                 Description = "Ngựa và Jockey đã sẵn sàng tham gia race.",
                 IsCompleted = currentStep >= 5 &&

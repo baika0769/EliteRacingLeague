@@ -16,7 +16,7 @@ public static class JockeyProfileService
             && !string.IsNullOrWhiteSpace(jockey.HealthCertificateUrl)
             && jockey.WeightKg > 0
             && jockey.YearsOfExperience >= 0
-            && HorseHealthStatuses.IsValid(jockey.HealthStatus)
+            && JockeyHealthStatuses.IsValid(jockey.HealthStatus)
             && HasRequiredDistanceExperiences(jockey.JockeyDistanceExperiences);
     }
 

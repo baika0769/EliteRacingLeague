@@ -554,6 +554,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 existing.RefereeId = request.RefereeId;
                 existing.Status = RefereeAssignmentStatuses.Assigned;
                 existing.AssignedAt = DateTime.UtcNow;
+                existing.Status = RefereeAssignmentStatuses.Assigned;
             }
             else
             {

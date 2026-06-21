@@ -6,6 +6,7 @@ using Eliteracingleague.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Email;
+using Eliteracingleague.API.Services.JockeyMatching;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +39,7 @@ builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<JockeyAccessService>();
+builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
 
 // JWT Authentication configuration
 builder.Services.AddAuthentication(options =>
@@ -70,6 +72,8 @@ builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddSwaggerGen(options =>
 {
+    options.CustomSchemaIds(type => type.FullName?.Replace("+", ".") ?? type.Name);
+
     options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",

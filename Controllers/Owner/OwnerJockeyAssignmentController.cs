@@ -13,6 +13,13 @@ namespace Eliteracingleague.API.Controllers.Owner;
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerJockeyAssignmentController : OwnerBaseController
 {
+    private static readonly string[] AvailableRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.Approved,
+        RaceRegistrationStatuses.JockeyInvited,
+        RaceRegistrationStatuses.ReadyToRace
+    };
+
     private static readonly string[] AssignableRegistrationStatuses =
     {
         RaceRegistrationStatuses.Approved,
@@ -27,6 +34,52 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
     public OwnerJockeyAssignmentController(EliteRacingLeagueContext context) : base(context)
     {
+    }
+
+    [HttpGet("registrations")]
+    public async Task<IActionResult> GetRegistrations()
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var registrations = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.OwnerId == ownerId.Value &&
+                AvailableRegistrationStatuses.Contains(r.Status))
+            .OrderBy(r => r.Race.RaceDate)
+            .Select(r => new OwnerJockeyAssignmentRegistrationResponse
+            {
+                RegistrationId = r.RegistrationId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                RaceName = r.Race.RaceName,
+                RaceDate = r.Race.RaceDate,
+                Location = r.Race.Location,
+                DistanceMeters = r.Race.DistanceMeters,
+                HorseId = r.HorseId,
+                HorseName = r.Horse.HorseName,
+                HorseImageUrl = r.Horse.ImageUrl,
+                RegistrationStatus = r.Status,
+                HasOfficialJockey = r.JockeyId.HasValue,
+                OfficialJockeyId = r.JockeyId,
+                OfficialJockeyName = r.JockeyId.HasValue
+                    ? r.Jockey!.JockeyNavigation.FullName
+                    : null
+            })
+            .ToListAsync();
+
+        return Ok(registrations);
     }
 
     [HttpGet("{registrationId:int}/context")]
@@ -66,6 +119,8 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
+        var hasOfficialJockey = HasOfficialJockey(data.AssignedJockeyId);
+
         return Ok(new OwnerJockeyAssignmentContextResponse
         {
             RegistrationId = data.RegistrationId,
@@ -86,7 +141,14 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             HealthStatus = data.HealthStatus,
             HorseIsActive = data.HorseIsActive,
             AssignedJockeyId = data.AssignedJockeyId,
-            AssignedJockeyName = data.AssignedJockeyName
+            AssignedJockeyName = data.AssignedJockeyName,
+            HasOfficialJockey = hasOfficialJockey,
+            OfficialJockeyId = data.AssignedJockeyId,
+            OfficialJockeyName = data.AssignedJockeyName,
+            AssignmentStatus = data.RegistrationStatus,
+            CanSendInvitation = !hasOfficialJockey,
+            CanSignJockey = !hasOfficialJockey,
+            CanChangeTournament = true
         });
     }
 
@@ -123,6 +185,17 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return NotFound(new
             {
                 message = "Không tìm thấy đăng ký race hoặc bạn không có quyền xem."
+            });
+        }
+
+        if (HasOfficialJockey(registration.AssignedJockeyId))
+        {
+            return Ok(new OwnerJockeyCandidateListResponse
+            {
+                Page = page,
+                PageSize = pageSize,
+                TotalItems = 0,
+                TotalPages = 0
             });
         }
 
@@ -269,6 +342,14 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
+        if (HasOfficialJockey(registration.JockeyId))
+        {
+            return BadRequest(new
+            {
+                message = "Official jockey has already been selected for this registration. Please use Change Tournament to work with another registration."
+            });
+        }
+
         var assignmentError = ValidateCanAssignJockey(registration);
 
         if (assignmentError != null)
@@ -297,7 +378,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
-        if (!HorseHealthStatuses.CanRace(jockey.HealthStatus))
+        if (!JockeyHealthStatuses.CanRace(jockey.HealthStatus))
         {
             return BadRequest(new
             {
@@ -410,6 +491,327 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         });
     }
 
+    [HttpGet("{registrationId:int}/summary")]
+    public async Task<IActionResult> GetInvitationSummary(int registrationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var ownsRegistration = await _context.RaceRegistrations
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RegistrationId == registrationId &&
+                r.OwnerId == ownerId.Value);
+
+        if (!ownsRegistration)
+        {
+            return NotFound(new
+            {
+                message = "Registration not found or you do not have permission to view it."
+            });
+        }
+
+        var invitations = _context.JockeyInvitations
+            .AsNoTracking()
+            .Where(i => i.RegistrationId == registrationId);
+
+        return Ok(new OwnerJockeyAssignmentSummaryResponse
+        {
+            InvitedCount = await invitations.CountAsync(),
+            PendingCount = await invitations.CountAsync(i => i.Status == InvitationStatuses.Pending),
+            AcceptedCount = await invitations.CountAsync(i => i.Status == InvitationStatuses.Accepted)
+        });
+    }
+
+    [HttpGet("{registrationId:int}/invitations")]
+    public async Task<IActionResult> GetInvitations(int registrationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var registration = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.RegistrationId == registrationId &&
+                r.OwnerId == ownerId.Value)
+            .Select(r => new
+            {
+                r.JockeyId,
+                r.Status
+            })
+            .FirstOrDefaultAsync();
+
+        if (registration == null)
+        {
+            return NotFound(new
+            {
+                message = "Registration not found or you do not have permission to view it."
+            });
+        }
+
+        var invitations = await _context.JockeyInvitations
+            .AsNoTracking()
+            .Where(i => i.RegistrationId == registrationId)
+            .OrderByDescending(i => i.SentAt)
+            .Select(i => new OwnerJockeyInvitationResponse
+            {
+                InvitationId = i.InvitationId,
+                JockeyId = i.JockeyId,
+                JockeyName = i.Jockey.JockeyNavigation.FullName,
+                ProfileImageUrl = i.Jockey.ProfileImageUrl,
+                ExperienceYears = i.Jockey.YearsOfExperience,
+                SentAt = i.SentAt,
+                RespondedAt = i.RespondedAt,
+                Status = i.Status,
+                CanSign = i.Status == InvitationStatuses.Accepted &&
+                    registration.JockeyId == null,
+                IsOfficial = registration.JockeyId == i.JockeyId
+            })
+            .ToListAsync();
+
+        return Ok(invitations);
+    }
+
+    [HttpGet("invitations/{invitationId:int}")]
+    public async Task<IActionResult> GetInvitationDetail(int invitationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        var invitation = await _context.JockeyInvitations
+            .AsNoTracking()
+            .Where(i =>
+                i.InvitationId == invitationId &&
+                i.Registration.OwnerId == ownerId.Value)
+            .Select(i => new OwnerJockeyInvitationDetailResponse
+            {
+                InvitationId = i.InvitationId,
+                RegistrationId = i.RegistrationId,
+                JockeyId = i.JockeyId,
+                JockeyName = i.Jockey.JockeyNavigation.FullName,
+                ProfileImageUrl = i.Jockey.ProfileImageUrl,
+                ExperienceYears = i.Jockey.YearsOfExperience,
+                WeightKg = i.Jockey.WeightKg,
+                HealthStatus = i.Jockey.HealthStatus,
+                SentAt = i.SentAt,
+                RespondedAt = i.RespondedAt,
+                Status = i.Status,
+                HorseName = i.Registration.Horse.HorseName,
+                TournamentName = i.Registration.Race.Tournament.TournamentName,
+                RaceDate = i.Registration.Race.RaceDate,
+                Message = i.Message,
+                ResponseNote = null,
+                CanSign = i.Status == InvitationStatuses.Accepted &&
+                    i.Registration.JockeyId == null,
+                IsOfficial = i.Registration.JockeyId == i.JockeyId
+            })
+            .FirstOrDefaultAsync();
+
+        if (invitation == null)
+        {
+            return NotFound(new
+            {
+                message = "Invitation not found or you do not have permission to view it."
+            });
+        }
+
+        return Ok(invitation);
+    }
+
+    [HttpPut("{registrationId:int}/official-jockey/{invitationId:int}")]
+    public async Task<IActionResult> SelectOfficialJockey(int registrationId, int invitationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
+        var registration = await _context.RaceRegistrations
+            .Include(r => r.Race)
+            .FirstOrDefaultAsync(r =>
+                r.RegistrationId == registrationId &&
+                r.OwnerId == ownerId.Value);
+
+        if (registration == null)
+        {
+            return NotFound(new
+            {
+                message = "Registration not found or you do not have permission to update it."
+            });
+        }
+
+        var invitation = await _context.JockeyInvitations
+            .Include(i => i.Jockey)
+            .ThenInclude(j => j.JockeyNavigation)
+            .FirstOrDefaultAsync(i =>
+                i.InvitationId == invitationId &&
+                i.RegistrationId == registrationId);
+
+        if (invitation == null)
+        {
+            return NotFound(new
+            {
+                message = "Invitation not found for this registration."
+            });
+        }
+
+        if (registration.JockeyId == invitation.JockeyId)
+        {
+            return Ok(BuildOfficialJockeyResponse(
+                registration,
+                invitation.Jockey,
+                "Official jockey already selected."));
+        }
+
+        if (registration.JockeyId.HasValue)
+        {
+            return BadRequest(new
+            {
+                message = "Official jockey has already been selected. Please use Change Tournament to work with another registration."
+            });
+        }
+
+        if (invitation.Status != InvitationStatuses.Accepted)
+        {
+            return BadRequest(new
+            {
+                message = "Only an accepted invitation can be selected.",
+                invitationStatus = invitation.Status
+            });
+        }
+
+        var jockey = invitation.Jockey;
+
+        if (jockey.JockeyNavigation.Role != UserRoles.Jockey ||
+            jockey.JockeyNavigation.Status != UserStatuses.Active ||
+            !jockey.IsActive)
+        {
+            return BadRequest(new { message = "Jockey is not active or eligible." });
+        }
+
+        if (!JockeyHealthStatuses.CanRace(jockey.HealthStatus))
+        {
+            return BadRequest(new
+            {
+                message = "Jockey health status is not eligible to race.",
+                healthStatus = jockey.HealthStatus
+            });
+        }
+
+        if (registration.Status == RaceRegistrationStatuses.Cancelled ||
+            registration.Status == RaceRegistrationStatuses.Rejected ||
+            registration.Status == RaceRegistrationStatuses.Completed)
+        {
+            return BadRequest(new
+            {
+                message = "Registration status does not allow selecting an official jockey.",
+                registrationStatus = registration.Status
+            });
+        }
+
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
+        {
+            return BadRequest(new
+            {
+                message = "Race is completed or cancelled."
+            });
+        }
+
+        if (!AssignableRegistrationStatuses.Contains(registration.Status))
+        {
+            return BadRequest(new
+            {
+                message = "Registration status does not allow selecting an official jockey.",
+                registrationStatus = registration.Status
+            });
+        }
+
+        var jockeyAlreadyAssigned = await _context.RaceRegistrations
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RegistrationId != registrationId &&
+                r.RaceId == registration.RaceId &&
+                r.JockeyId == invitation.JockeyId);
+
+        if (jockeyAlreadyAssigned)
+        {
+            return BadRequest(new
+            {
+                message = "Jockey is already assigned to another registration in this race."
+            });
+        }
+
+        var now = DateTime.UtcNow;
+        registration.JockeyId = invitation.JockeyId;
+        registration.Status = RaceRegistrationStatuses.ReadyToRace;
+        registration.JockeyConfirmedAt = now;
+
+        var otherPendingInvitations = await _context.JockeyInvitations
+            .Where(i =>
+                i.RegistrationId == registrationId &&
+                i.InvitationId != invitationId &&
+                i.Status == InvitationStatuses.Pending)
+            .ToListAsync();
+
+        foreach (var otherInvitation in otherPendingInvitations)
+        {
+            otherInvitation.Status = InvitationStatuses.Cancelled;
+            otherInvitation.RespondedAt = now;
+        }
+
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        return Ok(BuildOfficialJockeyResponse(
+            registration,
+            jockey,
+            "Official jockey selected successfully."));
+    }
+
     private async Task<AssignmentRegistrationData?> LoadRegistrationContextAsync(int registrationId, int ownerId)
     {
         return await _context.RaceRegistrations
@@ -446,16 +848,14 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
     private static bool CanOpenAssignmentPage(AssignmentRegistrationData data)
     {
-        if (data.AssignedJockeyId != null &&
-            data.RegistrationStatus == RaceRegistrationStatuses.ReadyToRace)
+        if (HasOfficialJockey(data.AssignedJockeyId))
         {
             return true;
         }
 
         return AssignableRegistrationStatuses.Contains(data.RegistrationStatus) &&
             data.AssignedJockeyId == null &&
-            data.RaceStatus != RaceStatuses.Completed &&
-            data.RaceStatus != RaceStatuses.Cancelled;
+            !RaceStatuses.IsClosedForJockeyAssignment(data.RaceStatus);
     }
 
     private static string? ValidateCanAssignJockey(AssignmentRegistrationData data)
@@ -476,8 +876,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Chỉ đăng ký Approved hoặc JockeyInvited mới có thể mời jockey.";
         }
 
-        if (data.RaceStatus == RaceStatuses.Completed ||
-            data.RaceStatus == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(data.RaceStatus))
         {
             return "Race đã hoàn thành hoặc đã bị hủy, không thể mời jockey.";
         }
@@ -503,8 +902,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Chỉ đăng ký Approved hoặc JockeyInvited mới có thể mời jockey.";
         }
 
-        if (registration.Race.Status == RaceStatuses.Completed ||
-            registration.Race.Status == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return "Race đã hoàn thành hoặc đã bị hủy, không thể mời jockey.";
         }
@@ -576,8 +974,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "This registration already has an assigned jockey";
         }
 
-        if (registration.RaceStatus == RaceStatuses.Completed ||
-            registration.RaceStatus == RaceStatuses.Cancelled)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.RaceStatus))
         {
             return "Race is completed or cancelled";
         }
@@ -592,7 +989,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return "Jockey already has a race on this day";
         }
 
-        if (!HorseHealthStatuses.CanRace(candidate.HealthStatus))
+        if (!JockeyHealthStatuses.CanRace(candidate.HealthStatus))
         {
             return "Jockey health status is not eligible";
         }
@@ -721,6 +1118,26 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         return !string.IsNullOrWhiteSpace(status) &&
             !status.Equals("All", StringComparison.OrdinalIgnoreCase) &&
             !status.Equals(UserStatuses.Active, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static OfficialJockeySelectionResponse BuildOfficialJockeyResponse(
+        RaceRegistration registration,
+        Eliteracingleague.API.Models.Jockey jockey,
+        string message)
+    {
+        return new OfficialJockeySelectionResponse
+        {
+            Message = message,
+            RegistrationId = registration.RegistrationId,
+            JockeyId = jockey.JockeyId,
+            JockeyName = jockey.JockeyNavigation.FullName,
+            RegistrationStatus = registration.Status
+        };
+    }
+
+    private static bool HasOfficialJockey(int? jockeyId)
+    {
+        return jockeyId.HasValue;
     }
 
     private sealed class AssignmentRegistrationData
