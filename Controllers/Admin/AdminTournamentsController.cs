@@ -431,6 +431,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                     race.UpdatedAt = now;
                 }
 
+                var raceIds = races.Select(r => r.RaceId).ToList();
+
+                await CancelTournamentRelatedDataAsync(raceIds, now);
+
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
@@ -638,6 +642,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                 race.UpdatedAt = now;
             }
 
+            var raceIds = races.Select(r => r.RaceId).ToList();
+
+            await CancelTournamentRelatedDataAsync(raceIds, now);
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
@@ -785,6 +793,49 @@ namespace Eliteracingleague.API.Controllers.Admin
             return $"/uploads/tournaments/{fileName}";
         }
 
+
+        private async Task CancelTournamentRelatedDataAsync(List<int> raceIds, DateTime now)
+        {
+            if (raceIds == null || raceIds.Count == 0)
+            {
+                return;
+            }
+
+            var registrations = await _context.RaceRegistrations
+                .Where(r => raceIds.Contains(r.RaceId)
+                    && r.Status != RaceRegistrationStatuses.Cancelled
+                    && r.Status != RaceRegistrationStatuses.Rejected)
+                .ToListAsync();
+
+            foreach (var registration in registrations)
+            {
+                registration.Status = RaceRegistrationStatuses.Cancelled;
+                registration.AdminNote = "Tournament cancelled";
+                registration.ReviewedAt = now;
+            }
+
+            var invitations = await _context.JockeyInvitations
+                .Where(i => raceIds.Contains(i.Registration.RaceId)
+                    && i.Status == InvitationStatuses.Pending)
+                .ToListAsync();
+
+            foreach (var invitation in invitations)
+            {
+                invitation.Status = InvitationStatuses.Cancelled;
+                invitation.RespondedAt = now;
+            }
+
+            var assignments = await _context.RefereeAssignments
+                .Where(a => raceIds.Contains(a.RaceId)
+                    && a.Status == RefereeAssignmentStatuses.Assigned)
+                .ToListAsync();
+
+            foreach (var assignment in assignments)
+            {
+                assignment.Status = RefereeAssignmentStatuses.Cancelled;
+            }
+        }
+
         private static string MapTournamentStatusToRaceStatus(
             string tournamentStatus,
             string currentRaceStatus)
@@ -807,4 +858,6 @@ namespace Eliteracingleague.API.Controllers.Admin
             };
         }
     }
+
+
 }

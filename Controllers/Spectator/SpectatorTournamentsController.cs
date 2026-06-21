@@ -13,6 +13,13 @@ public class SpectatorTournamentsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
 
+    private static readonly string[] VisibleRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.Approved,
+        RaceRegistrationStatuses.JockeyInvited,
+        RaceRegistrationStatuses.ReadyToRace
+    };
+
     public SpectatorTournamentsController(EliteRacingLeagueContext context)
     {
         _context = context;
@@ -22,7 +29,10 @@ public class SpectatorTournamentsController : ControllerBase
     public async Task<IActionResult> GetTournaments()
     {
         var tournaments = await _context.Tournaments
-            .Where(t => t.Status != TournamentStatuses.Draft)
+            .AsNoTracking()
+            .Where(t =>
+                t.Status != TournamentStatuses.Draft &&
+                t.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(t => t.StartDate)
             .Select(t => new
             {
@@ -33,9 +43,12 @@ public class SpectatorTournamentsController : ControllerBase
                 startDate = t.StartDate,
                 endDate = t.EndDate,
                 prizePool = t.PrizePool,
+                imageUrl = t.ImageUrl,
                 status = t.Status,
                 race = _context.Races
-                    .Where(r => r.TournamentId == t.TournamentId)
+                    .Where(r =>
+                        r.TournamentId == t.TournamentId &&
+                        r.Status != RaceStatuses.Cancelled)
                     .Select(r => new
                     {
                         raceId = r.RaceId,
@@ -56,7 +69,11 @@ public class SpectatorTournamentsController : ControllerBase
     public async Task<IActionResult> GetTournamentDetail(int id)
     {
         var tournament = await _context.Tournaments
-            .Where(t => t.TournamentId == id)
+            .AsNoTracking()
+            .Where(t =>
+                t.TournamentId == id &&
+                t.Status != TournamentStatuses.Draft &&
+                t.Status != TournamentStatuses.Cancelled)
             .Select(t => new
             {
                 tournamentId = t.TournamentId,
@@ -66,10 +83,13 @@ public class SpectatorTournamentsController : ControllerBase
                 startDate = t.StartDate,
                 endDate = t.EndDate,
                 prizePool = t.PrizePool,
+                imageUrl = t.ImageUrl,
                 rules = t.Rules,
                 status = t.Status,
                 race = _context.Races
-                    .Where(r => r.TournamentId == t.TournamentId)
+                    .Where(r =>
+                        r.TournamentId == t.TournamentId &&
+                        r.Status != RaceStatuses.Cancelled)
                     .Select(r => new
                     {
                         raceId = r.RaceId,
@@ -84,17 +104,40 @@ public class SpectatorTournamentsController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (tournament == null)
+        {
             return NotFound("Tournament not found.");
+        }
 
         return Ok(tournament);
     }
 
-    [HttpGet("../races/{raceId}/registrations")]
+    [HttpGet("/api/spectator/races/{raceId}/registrations")]
     public async Task<IActionResult> GetRaceRegistrations(int raceId)
     {
+        var race = await _context.Races
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(r => new
+            {
+                r.RaceId
+            })
+            .FirstOrDefaultAsync();
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
         var registrations = await _context.RaceRegistrations
-            .Where(r => r.RaceId == raceId &&
-                        r.Status == RaceRegistrationStatuses.Approved)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                VisibleRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 registrationId = r.RegistrationId,
@@ -104,7 +147,9 @@ public class SpectatorTournamentsController : ControllerBase
                 horseWeightKg = r.Horse.WeightKg,
                 horseHealthStatus = r.Horse.HealthStatus,
                 ownerId = r.OwnerId,
-                jockeyId = r.JockeyId
+                jockeyId = r.JockeyId,
+                jockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
+                status = r.Status
             })
             .ToListAsync();
 

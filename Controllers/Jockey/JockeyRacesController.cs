@@ -22,7 +22,9 @@ public class JockeyRacesController : ControllerBase
     private readonly EliteRacingLeagueContext _context;
     private readonly JockeyAccessService _jockeyAccess;
 
-    public JockeyRacesController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
+    public JockeyRacesController(
+        EliteRacingLeagueContext context,
+        JockeyAccessService jockeyAccess)
     {
         _context = context;
         _jockeyAccess = jockeyAccess;
@@ -42,7 +44,11 @@ public class JockeyRacesController : ControllerBase
 
         var items = await _context.RaceRegistrations
             .AsNoTracking()
-            .Where(r => r.JockeyId == jockeyId && AcceptedRaceStatuses.Contains(r.Status))
+            .Where(r =>
+                r.JockeyId == jockeyId &&
+                AcceptedRaceStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderBy(r => r.Race.RaceDate)
             .Select(r => new JockeyAcceptedRaceResponse
             {
@@ -78,7 +84,9 @@ public class JockeyRacesController : ControllerBase
             .Where(r =>
                 r.RaceId == raceId &&
                 r.JockeyId == jockeyId &&
-                AcceptedRaceStatuses.Contains(r.Status))
+                AcceptedRaceStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new JockeyRaceDetailResponse
             {
                 RaceRegistrationId = r.RegistrationId,
@@ -95,7 +103,10 @@ public class JockeyRacesController : ControllerBase
 
         if (race == null)
         {
-            return NotFound(new { message = "Không tìm thấy race hoặc bạn không có quyền xem race này." });
+            return NotFound(new
+            {
+                message = "Không tìm thấy race hoặc bạn không có quyền xem race này."
+            });
         }
 
         return Ok(race);

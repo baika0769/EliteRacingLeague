@@ -408,8 +408,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.OwnerId == ownerId.Value &&
-                r.Status == RaceRegistrationStatuses.Pending)
+    r.OwnerId == ownerId.Value &&
+    r.Status == RaceRegistrationStatuses.Pending &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.SubmittedAt)
             .Select(r => new
             {
@@ -459,8 +461,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.OwnerId == ownerId.Value &&
-                ApprovedRegistrationStatuses.Contains(r.Status))
+    r.OwnerId == ownerId.Value &&
+    ApprovedRegistrationStatuses.Contains(r.Status) &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.Race.RaceDate)
             .Select(r => new
             {
@@ -510,8 +514,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.RegistrationId == registrationId &&
-                r.OwnerId == ownerId.Value)
+    r.RegistrationId == registrationId &&
+    r.OwnerId == ownerId.Value &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 r.RegistrationId,
@@ -573,8 +579,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var registration = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.RegistrationId == registrationId &&
-                r.OwnerId == ownerId.Value)
+    r.RegistrationId == registrationId &&
+    r.OwnerId == ownerId.Value &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 r.RegistrationId,

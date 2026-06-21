@@ -16,6 +16,13 @@ public class RefereeRacesController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
 
+    private static readonly string[] ActiveRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.Approved,
+        RaceRegistrationStatuses.JockeyInvited,
+        RaceRegistrationStatuses.ReadyToRace
+    };
+
     public RefereeRacesController(EliteRacingLeagueContext context)
     {
         _context = context;
@@ -26,14 +33,28 @@ public class RefereeRacesController : ControllerBase
         return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
     }
 
+    private async Task<bool> IsAssignedToActiveRaceAsync(int raceId, int refereeId)
+    {
+        return await _context.RefereeAssignments.AnyAsync(a =>
+            a.RaceId == raceId &&
+            a.RefereeId == refereeId &&
+            a.Status == RefereeAssignmentStatuses.Assigned &&
+            a.Race.Status != RaceStatuses.Cancelled &&
+            a.Race.Tournament.Status != TournamentStatuses.Cancelled);
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAssignedRaces()
     {
         var refereeId = GetRefereeId();
 
         var races = await _context.RefereeAssignments
-            .Where(a => a.RefereeId == refereeId
-                && a.Status == RefereeAssignmentStatuses.Assigned)
+            .AsNoTracking()
+            .Where(a =>
+                a.RefereeId == refereeId &&
+                a.Status == RefereeAssignmentStatuses.Assigned &&
+                a.Race.Status != RaceStatuses.Cancelled &&
+                a.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(a => new
             {
                 assignmentId = a.RefereeAssignmentId,
@@ -44,6 +65,7 @@ public class RefereeRacesController : ControllerBase
                 distanceMeters = a.Race.DistanceMeters,
                 location = a.Race.Location,
                 raceStatus = a.Race.Status,
+                tournamentStatus = a.Race.Tournament.Status,
                 assignmentStatus = a.Status,
                 assignedAt = a.AssignedAt
             })
@@ -57,16 +79,20 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var registrations = await _context.RaceRegistrations
-            .Where(r => r.RaceId == raceId)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 registrationId = r.RegistrationId,
@@ -74,6 +100,7 @@ public class RefereeRacesController : ControllerBase
                 horseName = r.Horse.HorseName,
                 ownerId = r.OwnerId,
                 jockeyId = r.JockeyId,
+                jockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
                 status = r.Status
             })
             .ToListAsync();
@@ -89,23 +116,29 @@ public class RefereeRacesController : ControllerBase
         var refereeId = GetRefereeId();
 
         if (!PreRaceInspectionStatuses.IsValid(request.Status))
+        {
             return BadRequest("Invalid inspection status.");
+        }
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var registration = await _context.RaceRegistrations
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
-                r.RegistrationId == request.RegistrationId);
+                r.RegistrationId == request.RegistrationId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (registration == null)
-            return NotFound("Registration not found.");
+        {
+            return NotFound("Registration not found or has been cancelled.");
+        }
 
         var inspection = await _context.PreRaceInspections
             .FirstOrDefaultAsync(i =>
@@ -150,21 +183,25 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var registration = await _context.RaceRegistrations
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
-                r.RegistrationId == request.RegistrationId);
+                r.RegistrationId == request.RegistrationId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (registration == null)
-            return NotFound("Registration not found.");
+        {
+            return NotFound("Registration not found or has been cancelled.");
+        }
 
         var result = await _context.RaceResults
             .FirstOrDefaultAsync(r => r.RegistrationId == request.RegistrationId);
@@ -210,6 +247,13 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
         var result = await _context.RaceResults
             .FirstOrDefaultAsync(r =>
                 r.ResultId == resultId &&
@@ -217,12 +261,19 @@ public class RefereeRacesController : ControllerBase
                 r.EnteredByRefereeId == refereeId);
 
         if (result == null)
+        {
             return NotFound("Race result not found.");
+        }
 
         result.Status = RaceResultStatuses.RefereeConfirmed;
         result.UpdatedAt = DateTime.UtcNow;
 
-        var race = await _context.Races.FirstOrDefaultAsync(r => r.RaceId == raceId);
+        var race = await _context.Races
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
         if (race != null)
         {
             race.Status = RaceStatuses.ResultPending;
@@ -247,15 +298,29 @@ public class RefereeRacesController : ControllerBase
         var refereeId = GetRefereeId();
 
         if (!RaceViolationActions.IsValid(request.Action))
+        {
             return BadRequest("Invalid violation action.");
+        }
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
+
+        var registrationExists = await _context.RaceRegistrations
+            .AnyAsync(r =>
+                r.RaceId == raceId &&
+                r.RegistrationId == request.RegistrationId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (!registrationExists)
+        {
+            return NotFound("Registration not found or has been cancelled.");
+        }
 
         var violation = new RaceViolation
         {
@@ -285,16 +350,19 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var race = await _context.Races
-            .Where(r => r.RaceId == raceId)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 r.RaceId,
@@ -304,10 +372,17 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (race == null)
-            return NotFound("Race not found.");
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
 
         var query = _context.RaceRegistrations
-            .Where(r => r.RaceId == raceId)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 registrationId = r.RegistrationId,
@@ -324,20 +399,39 @@ public class RefereeRacesController : ControllerBase
             });
 
         if (filter == "flagged")
+        {
             query = query.Where(x => x.inspectionStatus == PreRaceInspectionStatuses.Failed);
+        }
 
         if (filter == "pending")
+        {
             query = query.Where(x => x.inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation);
+        }
 
         var rows = await query.ToListAsync();
 
-        var allCount = await _context.RaceRegistrations.CountAsync(r => r.RaceId == raceId);
+        var allCount = await _context.RaceRegistrations
+            .CountAsync(r =>
+                r.RaceId == raceId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         var failedCount = await _context.PreRaceInspections
-            .CountAsync(i => i.RaceId == raceId && i.Status == PreRaceInspectionStatuses.Failed);
+            .CountAsync(i =>
+                i.RaceId == raceId &&
+                i.Status == PreRaceInspectionStatuses.Failed &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
-        var pendingCount = allCount - await _context.PreRaceInspections
-            .CountAsync(i => i.RaceId == raceId && i.Status != PreRaceInspectionStatuses.PendingConfirmation);
+        var inspectedCount = await _context.PreRaceInspections
+            .CountAsync(i =>
+                i.RaceId == raceId &&
+                i.Status != PreRaceInspectionStatuses.PendingConfirmation &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
+
+        var pendingCount = Math.Max(0, allCount - inspectedCount);
 
         return Ok(new
         {
@@ -377,13 +471,12 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var report = new RefereeReport
         {
@@ -408,16 +501,20 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var violations = await _context.RaceViolations
-            .Where(v => v.RaceId == raceId && v.RefereeId == refereeId)
+            .AsNoTracking()
+            .Where(v =>
+                v.RaceId == raceId &&
+                v.RefereeId == refereeId &&
+                v.Race.Status != RaceStatuses.Cancelled &&
+                v.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(v => v.CreatedAt)
             .Select(v => new
             {
@@ -440,16 +537,20 @@ public class RefereeRacesController : ControllerBase
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var results = await _context.RaceResults
-            .Where(r => r.RaceId == raceId && r.EnteredByRefereeId == refereeId)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.EnteredByRefereeId == refereeId &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderBy(r => r.FinishPosition)
             .Select(r => new
             {
@@ -468,21 +569,26 @@ public class RefereeRacesController : ControllerBase
 
         return Ok(results);
     }
+
     [HttpGet("{raceId}/reports")]
     public async Task<IActionResult> GetReports(int raceId)
     {
         var refereeId = GetRefereeId();
 
-        var assigned = await _context.RefereeAssignments.AnyAsync(a =>
-            a.RaceId == raceId &&
-            a.RefereeId == refereeId &&
-            a.Status == RefereeAssignmentStatuses.Assigned);
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
+        {
             return Forbid();
+        }
 
         var reports = await _context.RefereeReports
-            .Where(r => r.RaceId == raceId && r.RefereeId == refereeId)
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.SubmittedAt)
             .Select(r => new
             {

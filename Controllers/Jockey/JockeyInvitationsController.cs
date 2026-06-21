@@ -7,7 +7,6 @@ using Eliteracingleague.API.Services.JockeyMatching;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Jockey;
 
@@ -63,8 +62,11 @@ public class JockeyInvitationsController : ControllerBase
                     .ThenInclude(h => h.Breed)
             .Include(i => i.InvitedByOwner)
                 .ThenInclude(o => o.Owner)
-            .Where(i => i.JockeyId == jockeyId.Value
-                && i.Status == InvitationStatuses.Pending)
+            .Where(i =>
+                i.JockeyId == jockeyId.Value &&
+                i.Status == InvitationStatuses.Pending &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(i => i.SentAt)
             .ToListAsync();
 
@@ -144,11 +146,13 @@ public class JockeyInvitationsController : ControllerBase
                 .ThenInclude(o => o.Owner)
             .FirstOrDefaultAsync(i =>
                 i.InvitationId == invitationId &&
-                i.JockeyId == jockeyId.Value);
+                i.JockeyId == jockeyId.Value &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (invitation == null)
         {
-            return NotFound(new { message = "Invitation not found." });
+            return NotFound(new { message = "Invitation not found or race has been cancelled." });
         }
 
         var registration = invitation.Registration;
@@ -219,7 +223,7 @@ public class JockeyInvitationsController : ControllerBase
 
         if (invitation == null)
         {
-            return NotFound(new { message = "Không tìm thấy lời mời." });
+            return NotFound(new { message = "Không tìm thấy lời mời hoặc race đã bị hủy." });
         }
 
         if (invitation.Registration.JockeyId != null)
@@ -312,7 +316,7 @@ public class JockeyInvitationsController : ControllerBase
 
         if (invitation == null)
         {
-            return NotFound(new { message = "Không tìm thấy lời mời." });
+            return NotFound(new { message = "Không tìm thấy lời mời hoặc race đã bị hủy." });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -457,12 +461,16 @@ public class JockeyInvitationsController : ControllerBase
         return await _context.JockeyInvitations
             .Include(i => i.Registration)
                 .ThenInclude(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
             .Include(i => i.Registration)
                 .ThenInclude(r => r.Horse)
             .Include(i => i.Jockey)
                 .ThenInclude(j => j.JockeyNavigation)
-            .FirstOrDefaultAsync(i => i.InvitationId == invitationId
-                && i.JockeyId == jockeyId);
+            .FirstOrDefaultAsync(i =>
+                i.InvitationId == invitationId &&
+                i.JockeyId == jockeyId &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
     }
 
     private static Notification CreateOwnerNotification(
