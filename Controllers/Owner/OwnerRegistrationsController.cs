@@ -108,19 +108,12 @@ public class OwnerRegistrationsController : OwnerBaseController
 
         var today = DateTime.UtcNow.Date;
 
-        var registerableRaceStatuses = new[]
-        {
-        RaceStatuses.Scheduled,
-        RaceStatuses.AssignedReferee,
-        RaceStatuses.RefereeReady
-    };
-
         var data = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
                 t.Race != null &&
-                registerableRaceStatuses.Contains(t.Race.Status) &&
+                RaceStatuses.RegisterableStatuses.Contains(t.Race.Status) &&
                 t.Race.RaceDate >= today)
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
