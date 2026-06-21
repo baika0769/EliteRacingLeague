@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Models;
 using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -113,6 +114,9 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> ApproveRegistration(int id)
         {
             var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
+                .Include(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -124,30 +128,30 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (registration.Status != RaceRegistrationStatuses.Pending)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Only pending registrations can be approved",
-                    Id = id,
-                    Status = registration.Status
-                });
-            }
-
-            var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            if (!int.TryParse(adminIdText, out var adminId))
-            {
-                return Unauthorized(new
-                {
-                    message = "Invalid admin token."
-                });
-            }
+            var adminId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var statusChanged = registration.Status != RaceRegistrationStatuses.Approved;
 
             registration.Status = RaceRegistrationStatuses.Approved;
             registration.ReviewedBy = adminId;
             registration.ReviewedAt = DateTime.UtcNow;
             registration.AdminNote = "Approved by admin";
+
+            if (statusChanged)
+            {
+                var hasNames = !string.IsNullOrWhiteSpace(registration.Horse.HorseName) &&
+                    !string.IsNullOrWhiteSpace(registration.Race.Tournament.TournamentName);
+
+                _context.Notifications.Add(new Notification
+                {
+                    UserId = registration.OwnerId,
+                    Title = "Registration Approved",
+                    Message = hasNames
+                        ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."
+                        : "Your registration has been approved.",
+                    IsRead = false,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
             await _context.SaveChangesAsync();
 
@@ -166,6 +170,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             [FromBody] AdminRejectRegistrationRequest? request)
         {
             var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -177,25 +182,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (registration.Status != RaceRegistrationStatuses.Pending)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Only pending registrations can be rejected",
-                    Id = id,
-                    Status = registration.Status
-                });
-            }
-
-            var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            if (!int.TryParse(adminIdText, out var adminId))
-            {
-                return Unauthorized(new
-                {
-                    message = "Invalid admin token."
-                });
-            }
+            var statusChanged = registration.Status != RaceRegistrationStatuses.Rejected;
 
             registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedBy = adminId;
@@ -203,6 +190,20 @@ namespace Eliteracingleague.API.Controllers.Admin
             registration.AdminNote = string.IsNullOrWhiteSpace(request?.AdminNote)
                 ? "Rejected by admin"
                 : request.AdminNote.Trim();
+
+            if (statusChanged)
+            {
+                _context.Notifications.Add(new Notification
+                {
+                    UserId = registration.OwnerId,
+                    Title = "Registration Rejected",
+                    Message = !string.IsNullOrWhiteSpace(registration.Horse.HorseName)
+                        ? $"Your registration for {registration.Horse.HorseName} has been rejected."
+                        : "Your registration has been rejected.",
+                    IsRead = false,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
             await _context.SaveChangesAsync();
 
