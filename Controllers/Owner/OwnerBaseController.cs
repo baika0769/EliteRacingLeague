@@ -65,7 +65,7 @@ public abstract class OwnerBaseController : ControllerBase
             });
         }
 
-        if (data.UserStatus == "Pending")
+        if (data.UserStatus == UserStatuses.Pending)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
@@ -152,7 +152,7 @@ public abstract class OwnerBaseController : ControllerBase
             });
         }
 
-        if (data.UserStatus != "Pending" && data.UserStatus != UserStatuses.Active)
+        if (data.UserStatus != UserStatuses.Pending && data.UserStatus != UserStatuses.Active)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new
             {

@@ -41,29 +41,31 @@ public class OwnerTournamentsController : OwnerBaseController
                 t.Race != null &&
                 t.Race.RaceDate >= today &&
                 t.Status == TournamentStatuses.OpenRegistration &&
-                t.Race.Status == RaceStatuses.Open &&
-                 t.Race.RaceRegistrations.Count < t.Race.MaxHorses &&
+                t.Race.RaceRegistrations.Count < t.Race.MaxHorses &&
                 !t.Race.RaceRegistrations.Any(r => r.OwnerId == ownerId.Value))
             .OrderBy(t => t.Race!.RaceDate)
-            .Take(5)
             .Select(t => new
-        {
-        t.TournamentId,
-        t.TournamentName,
-        RaceId = t.Race!.RaceId,
-        RaceDate = t.Race.RaceDate,
-        Location = t.Race.Location ?? t.Location
-    })
-    .ToListAsync();
+            {
+                t.TournamentId,
+                t.TournamentName,
+                RaceId = t.Race!.RaceId,
+                RaceStatus = t.Race.Status,
+                RaceDate = t.Race.RaceDate,
+                Location = t.Race.Location ?? t.Location
+            })
+            .ToListAsync();
 
-        var response = data.Select(t => new OwnerNewTournamentResponse
-        {
-            TournamentId = t.TournamentId,
-            TournamentName = t.TournamentName,
-            RaceId = t.RaceId,
-            RaceDate = t.RaceDate.ToString("yyyy-MM-dd"),
-            Location = t.Location
-        });
+        var response = data
+            .Where(t => RaceStatuses.CanRegister(t.RaceStatus))
+            .Take(5)
+            .Select(t => new OwnerNewTournamentResponse
+            {
+                TournamentId = t.TournamentId,
+                TournamentName = t.TournamentName,
+                RaceId = t.RaceId,
+                RaceDate = t.RaceDate.ToString("yyyy-MM-dd"),
+                Location = t.Location
+            });
 
         return Ok(response);
     }
