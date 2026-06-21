@@ -29,9 +29,16 @@ public static class RaceStatuses
             && All.Contains(status);
     }
 
+    public static readonly string[] RegisterableStatuses =
+    {
+        Scheduled,
+        AssignedReferee,
+        RefereeReady
+    };
+
     public static bool CanRegister(string? status)
     {
-        return status is Scheduled or AssignedReferee or RefereeReady;
+        return status != null && RegisterableStatuses.Contains(status);
     }
 
     public static bool IsClosedForPrediction(string? status)
