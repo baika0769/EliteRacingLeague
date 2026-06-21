@@ -267,6 +267,11 @@ public class JockeyInvitationsController : ControllerBase
         invitation.Status = InvitationStatuses.Accepted;
         invitation.RespondedAt = DateTime.UtcNow;
 
+        _context.Notifications.Add(CreateOwnerNotification(
+            invitation.InvitedByOwnerId,
+            "Invitation Accepted",
+            $"{invitation.Jockey.JockeyNavigation.FullName} accepted invitation for {invitation.Registration.Horse.HorseName}."));
+
         await _context.SaveChangesAsync();
 
         return Ok(new
@@ -311,6 +316,11 @@ public class JockeyInvitationsController : ControllerBase
 
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
+
+        _context.Notifications.Add(CreateOwnerNotification(
+            invitation.InvitedByOwnerId,
+            "Invitation Rejected",
+            $"{invitation.Jockey.JockeyNavigation.FullName} rejected invitation for {invitation.Registration.Horse.HorseName}."));
 
         await _context.SaveChangesAsync();
 
@@ -427,7 +437,26 @@ public class JockeyInvitationsController : ControllerBase
         return await _context.JockeyInvitations
             .Include(i => i.Registration)
                 .ThenInclude(r => r.Race)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Horse)
+            .Include(i => i.Jockey)
+                .ThenInclude(j => j.JockeyNavigation)
             .FirstOrDefaultAsync(i => i.InvitationId == invitationId
                 && i.JockeyId == jockeyId);
+    }
+
+    private static Notification CreateOwnerNotification(
+        int ownerId,
+        string title,
+        string message)
+    {
+        return new Notification
+        {
+            UserId = ownerId,
+            Title = title,
+            Message = message,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        };
     }
 }
