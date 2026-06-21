@@ -83,14 +83,6 @@ public class OwnerNotificationsController : OwnerBaseController
             .Distinct()
             .Count();
 
-        var upcomingRaces = await _context.RaceRegistrations
-            .AsNoTracking()
-            .CountAsync(r =>
-                r.OwnerId == ownerId.Value &&
-                r.Race.RaceDate >= DateTime.UtcNow &&
-                activeRegistrationStatuses.Contains(r.Status) &&
-                !excludedRaceStatuses.Contains(r.Race.Status));
-
         return Ok(new OwnerNotificationSummaryResponse
         {
             Unread = unread,

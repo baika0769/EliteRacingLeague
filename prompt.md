@@ -1,156 +1,56 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn tích hợp: đưa code mới từ nhánh `khaii` sang nền constants chuẩn của nhánh `test`.
-
-Bối cảnh:
-
-* `test` = nhánh chuẩn constants/status hiện tại.
-* `khaii` = nhánh có code mới nhưng có thể lệch constants.
-* `main` = nhánh cuối cùng cần sạch, đúng luồng.
-* Không merge thẳng `khaii` vào `main`.
-* Không merge toàn bộ nhánh `khaii`.
-* Làm trên nhánh tích hợp được tạo từ `test`.
+Giai đoạn kiểm tra và hoàn tất chuẩn hóa constants/status BE hiện tại.
 
 Lưu ý quan trọng:
 
-* Chỉ đọc và phân tích source code hiện tại trong workspace.
+* Chỉ đọc và phân tích source code hiện tại tôi vừa gửi.
 * Không dùng file cũ hoặc suy luận từ phiên bản cũ.
 * Nếu có nhiều file trùng tên hoặc nhiều phiên bản, ưu tiên file trong source hiện tại.
-* Code phải sạch, dễ tái sử dụng, dễ bảo trì.
-* Không lấy bừa file constants từ `khaii` nếu `test` đã đúng.
+* File nào đã đúng thì giữ nguyên, không sửa lại.
+* Chỉ sửa lỗi còn sót nếu phát hiện lệch constants/status.
 * Không sửa database.
 * Không migration.
-* Không đổi schema.
-* Không tự thêm field vào entity.
-* Không sửa connection string.
-* Không sửa appsettings nếu không liên quan trực tiếp.
-* Không sửa frontend nếu không được yêu cầu.
+* Không sửa frontend.
 * Không refactor lớn.
+* Không đổi nghiệp vụ ngoài phạm vi constants/status.
 * Không in code dài ra terminal.
-* Không push `main`.
-* Không merge vào `main` trong giai đoạn này.
-* Chỉ tạo nhánh tích hợp, sửa constants, build/test, commit, rồi báo cáo để tôi kiểm tra trước khi merge main.
+* Code sạch, dễ tái sử dụng, dễ bảo trì.
 
 Mục tiêu:
+Kiểm tra và hoàn tất các thay đổi chuẩn hóa constants/status sau:
 
-1. Đảm bảo workspace sạch trước khi checkout/chuyển nhánh.
-2. Tạo nhánh tích hợp từ `test`.
-3. Đưa từng phần code cần giữ từ `khaii` sang.
-4. Không lấy file constants từ `khaii` nếu `test` là chuẩn.
-5. Sửa toàn bộ code mới để bám constants/status hiện tại của `test`.
-6. Build/test pass.
-7. Commit trên nhánh tích hợp.
-8. Báo cáo rõ đã làm gì.
+1. RaceStatuses không còn Open, Closed, Completed.
+2. Owner đăng ký race dùng RaceStatuses.CanRegister().
+3. Owner/Jockey assignment không dùng RaceStatuses.Completed.
+4. Jockey Dashboard dùng helper IsCompletedForDashboard().
+5. Spectator Prediction dùng helper IsClosedForPrediction().
+6. Admin pending race result dùng RaceResultStatuses.RefereeConfirmed.
+7. Admin approve result cập nhật đúng RaceResult, Race, RaceRegistration.
+8. Admin/Spectator Prediction dùng RacePredictionStatuses.
+9. Admin assign referee dùng RefereeAssignmentStatuses.Assigned.
+10. Owner không còn hardcode status nghiệp vụ.
+11. Search toàn project không còn constant cũ trong Controllers/Services.
 
-Giai đoạn 0: Kiểm tra workspace an toàn
-
-Chạy:
-
-git status --short
-
-Nếu workspace có file chưa commit hoặc untracked thì DỪNG và báo rõ, không checkout/chuyển nhánh.
-
-Nếu chỉ có file hỗ trợ như:
-
-* AGENTS.md
-* prompt.md
-
-thì KHÔNG tự xóa, KHÔNG tự commit nếu chưa được phép.
-
-Hãy báo:
-
-"Workspace chưa sạch. Có file chưa được theo dõi hoặc chưa commit. Vui lòng commit/stash/xóa trước khi tiếp tục."
-
-Nếu tôi đã xử lý bằng stash/commit/xóa rồi thì mới tiếp tục.
-
-Giai đoạn 1: Kiểm tra branch remote/local
+Giai đoạn 0: Kiểm tra build nền
 
 Chạy:
+dotnet build
 
-git fetch origin
-git branch -a
+Nếu build đang lỗi:
 
-Đảm bảo có các nhánh:
+* Chỉ sửa lỗi build liên quan trực tiếp constants/status.
+* Không refactor rộng.
+* Không thêm chức năng mới.
 
-* test
-* khaii
-* main
+Giai đoạn 1: Kiểm tra Constants/RaceStatuses.cs
 
-Nếu thiếu nhánh nào thì dừng và báo rõ.
-
-Giai đoạn 2: Tạo nhánh tích hợp từ test
-
-Chạy:
-
-git checkout test
-git pull origin test
-git checkout -b integrate/khaii-features-on-current-constants
-
-Ý nghĩa:
-
-* Nhánh `integrate/khaii-features-on-current-constants` lấy constants đúng từ `test` làm nền.
-* Mọi code mới từ `khaii` phải sửa theo chuẩn constants của `test`.
-
-Không được checkout `main`.
-Không được merge `khaii`.
-
-Giai đoạn 3: Kiểm tra file khác nhau giữa test và khaii
-
-Chạy:
-
-git diff --name-status test..khaii
-
-Sau đó phân nhóm file khác nhau.
-
-Chỉ lấy các file thật sự cần giữ từ `khaii`.
-
-Tuyệt đối không checkout nguyên folder nếu chưa chắc đúng path.
-
-Ví dụ nếu cần phần Owner Notifications thì chỉ lấy đúng file thực tế sau khi xem diff, ví dụ:
-
-git checkout khaii -- Controllers/Owner/OwnerNotificationsController.cs
-git checkout khaii -- DTOs/Owner/Notifications
-
-Ví dụ nếu cần phần Owner Jockey Assignment:
-
-git checkout khaii -- Controllers/Owner/OwnerJockeyAssignmentController.cs
-git checkout khaii -- DTOs/Owner/OwnerJockeyAssignmentDtos.cs
-
-Ví dụ nếu cần phần Jockey Invitations:
-
-git checkout khaii -- Controllers/Jockey/JockeyInvitationsController.cs
-
-Ví dụ nếu cần phần Admin Race Registrations:
-
-git checkout khaii -- Controllers/Admin/AdminRaceRegistrationsController.cs
-
-Yêu cầu:
-
-* Nếu file đã tồn tại ở `test` và đang đúng constants thì không ghi đè bừa.
-* Nếu cần lấy code mới từ `khaii` vào file đã tồn tại, hãy mở diff và merge thủ công nội dung cần thiết.
-* Không checkout các file constants từ `khaii` nếu `test` đã là chuẩn.
-* Không checkout appsettings, .env, migration, database script, file backup.
-* Sau mỗi nhóm file, chạy:
-
-git diff --stat
-git diff --name-only
-
-Giai đoạn 4: Giữ constants chuẩn từ test
-
-Ưu tiên giữ constants từ `test`:
+File:
 
 * Constants/RaceStatuses.cs
-* Constants/RaceResultStatuses.cs
-* Constants/RaceRegistrationStatuses.cs
-* Constants/TournamentStatuses.cs
-* Constants/InvitationStatuses.cs
-* Constants/RacePredictionStatuses.cs
-* Constants/JockeyHealthStatuses.cs
-* Constants/UserStatuses.cs
-* Constants/UserRoles.cs
-* Constants/PrizeAwardStatuses.cs
 
-Quy ước RaceStatuses hiện tại:
+Yêu cầu đúng:
+RaceStatuses chỉ còn:
 
 * Scheduled
 * AssignedReferee
@@ -161,253 +61,368 @@ Quy ước RaceStatuses hiện tại:
 * Published
 * Cancelled
 
-Không dùng trong RaceStatuses:
+Không còn:
 
 * Open
 * Closed
 * Completed
 
-Nếu code mới từ `khaii` dùng 3 status cũ này thì phải sửa theo helper/status chuẩn của `test`.
+All phải chứa đúng 8 status trên.
 
-Giai đoạn 5: Rà soát lệch constants/status
+Phải có helper:
 
-Chạy:
+* CanRegister(string? status) => status == Scheduled
+* IsClosedForPrediction(string? status) => Ongoing/Finshed/ResultPending/Published/Cancelled
+* IsClosedForJockeyAssignment(string? status) => Ongoing/Finished/ResultPending/Published/Cancelled
+* IsCompletedForDashboard(string? status) => Finished/ResultPending/Published
 
-rg 'RaceStatuses.(Open|Closed|Completed)' .
-rg 'Status == "Open"|r.Status == "Open"' .
-rg 'PredictionStatuses' Controllers
-rg '"Approved"|"JockeyInvited"|"ReadyToRace"|"Pending"|"Rejected"|"Cancelled"|"Completed"' Controllers
+Nếu đã đúng thì không sửa.
 
-Mục tiêu sửa:
+Giai đoạn 2: Kiểm tra Owner xem tournament/race và đăng ký race
 
-* RaceStatuses.Open → RaceStatuses.CanRegister(...) hoặc RaceStatuses.Scheduled theo ngữ cảnh.
-* RaceStatuses.Completed → RaceStatuses.Finished / RaceStatuses.ResultPending / RaceStatuses.Published hoặc helper phù hợp.
-* RaceStatuses.Closed → helper đóng race phù hợp.
-* PredictionStatuses → RacePredictionStatuses.
-* Hardcode status → constants tương ứng nếu đó là status nghiệp vụ.
-
-Không sửa chuỗi message hiển thị cho người dùng.
-Không sửa label UI/API response nếu chỉ là text mô tả.
-Không sửa text trong documentation nếu không ảnh hưởng compile/runtime.
-
-Giai đoạn 6: Sửa Owner đăng ký race theo constants hiện tại
-
-Nếu thấy:
-
-race.Status == RaceStatuses.Open
-
-hoặc:
-
-race.Status != RaceStatuses.Open
-
-thì sửa thành:
-
-RaceStatuses.CanRegister(race.Status)
-
-hoặc:
-
-!RaceStatuses.CanRegister(race.Status)
-
-Quy ước đúng:
-
-* Tournament.Status = TournamentStatuses.OpenRegistration.
-* Race.Status = RaceStatuses.Scheduled.
-* Owner chỉ đăng ký khi tournament đang mở đăng ký và race có thể đăng ký.
-
-Các file thường cần kiểm tra:
+File:
 
 * Controllers/Owner/OwnerTournamentsController.cs
+
+Kiểm tra:
+
+* Không còn t.Race.Status == RaceStatuses.Open.
+* Phải dùng RaceStatuses.CanRegister(t.Race.Status).
+* Vẫn giữ điều kiện TournamentStatuses.OpenRegistration.
+
+File:
+
 * Controllers/Owner/OwnerRegistrationsController.cs
+
+Kiểm tra:
+
+* Không còn race.Status != RaceStatuses.Open.
+* Không còn tự check Scheduled rời rạc nếu đã có helper.
+* Đăng ký race phải dùng:
+  RaceStatuses.CanRegister(...)
+  hoặc !RaceStatuses.CanRegister(...)
+
+File:
+
 * Controllers/Owner/OwnerRacesController.cs
 
-Giai đoạn 7: Sửa Owner Notifications nếu lệch RaceStatuses
+Kiểm tra:
 
-Trong:
+* Không còn r.Status == "Open".
+* Phải dùng RaceStatuses.CanRegister(r.Status).
+* Vẫn giữ điều kiện Owner xem được race nếu đã có RaceRegistration:
+  RaceStatuses.CanRegister(r.Status) ||
+  r.RaceRegistrations.Any(rr => rr.OwnerId == ownerId.Value)
 
-Controllers/Owner/OwnerNotificationsController.cs
+Kiểm tra thêm:
 
-Nếu có:
+* Không còn registration.Race.Status == RaceStatuses.Completed.
+* Nếu kiểm tra race đóng thì dùng:
+  RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status)
 
-RaceStatuses.Completed
+Giai đoạn 3: Kiểm tra Owner/Jockey Assignment
 
-thì bỏ, vì Race không dùng Completed nữa.
+File:
 
-Ưu tiên dùng helper nếu `test` có:
+* Controllers/Owner/OwnerJockeyAssignmentController.cs
 
-!RaceStatuses.IsClosedForJockeyAssignment(r.Race.Status)
+Kiểm tra:
 
-Nếu helper chưa có thì dùng rõ các status đóng:
+* Không còn RaceStatuses.Completed.
+* Không còn logic:
+  RaceStatus == RaceStatuses.Completed
+  RaceStatus != RaceStatuses.Completed
 
-r.Race.Status != RaceStatuses.Ongoing &&
-r.Race.Status != RaceStatuses.Finished &&
-r.Race.Status != RaceStatuses.ResultPending &&
-r.Race.Status != RaceStatuses.Published &&
-r.Race.Status != RaceStatuses.Cancelled
+Phải dùng:
 
-Không dùng RaceStatuses.Completed cho Race.
+* RaceStatuses.IsClosedForJockeyAssignment(...)
+* hoặc !RaceStatuses.IsClosedForJockeyAssignment(...)
 
-Giai đoạn 8: Sửa Admin pending results
+Áp dụng cho:
 
-Trong:
+* data.RaceStatus
+* registration.Race.Status
+* registration.RaceStatus nếu có
+
+Luồng đúng:
+Đóng luồng mời/chọn Jockey khi Race là:
+
+* Ongoing
+* Finished
+* ResultPending
+* Published
+* Cancelled
+
+Giai đoạn 4: Kiểm tra Jockey Dashboard
+
+File:
+
+* Controllers/Jockey/JockeyDashboardController.cs
+
+Kiểm tra:
+
+* Không còn RaceStatuses.Completed.
+* Race đã xong phải dùng:
+  RaceStatuses.IsCompletedForDashboard(r.Race.Status)
+
+Race được xem là đã xong nếu:
+
+* Finished
+* ResultPending
+* Published
+
+Giai đoạn 5: Kiểm tra Spectator Prediction
+
+File:
+
+* Controllers/Spectator/SpectatorPredictionsController.cs
+
+Kiểm tra:
+
+* Không còn check thủ công:
+  RaceStatuses.Cancelled ||
+  RaceStatuses.Ongoing ||
+  RaceStatuses.Completed ||
+  RaceStatuses.ResultPending ||
+  RaceStatuses.Published
+
+Phải dùng:
+RaceStatuses.IsClosedForPrediction(race.Status)
+
+Spectator không prediction được khi Race là:
+
+* Ongoing
+* Finished
+* ResultPending
+* Published
+* Cancelled
+
+Giai đoạn 6: Kiểm tra Admin pending race result
+
+File:
 
 * Controllers/Admin/AdminRaceResultsController.cs
+
+Kiểm tra pending result:
+
+* Không dùng RaceResultStatuses.Draft.
+* Phải dùng RaceResultStatuses.RefereeConfirmed.
+
+File:
+
 * Controllers/Admin/AdminDashboardController.cs
 
-Nếu pending result đang lấy:
+Kiểm tra count pending result:
 
-RaceResultStatuses.Draft
+* Không count Draft.
+* Phải count RefereeConfirmed.
 
-thì đổi thành:
+Luồng đúng:
+Referee nhập result -> Draft
+Referee confirm -> RefereeConfirmed
+Admin pending result -> lấy RefereeConfirmed
 
-RaceResultStatuses.RefereeConfirmed
+Giai đoạn 7: Kiểm tra Admin approve result
 
-Quy ước:
+File:
 
-* Draft = Referee mới nhập result.
-* RefereeConfirmed = Referee đã xác nhận, Admin mới duyệt.
+* Controllers/Admin/AdminRaceResultsController.cs
 
-Giai đoạn 9: Sửa Admin approve result đúng luồng
+Khi Admin approve result, cần đúng:
 
-Khi Admin approve result, đảm bảo đúng:
+* Chỉ approve nếu result.Status == RaceResultStatuses.RefereeConfirmed.
+* Nếu không đúng thì trả BadRequest rõ ràng.
+* Set result.Status = RaceResultStatuses.AdminApproved.
+* Set result.PublishedAt = DateTime.UtcNow.
+* Set result.UpdatedAt = DateTime.UtcNow nếu field có.
+* Set result.Registration.Status = RaceRegistrationStatuses.Completed.
 
-RaceResult.Status = RaceResultStatuses.AdminApproved
-Race.Status = RaceStatuses.Published
-RaceRegistration.Status = RaceRegistrationStatuses.Completed
+Kiểm tra logic publish race:
+
+* Nếu race chỉ có một result hoặc tất cả result khác đã AdminApproved thì:
+  result.Race.Status = RaceStatuses.Published
+  result.Race.UpdatedAt = DateTime.UtcNow
+
+Không phá logic PrizeAward hiện có.
+Không tạo PrizeAward nếu không có PrizeRule, trừ khi code hiện tại đã có rule khác.
+
+Giai đoạn 8: Kiểm tra Admin Prediction dùng đúng constants
+
+File:
+
+* Controllers/Admin/AdminPredictionsController.cs
+* Controllers/Spectator/SpectatorPredictionsController.cs
 
 Yêu cầu:
 
-* Không phá logic tạo/cập nhật PrizeAward hiện có.
-* Nếu đã có PrizeAward logic thì giữ lại.
-* Không tạo PrizeAward nếu không có PrizeRule, trừ khi logic hiện tại đã quy định khác.
-* Không sửa SpectatorRewardsController.
+* Không dùng PredictionStatuses trong Controllers/Services.
+* Phải dùng RacePredictionStatuses:
 
-Giai đoạn 10: Sửa Prediction constants
+  * RacePredictionStatuses.Pending
+  * RacePredictionStatuses.All
+  * RacePredictionStatuses.Locked
+  * RacePredictionStatuses.Evaluated
+  * RacePredictionStatuses.Cancelled nếu có
 
-Trong Controllers/Admin và Controllers/Spectator, nếu còn dùng:
+PredictionStatuses.cs có thể giữ lại để tránh refactor lớn, nhưng Controllers/Services không dùng nữa.
 
-PredictionStatuses.Pending
-PredictionStatuses.Locked
-PredictionStatuses.Evaluated
-PredictionStatuses.Cancelled
+Giai đoạn 9: Kiểm tra Admin assign referee
 
-thì sửa thành:
+File:
 
-RacePredictionStatuses.Pending
-RacePredictionStatuses.Locked
-RacePredictionStatuses.Evaluated
-RacePredictionStatuses.Cancelled
+* Controllers/Admin/AdminTournamentsController.cs
 
-Không bắt buộc xóa PredictionStatuses.cs nếu còn để tránh refactor lớn.
+Yêu cầu:
 
-Giai đoạn 11: Giảm hardcode status trong Controllers
+* Không còn Status = "Assigned".
+* Phải dùng:
+  RefereeAssignmentStatuses.Assigned
 
-Các hardcode status nghiệp vụ như:
+Khi existing assignment != null:
+
+* Ngoài cập nhật RefereeId và AssignedAt, phải set:
+  existing.Status = RefereeAssignmentStatuses.Assigned
+
+Mục tiêu:
+Nếu assignment cũ từng Cancelled, Admin gán lại Referee thì status quay về Assigned.
+
+Giai đoạn 10: Kiểm tra hardcode status trong Owner
+
+File:
+
+* Controllers/Owner/OwnerBaseController.cs
+
+Yêu cầu:
+
+* Không còn data.UserStatus == "Pending".
+* Không còn data.UserStatus != "Pending".
+* Phải dùng UserStatuses.Pending.
+
+File:
+
+* Controllers/Owner/OwnerRegistrationsController.cs
+
+Journey key phải dùng constants:
+
+* RaceRegistrationStatuses.Approved
+* RaceRegistrationStatuses.JockeyInvited
+* RaceRegistrationStatuses.ReadyToRace
+
+Không hardcode:
 
 * "Approved"
 * "JockeyInvited"
 * "ReadyToRace"
-* "Pending"
-* "Rejected"
-* "Cancelled"
-* "Active"
-* "Inactive"
-* "Banned"
 
-Nếu thuộc nghiệp vụ status thì thay bằng constants tương ứng:
+File:
 
-* RaceRegistrationStatuses
-* InvitationStatuses
-* UserStatuses
-* RaceResultStatuses
-* RacePredictionStatuses
-* PrizeAwardStatuses
+* Constants/HorseActivityStatuses.cs
+* Controllers/Owner/OwnerHorsesController.cs
 
-Không sửa message tiếng Việt.
-Không sửa label hiển thị.
-Không sửa các text không phải status nghiệp vụ.
+Nếu đã có HorseActivityStatuses thì kiểm tra:
 
-Giai đoạn 12: Build và test
+* HorseActivityStatuses.Active
+* HorseActivityStatuses.Inactive
 
-Chạy:
+OwnerHorsesController không nên hardcode "Active"/"Inactive" cho trạng thái ngựa.
 
-dotnet build
+Lý do:
 
-Nếu project có test:
+* UserStatuses.Active là trạng thái tài khoản.
+* HorseActivityStatuses.Active là trạng thái bật/tắt ngựa.
 
-dotnet test
+Giai đoạn 11: Search kiểm tra toàn project
 
-Nếu build lỗi:
+Chạy các lệnh:
 
-* Chỉ sửa lỗi liên quan đến file vừa tích hợp.
-* Không refactor rộng.
-* Không đổi nghiệp vụ ngoài constants/status.
-* Không sửa DB/migration.
-
-Test nhanh các luồng chính:
-
-1. Owner thấy tournament OpenRegistration + race Scheduled.
-2. Owner đăng ký được race Scheduled.
-3. Owner không đăng ký race Ongoing/Finished/ResultPending/Published/Cancelled.
-4. Owner Notifications không dùng RaceStatuses.Completed.
-5. Owner Jockey Assignment vẫn build.
-6. Jockey Accept/Reject Invitation vẫn đúng.
-7. Admin approve/reject registration vẫn đúng.
-8. Referee nhập result Draft.
-9. Referee confirm result thành RefereeConfirmed.
-10. Admin pending result thấy RefereeConfirmed.
-11. Admin approve result cập nhật RaceResult/Race/RaceRegistration đúng.
-12. Spectator prediction dùng RacePredictionStatuses.
-13. Jockey dashboard không phụ thuộc RaceStatuses.Completed.
-
-Giai đoạn 13: Kiểm tra trước khi commit
-
-Chạy lại:
-
-rg 'RaceStatuses.(Open|Closed|Completed)' Controllers
-rg 'PredictionStatuses' Controllers
-rg 'Status == "Open"|r.Status == "Open"' Controllers
+rg -n "RaceStatuses.(Open|Closed|Completed)|r.Status == "Open"|"Open"" Controllers Services Constants -S
 
 Kết quả mong muốn:
 
-* Không còn RaceStatuses.Open trong Controllers.
-* Không còn RaceStatuses.Completed trong Controllers.
-* Không còn RaceStatuses.Closed trong Controllers.
-* Không còn PredictionStatuses trong Controllers.
-* Không còn hardcode "Open" cho Race trong Controllers.
+* Không còn lỗi trong Controllers/Services.
+* Không còn RaceStatuses.Open/Closed/Completed.
 
-Nếu còn:
+Chạy:
 
-* Sửa theo constants/helper chuẩn của `test`.
-* Chạy lại dotnet build.
+rg -n 'Status = "Assigned"|"Assigned"' Controllers Services -S
 
-Giai đoạn 14: Commit nhánh tích hợp
+Kết quả mong muốn:
 
-Sau khi build pass và rà soát pass:
+* Không còn Status = "Assigned" trong Controllers/Services.
+* Nếu còn chuỗi "Assigned" là message/label không phải status thì ghi rõ.
 
-git status --short
-git diff --stat
-git add .
-git commit -m "integrate khaii features with current status constants"
+Chạy:
 
-Không merge vào main.
-Không push main.
+rg -n "RaceResultStatuses.Draft" Controllers/Admin -S
 
-Giai đoạn 15: Báo cáo kết quả
+Kết quả mong muốn:
 
-Sau khi làm xong, chỉ trả lời tối đa 15 dòng:
+* Không còn trong Admin pending/approve flow.
+* RaceResultStatuses.Draft còn ở RefereeRacesController.cs là đúng vì Referee nhập result ban đầu là Draft.
 
-1. Workspace ban đầu có sạch không
-2. Đã tạo nhánh tích hợp từ test chưa
-3. File/nhóm chức năng đã lấy từ khaii
-4. Có lấy file constants từ khaii không
-5. Constants nào được giữ từ test
-6. Đã sửa RaceStatuses.Open ở đâu
-7. Đã sửa RaceStatuses.Completed/Closed ở đâu
-8. Đã sửa hardcode "Open" ở đâu
-9. Admin pending result đã dùng RefereeConfirmed chưa
-10. Admin approve result đã cập nhật Race/Registration chưa
-11. Prediction đã dùng RacePredictionStatuses chưa
-12. Kết quả rg kiểm tra constants cũ
-13. dotnet build kết quả
-14. dotnet test kết quả nếu có
-15. Lỗi còn lại nếu có
+Chạy:
+
+rg -n "\bPredictionStatuses\b" Controllers Services -S
+
+Kết quả mong muốn:
+
+* Không còn dùng PredictionStatuses trong Controllers/Services.
+
+Chạy:
+
+rg -n '"Pending"|"Active"|"Inactive"|"Approved"|"JockeyInvited"|"ReadyToRace"|"Completed"|"Cancelled"' Controllers Services -S
+
+Yêu cầu:
+
+* Nếu là hardcode status nghiệp vụ thì đổi sang constants.
+* Không sửa chuỗi message tiếng Việt/tiếng Anh hiển thị.
+* Không sửa label không phải status.
+* Nếu còn chuỗi hợp lệ không phải status thì báo rõ.
+
+Giai đoạn 12: Test nhanh nghiệp vụ
+
+Test build:
+
+* dotnet build phải pass.
+
+Test Owner:
+
+1. Tournament OpenRegistration + Race Scheduled.
+2. Owner thấy race/tournament để đăng ký.
+3. Owner đăng ký được race Scheduled.
+4. Owner không đăng ký được race Ongoing/Finished/ResultPending/Published/Cancelled.
+
+Test Admin Result:
+
+1. Referee tạo Draft.
+2. Referee confirm thành RefereeConfirmed.
+3. Admin pending result thấy RefereeConfirmed.
+4. Admin approve result.
+5. RaceResult = AdminApproved.
+6. RaceRegistration = Completed.
+7. Race = Published khi đủ điều kiện.
+
+Test Prediction:
+
+1. Controller dùng RacePredictionStatuses.
+2. Spectator không prediction được race đã đóng theo IsClosedForPrediction.
+
+Test Jockey:
+
+1. Jockey dashboard không dùng RaceStatuses.Completed.
+2. Completed dashboard tính bằng IsCompletedForDashboard.
+
+Sau khi sửa xong chỉ trả lời tối đa 12 dòng:
+
+1. Build nền ban đầu có lỗi không
+2. File đã sửa
+3. RaceStatuses hiện còn Open/Closed/Completed không
+4. Owner register race đã dùng CanRegister chưa
+5. Owner/Jockey assignment đã dùng IsClosedForJockeyAssignment chưa
+6. JockeyDashboard đã dùng IsCompletedForDashboard chưa
+7. SpectatorPredictions đã dùng IsClosedForPrediction chưa
+8. Admin pending result đã dùng RefereeConfirmed chưa
+9. Admin approve result đã cập nhật Race/Registration đúng chưa
+10. PredictionStatuses còn dùng trong Controllers/Services không
+11. Hardcode status nghiệp vụ còn sót không
+12. Build command/lỗi còn lại

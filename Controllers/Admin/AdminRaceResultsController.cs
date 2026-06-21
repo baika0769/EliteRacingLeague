@@ -133,6 +133,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             result.Status = RaceResultStatuses.AdminApproved;
             result.PublishedAt = now;
+            result.UpdatedAt = now;
 
             if (registration != null)
             {

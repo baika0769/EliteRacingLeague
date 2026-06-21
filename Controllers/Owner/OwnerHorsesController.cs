@@ -224,11 +224,11 @@ public class OwnerHorsesController : OwnerBaseController
 
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (status == "Active")
+            if (status == HorseActivityStatuses.Active)
             {
                 query = query.Where(h => h.IsActive);
             }
-            else if (status == "Inactive")
+            else if (status == HorseActivityStatuses.Inactive)
             {
                 query = query.Where(h => !h.IsActive);
             }
@@ -259,7 +259,9 @@ public class OwnerHorsesController : OwnerBaseController
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
                 IsActive = h.IsActive,
-                Status = h.IsActive ? "Active" : "Inactive",
+                Status = h.IsActive
+                    ? HorseActivityStatuses.Active
+                    : HorseActivityStatuses.Inactive,
                 InRaceCount = h.RaceRegistrations.Count
             })
             .ToListAsync();
@@ -308,7 +310,9 @@ public class OwnerHorsesController : OwnerBaseController
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
                 IsActive = h.IsActive,
-                Status = h.IsActive ? "Active" : "Inactive",
+                Status = h.IsActive
+                    ? HorseActivityStatuses.Active
+                    : HorseActivityStatuses.Inactive,
                 InRaceCount = h.RaceRegistrations.Count
             })
             .FirstOrDefaultAsync();
@@ -455,7 +459,9 @@ public class OwnerHorsesController : OwnerBaseController
                 : "Ngựa đã được chuyển sang Inactive.",
             horseId = horse.HorseId,
             isActive = horse.IsActive,
-            status = horse.IsActive ? "Active" : "Inactive"
+            status = horse.IsActive
+                ? HorseActivityStatuses.Active
+                : HorseActivityStatuses.Inactive
         });
     }
 
