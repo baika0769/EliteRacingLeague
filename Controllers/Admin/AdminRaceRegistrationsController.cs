@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Models;
 using System.Security.Claims;
  
 namespace Eliteracingleague.API.Controllers.Admin
@@ -80,6 +81,9 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> ApproveRegistration(int id)
         {
             var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
+                .Include(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -92,10 +96,19 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             var adminId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var statusChanged = registration.Status != RaceRegistrationStatuses.Approved;
 
             registration.Status = RaceRegistrationStatuses.Approved;
             registration.ReviewedBy = adminId;
             registration.ReviewedAt = DateTime.UtcNow;
+
+            if (statusChanged)
+            {
+                _context.Notifications.Add(CreateOwnerNotification(
+                    registration.OwnerId,
+                    "Registration Approved",
+                    $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."));
+            }
 
             await _context.SaveChangesAsync();
 
@@ -136,6 +149,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> RejectRegistration(int id)
         {
             var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -147,9 +161,19 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var statusChanged = registration.Status != RaceRegistrationStatuses.Rejected;
+
             registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedAt = DateTime.UtcNow;
             registration.AdminNote = "Rejected by admin";
+
+            if (statusChanged)
+            {
+                _context.Notifications.Add(CreateOwnerNotification(
+                    registration.OwnerId,
+                    "Registration Rejected",
+                    $"Your registration for {registration.Horse.HorseName} has been rejected."));
+            }
 
             await _context.SaveChangesAsync();
 
@@ -159,6 +183,21 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Id = registration.RegistrationId,
                 Status = registration.Status
             });
+        }
+
+        private static Notification CreateOwnerNotification(
+            int ownerId,
+            string title,
+            string message)
+        {
+            return new Notification
+            {
+                UserId = ownerId,
+                Title = title,
+                Message = message,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow
+            };
         }
     }
 }
