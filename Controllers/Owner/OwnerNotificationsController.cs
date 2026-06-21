@@ -382,7 +382,7 @@ public class OwnerNotificationsController : OwnerBaseController
 
         if (ContainsAny(content, "Approved"))
         {
-            return "Approved";
+            return RaceRegistrationStatuses.Approved;
         }
 
         if (ContainsAny(content, "Accepted", "Confirmed", "Official"))
@@ -402,7 +402,7 @@ public class OwnerNotificationsController : OwnerBaseController
 
         if (ContainsAny(content, "Pending"))
         {
-            return "Pending";
+            return RaceRegistrationStatuses.Pending;
         }
 
         return null;
