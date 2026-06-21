@@ -43,13 +43,7 @@ public class OwnerRegistrationsController : OwnerBaseController
     private static string? GetHorseIneligibleReason(
         bool isActive,
         string healthStatus,
-        bool alreadyRegistered,
-        int age,
-        decimal weightKg,
-        int? minAge,
-        int? maxAge,
-        decimal? minWeight,
-        decimal? maxWeight)
+        bool alreadyRegistered)
     {
         if (!isActive)
         {
@@ -64,26 +58,6 @@ public class OwnerRegistrationsController : OwnerBaseController
         if (healthStatus != HorseHealthStatuses.Healthy)
         {
             return "Ngựa không ở trạng thái Healthy.";
-        }
-
-        if (minAge.HasValue && age < minAge.Value)
-        {
-            return $"Ngựa chưa đủ tuổi tối thiểu {minAge.Value}.";
-        }
-
-        if (maxAge.HasValue && age > maxAge.Value)
-        {
-            return $"Ngựa vượt quá tuổi tối đa {maxAge.Value}.";
-        }
-
-        if (minWeight.HasValue && weightKg < minWeight.Value)
-        {
-            return $"Ngựa chưa đạt cân nặng tối thiểu {minWeight.Value}kg.";
-        }
-
-        if (maxWeight.HasValue && weightKg > maxWeight.Value)
-        {
-            return $"Ngựa vượt quá cân nặng tối đa {maxWeight.Value}kg.";
         }
 
         return null;
@@ -206,10 +180,7 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.Status,
                 r.RaceDate,
                 TournamentStatus = r.Tournament.Status,
-                TournamentMinAge = r.Tournament.MinHorseAge,
-                TournamentMaxAge = r.Tournament.MaxHorseAge,
-                TournamentMinWeight = r.Tournament.MinHorseWeightKg,
-                TournamentMaxWeight = r.Tournament.MaxHorseWeightKg
+                
             })
             .FirstOrDefaultAsync();
 
@@ -265,15 +236,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var response = horses.Select(h =>
         {
             var reason = GetHorseIneligibleReason(
-                h.IsActive,
-                h.HealthStatus,
-                h.AlreadyRegistered,
-                h.Age,
-                h.WeightKg,
-                race.TournamentMinAge,
-                race.TournamentMaxAge,
-                race.TournamentMinWeight,
-                race.TournamentMaxWeight);
+    h.IsActive,
+    h.HealthStatus,
+    h.AlreadyRegistered);
+
 
             return new OwnerEligibleHorseResponse
             {
@@ -368,18 +334,12 @@ public class OwnerRegistrationsController : OwnerBaseController
         }
 
         var ineligibleReason = GetHorseIneligibleReason(
-            horse.IsActive,
-            horse.HealthStatus,
-            horse.RaceRegistrations.Any(r =>
-                r.RaceId == request.RaceId &&
-                r.Status != RaceRegistrationStatuses.Rejected &&
-                r.Status != RaceRegistrationStatuses.Cancelled),
-            horse.Age,
-            horse.WeightKg,
-            race.Tournament.MinHorseAge,
-            race.Tournament.MaxHorseAge,
-            race.Tournament.MinHorseWeightKg,
-            race.Tournament.MaxHorseWeightKg);
+    horse.IsActive,
+    horse.HealthStatus,
+    horse.RaceRegistrations.Any(r =>
+        r.RaceId == request.RaceId &&
+        r.Status != RaceRegistrationStatuses.Rejected &&
+        r.Status != RaceRegistrationStatuses.Cancelled));
 
         if (ineligibleReason != null)
         {
