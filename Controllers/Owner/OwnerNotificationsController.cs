@@ -1,6 +1,5 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
-using Eliteracingleague.API.DTOs.Owner;
 using Eliteracingleague.API.DTOs.Owner.Notifications;
 using Eliteracingleague.API.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -124,22 +123,16 @@ public class OwnerNotificationsController : OwnerBaseController
             .Take(pageSize)
             .ToListAsync();
 
-        var response = new OwnerHorseListResponse
+        var response = new OwnerNotificationListResponse
         {
             Page = page,
             PageSize = pageSize,
             TotalItems = totalItems,
-            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize)
+            TotalPages = (int)Math.Ceiling(totalItems / (double)pageSize),
+            Items = notifications.Select(MapListItem).ToList()
         };
 
-        return Ok(new
-        {
-            response.Page,
-            response.PageSize,
-            response.TotalItems,
-            response.TotalPages,
-            Items = notifications.Select(MapListItem).ToList()
-        });
+        return Ok(response);
     }
 
     [HttpGet("{notificationId:int}")]
