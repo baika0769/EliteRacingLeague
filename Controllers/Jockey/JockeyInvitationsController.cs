@@ -464,4 +464,19 @@ public class JockeyInvitationsController : ControllerBase
             .FirstOrDefaultAsync(i => i.InvitationId == invitationId
                 && i.JockeyId == jockeyId);
     }
+
+    private static Notification CreateOwnerNotification(
+        int ownerId,
+        string title,
+        string message)
+    {
+        return new Notification
+        {
+            UserId = ownerId,
+            Title = title,
+            Message = message,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        };
+    }
 }

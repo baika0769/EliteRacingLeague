@@ -153,6 +153,14 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (statusChanged)
+            {
+                _context.Notifications.Add(CreateOwnerNotification(
+                    registration.OwnerId,
+                    "Registration Approved",
+                    $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."));
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
@@ -218,6 +226,21 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = registration.Status,
                 Note = registration.AdminNote
             });
+        }
+
+        private static Notification CreateOwnerNotification(
+            int ownerId,
+            string title,
+            string message)
+        {
+            return new Notification
+            {
+                UserId = ownerId,
+                Title = title,
+                Message = message,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow
+            };
         }
     }
 }

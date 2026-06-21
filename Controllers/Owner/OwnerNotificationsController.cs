@@ -1,5 +1,6 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.DTOs.Owner;
 using Eliteracingleague.API.DTOs.Owner.Notifications;
 using Eliteracingleague.API.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -201,8 +202,11 @@ public class OwnerNotificationsController : OwnerBaseController
             return NotFound(new { message = "Notification not found." });
         }
 
+        if (!notification.IsRead)
+        {
         notification.IsRead = true;
         await _context.SaveChangesAsync();
+        }
 
         return Ok(new OwnerNotificationMarkReadResponse
         {
@@ -236,7 +240,10 @@ public class OwnerNotificationsController : OwnerBaseController
             notification.IsRead = true;
         }
 
+        if (notifications.Count > 0)
+        {
         await _context.SaveChangesAsync();
+        }
 
         return Ok(new OwnerNotificationMarkAllReadResponse
         {
@@ -263,6 +270,7 @@ public class OwnerNotificationsController : OwnerBaseController
                 (n.Title.Contains("Registration") ||
                  n.Message.Contains("Registration") ||
                  n.Title.Contains("đăng ký") ||
+                n.Message.Contains("Registration") ||
                  n.Message.Contains("đăng ký") ||
                  n.Title.Contains("Approved") ||
                  n.Message.Contains("Approved") ||
@@ -374,7 +382,7 @@ public class OwnerNotificationsController : OwnerBaseController
 
         if (ContainsAny(content, "Approved"))
         {
-            return "Approved";
+            return RaceRegistrationStatuses.Approved;
         }
 
         if (ContainsAny(content, "Accepted", "Confirmed", "Official"))
@@ -394,7 +402,7 @@ public class OwnerNotificationsController : OwnerBaseController
 
         if (ContainsAny(content, "Pending"))
         {
-            return "Pending";
+            return RaceRegistrationStatuses.Pending;
         }
 
         return null;

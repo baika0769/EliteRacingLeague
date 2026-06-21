@@ -80,7 +80,7 @@ public class OwnerRegistrationsController : OwnerBaseController
 
 
     [HttpGet("open-tournaments")]
-    public async Task<IActionResult> GetOpenTournaments([FromQuery] int limit = 3)
+    public async Task<IActionResult> GetOpenTournaments([FromQuery] int limit = 6)
     {
         var ownerId = GetCurrentUserId();
 
@@ -96,17 +96,31 @@ public class OwnerRegistrationsController : OwnerBaseController
             return ownerProfileError;
         }
 
-        if (limit <= 0) limit = 3;
-        if (limit > 20) limit = 20;
+        if (limit <= 0)
+        {
+            limit = 6;
+        }
+
+        if (limit > 20)
+        {
+            limit = 20;
+        }
 
         var today = DateTime.UtcNow.Date;
+
+        var registerableRaceStatuses = new[]
+        {
+        RaceStatuses.Scheduled,
+        RaceStatuses.AssignedReferee,
+        RaceStatuses.RefereeReady
+    };
 
         var data = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
                 t.Race != null &&
-                t.Race.Status == RaceStatuses.Scheduled &&
+                registerableRaceStatuses.Contains(t.Race.Status) &&
                 t.Race.RaceDate >= today)
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
@@ -115,13 +129,17 @@ public class OwnerRegistrationsController : OwnerBaseController
                 t.TournamentName,
                 t.Location,
                 t.PrizePool,
+                t.ImageUrl,
+
                 RaceId = t.Race!.RaceId,
                 RaceDate = t.Race.RaceDate,
                 DistanceMeters = t.Race.DistanceMeters,
                 MaxHorses = t.Race.MaxHorses,
+
                 RegisteredCount = t.Race.RaceRegistrations.Count(r =>
                     r.Status != RaceRegistrationStatuses.Rejected &&
                     r.Status != RaceRegistrationStatuses.Cancelled),
+
                 OwnerAlreadyRegistered = t.Race.RaceRegistrations.Any(r =>
                     r.OwnerId == ownerId.Value &&
                     r.Status != RaceRegistrationStatuses.Rejected &&
@@ -145,8 +163,9 @@ public class OwnerRegistrationsController : OwnerBaseController
                 RegisteredCount = t.RegisteredCount,
                 AvailableSlots = Math.Max(0, t.MaxHorses - t.RegisteredCount),
                 OwnerAlreadyRegistered = t.OwnerAlreadyRegistered,
-                ImageUrl = null
-            });
+                ImageUrl = t.ImageUrl
+            })
+            .ToList();
 
         return Ok(response);
     }
@@ -197,7 +216,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             });
         }
 
-        if (race.Status != RaceStatuses.Scheduled)
+        if (!RaceStatuses.CanRegister(race.Status))
         {
             return BadRequest(new
             {
