@@ -31,7 +31,7 @@ public static class RaceStatuses
 
     public static bool CanRegister(string? status)
     {
-        return status == Scheduled;
+        return status is Scheduled or AssignedReferee or RefereeReady;
     }
 
     public static bool IsClosedForPrediction(string? status)

@@ -48,6 +48,7 @@ public class OwnerTournamentsController : OwnerBaseController
             {
                 t.TournamentId,
                 t.TournamentName,
+                t.ImageUrl,
                 RaceId = t.Race!.RaceId,
                 RaceStatus = t.Race.Status,
                 RaceDate = t.Race.RaceDate,
