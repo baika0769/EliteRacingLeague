@@ -19,13 +19,7 @@ public partial class Tournament
 
     public int MaxHorses { get; set; }
 
-    public int? MinHorseAge { get; set; }
-
-    public int? MaxHorseAge { get; set; }
-
-    public decimal? MinHorseWeightKg { get; set; }
-
-    public decimal? MaxHorseWeightKg { get; set; }
+    public string? ImageUrl { get; set; }
 
     public decimal? PrizePool { get; set; }
 
