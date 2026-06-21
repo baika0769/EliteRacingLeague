@@ -174,11 +174,10 @@ namespace Eliteracingleague.API.Controllers.Admin
 
         [HttpPut("{id:int}/reject")]
         public async Task<IActionResult> RejectRegistration(
-            int id,
-            [FromBody] AdminRejectRegistrationRequest? request)
+    int id,
+    [FromBody] AdminRejectRegistrationRequest? request)
         {
             var registration = await _context.RaceRegistrations
-                .Include(r => r.Horse)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -190,7 +189,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var statusChanged = registration.Status != RaceRegistrationStatuses.Rejected;
+            if (registration.Status != RaceRegistrationStatuses.Pending)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only pending registrations can be rejected",
+                    Id = id,
+                    Status = registration.Status
+                });
+            }
+
+            var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (!int.TryParse(adminIdText, out var adminId))
+            {
+                return Unauthorized(new AdminActionResponse
+                {
+                    Message = "Invalid admin token",
+                    Id = id
+                });
+            }
 
             registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedBy = adminId;
@@ -198,28 +216,6 @@ namespace Eliteracingleague.API.Controllers.Admin
             registration.AdminNote = string.IsNullOrWhiteSpace(request?.AdminNote)
                 ? "Rejected by admin"
                 : request.AdminNote.Trim();
-
-            if (statusChanged)
-            {
-                _context.Notifications.Add(new Notification
-                {
-                    UserId = registration.OwnerId,
-                    Title = "Registration Rejected",
-                    Message = !string.IsNullOrWhiteSpace(registration.Horse.HorseName)
-                        ? $"Your registration for {registration.Horse.HorseName} has been rejected."
-                        : "Your registration has been rejected.",
-                    IsRead = false,
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            if (statusChanged)
-            {
-                _context.Notifications.Add(CreateOwnerNotification(
-                    registration.OwnerId,
-                    "Registration Rejected",
-                    $"Your registration for {registration.Horse.HorseName} has been rejected."));
-            }
 
             await _context.SaveChangesAsync();
 
