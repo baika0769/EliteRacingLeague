@@ -40,6 +40,7 @@ builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<JockeyAccessService>();
 builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
+builder.Services.AddScoped<TournamentStatusService>();
 
 // JWT Authentication configuration
 builder.Services.AddAuthentication(options =>
