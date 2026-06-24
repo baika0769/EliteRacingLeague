@@ -34,6 +34,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     IsActive = h.IsActive,
                     OwnerId = h.OwnerId,
                     BreedId = h.BreedId,
+                    HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                     AchievementSummary = h.AchievementSummary,
                     CreatedAt = h.CreatedAt
                 })
@@ -58,6 +59,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     IsActive = h.IsActive,
                     OwnerId = h.OwnerId,
                     BreedId = h.BreedId,
+                    HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                     AchievementSummary = h.AchievementSummary,
                     CreatedAt = h.CreatedAt
                 })

@@ -98,6 +98,9 @@ public class RefereeRacesController : ControllerBase
                 registrationId = r.RegistrationId,
                 horseId = r.HorseId,
                 horseName = r.Horse.HorseName,
+                horseImageUrl = r.Horse.ImageUrl,
+                horseHealthStatus = r.Horse.HealthStatus,
+                healthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 ownerId = r.OwnerId,
                 jockeyId = r.JockeyId,
                 jockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
@@ -386,7 +389,11 @@ public class RefereeRacesController : ControllerBase
             .Select(r => new
             {
                 registrationId = r.RegistrationId,
+                horseId = r.HorseId,
                 horseName = r.Horse.HorseName,
+                horseImageUrl = r.Horse.ImageUrl,
+                horseHealthStatus = r.Horse.HealthStatus,
+                healthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 registrationCode = "#REG-" + r.RegistrationId.ToString(),
                 inspectionStatus = _context.PreRaceInspections
                     .Where(i => i.RaceId == raceId && i.RegistrationId == r.RegistrationId)
@@ -445,7 +452,11 @@ public class RefereeRacesController : ControllerBase
             items = rows.Select(x => new
             {
                 x.registrationId,
+                x.horseId,
                 x.horseName,
+                x.horseImageUrl,
+                x.horseHealthStatus,
+                x.healthCertificateImageUrl,
                 x.registrationCode,
                 checklist = x.inspectionStatus == PreRaceInspectionStatuses.Failed
                     ? new[] { true, true, false, true }

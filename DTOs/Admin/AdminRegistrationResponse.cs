@@ -23,6 +23,7 @@
         public string HealthStatus { get; set; } = string.Empty;
         public bool HorseIsActive { get; set; }
         public string? HorseImageUrl { get; set; }
+        public string? HealthCertificateImageUrl { get; set; }
 
         public int OwnerId { get; set; }
         public string OwnerName { get; set; } = string.Empty;

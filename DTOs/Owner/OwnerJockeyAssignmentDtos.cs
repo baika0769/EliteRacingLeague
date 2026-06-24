@@ -11,6 +11,7 @@ public class OwnerJockeyAssignmentRegistrationResponse
     public int HorseId { get; set; }
     public string HorseName { get; set; } = null!;
     public string? HorseImageUrl { get; set; }
+    public string? HealthCertificateImageUrl { get; set; }
     public string RegistrationStatus { get; set; } = null!;
     public bool HasOfficialJockey { get; set; }
     public int? OfficialJockeyId { get; set; }
@@ -35,6 +36,7 @@ public class OwnerJockeyAssignmentContextResponse
     public decimal? HeightCm { get; set; }
     public decimal WeightKg { get; set; }
     public string HealthStatus { get; set; } = null!;
+    public string? HealthCertificateImageUrl { get; set; }
     public bool HorseIsActive { get; set; }
     public int? AssignedJockeyId { get; set; }
     public string? AssignedJockeyName { get; set; }
