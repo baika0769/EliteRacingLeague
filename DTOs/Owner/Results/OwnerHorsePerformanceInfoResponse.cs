@@ -10,6 +10,8 @@ public class OwnerHorsePerformanceInfoResponse
 
     public string? ImageUrl { get; set; }
 
+    public string? HealthCertificateImageUrl { get; set; }
+
     public int Age { get; set; }
 
     public decimal WeightKg { get; set; }

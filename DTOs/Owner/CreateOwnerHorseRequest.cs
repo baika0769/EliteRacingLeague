@@ -10,4 +10,5 @@ public class CreateOwnerHorseRequest
     public string HealthStatus { get; set; } = null!;
     public string? AchievementSummary { get; set; }
     public string? ImageUrl { get; set; }
+    public string? HealthCertificateImageUrl { get; set; }
 }

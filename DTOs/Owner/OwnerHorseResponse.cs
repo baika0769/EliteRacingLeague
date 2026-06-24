@@ -14,6 +14,7 @@ public class OwnerHorseResponse
 
     public string HealthStatus { get; set; } = null!;
     public string? ImageUrl { get; set; }
+    public string? HealthCertificateImageUrl { get; set; }
 
     public bool IsActive { get; set; }
     public string Status { get; set; } = null!;
