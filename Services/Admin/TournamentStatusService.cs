@@ -15,7 +15,7 @@ namespace Eliteracingleague.API.Services
 
         public async Task SyncTournamentStatusesAsync()
         {
-            var now = DateTime.UtcNow;
+            var now = DateTime.Now;
             var today = DateOnly.FromDateTime(now);
 
             var tournaments = await _context.Tournaments
