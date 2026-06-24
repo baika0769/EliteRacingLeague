@@ -102,6 +102,9 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.ImageUrl)
                 .HasMaxLength(500)
                 .HasColumnName("image_url");
+            entity.Property(e => e.HealthCertificateImageUrl)
+                .HasMaxLength(500)
+                .HasColumnName("health_certificate_image_url");
             entity.Property(e => e.IsActive)
                 .HasDefaultValue(true)
                 .HasColumnName("is_active");

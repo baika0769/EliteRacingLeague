@@ -16,6 +16,7 @@ public class JockeyPendingInvitationResponse
     public int HorseId { get; set; }
     public string HorseName { get; set; } = null!;
     public string? HorseImageUrl { get; set; }
+    public string? HealthCertificateImageUrl { get; set; }
     public string BreedName { get; set; } = null!;
     public int Age { get; set; }
     public string HorseHealthStatus { get; set; } = null!;

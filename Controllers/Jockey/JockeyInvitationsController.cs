@@ -94,6 +94,7 @@ public class JockeyInvitationsController : ControllerBase
                 HorseId = i.Registration.HorseId,
                 HorseName = i.Registration.Horse.HorseName,
                 HorseImageUrl = i.Registration.Horse.ImageUrl,
+                HealthCertificateImageUrl = i.Registration.Horse.HealthCertificateImageUrl,
                 BreedName = i.Registration.Horse.Breed.BreedName,
                 Age = i.Registration.Horse.Age,
                 HorseHealthStatus = i.Registration.Horse.HealthStatus,
@@ -188,6 +189,7 @@ public class JockeyInvitationsController : ControllerBase
                 HorseId = horse.HorseId,
                 HorseName = horse.HorseName,
                 ImageUrl = horse.ImageUrl,
+                HealthCertificateImageUrl = horse.HealthCertificateImageUrl,
                 BreedName = horse.Breed.BreedName,
                 Age = horse.Age,
                 HealthStatus = horse.HealthStatus

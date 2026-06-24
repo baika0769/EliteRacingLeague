@@ -144,6 +144,7 @@ public class OwnerHorsesController : OwnerBaseController
             HealthStatus = request.HealthStatus.Trim(),
             AchievementSummary = request.AchievementSummary,
             ImageUrl = request.ImageUrl,
+            HealthCertificateImageUrl = request.HealthCertificateImageUrl,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -259,6 +260,7 @@ public class OwnerHorsesController : OwnerBaseController
                 WeightKg = h.WeightKg,
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
+                HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                 IsActive = h.IsActive,
                 Status = h.IsActive
                     ? HorseActivityStatuses.Active
@@ -310,6 +312,7 @@ public class OwnerHorsesController : OwnerBaseController
                 WeightKg = h.WeightKg,
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
+                HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                 IsActive = h.IsActive,
                 Status = h.IsActive
                     ? HorseActivityStatuses.Active
@@ -409,6 +412,7 @@ public class OwnerHorsesController : OwnerBaseController
         horse.HealthStatus = request.HealthStatus.Trim();
         horse.AchievementSummary = request.AchievementSummary;
         horse.ImageUrl = request.ImageUrl;
+        horse.HealthCertificateImageUrl = request.HealthCertificateImageUrl;
         horse.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -537,6 +541,7 @@ public class OwnerHorsesController : OwnerBaseController
                 h.HorseName,
                 BreedName = h.Breed.BreedName,
                 h.ImageUrl,
+                h.HealthCertificateImageUrl,
                 h.Age,
                 h.WeightKg,
                 Award = h.AchievementSummary
@@ -630,6 +635,7 @@ public class OwnerHorsesController : OwnerBaseController
                 HorseName = horseInfo.HorseName,
                 BreedName = horseInfo.BreedName,
                 ImageUrl = horseInfo.ImageUrl,
+                HealthCertificateImageUrl = horseInfo.HealthCertificateImageUrl,
                 Age = horseInfo.Age,
                 WeightKg = horseInfo.WeightKg,
                 OwnerName = ownerName ?? string.Empty,
