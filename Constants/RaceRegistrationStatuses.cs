@@ -10,6 +10,14 @@ public static class RaceRegistrationStatuses
     public const string Cancelled = "Cancelled";
     public const string Completed = "Completed";
 
+    public static readonly string[] HorseDeleteBlockingStatuses =
+    {
+        Pending,
+        Approved,
+        JockeyInvited,
+        ReadyToRace
+    };
+
     public static readonly string[] All =
     {
         Pending,
@@ -25,6 +33,12 @@ public static class RaceRegistrationStatuses
     {
         return !string.IsNullOrWhiteSpace(status)
             && All.Contains(status);
+    }
+
+    public static bool BlocksHorseDeletion(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status)
+            && HorseDeleteBlockingStatuses.Contains(status);
     }
 
     // Luồng chính:
