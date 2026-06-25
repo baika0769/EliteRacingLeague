@@ -470,6 +470,65 @@ public class OwnerHorsesController : OwnerBaseController
         });
     }
 
+    [HttpDelete("{horseId:int}")]
+    public async Task<IActionResult> DeleteHorse(int horseId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerError = await ValidateOwnerCanManageHorsesAsync(ownerId.Value);
+
+        if (ownerError != null)
+        {
+            return ownerError;
+        }
+
+        var horse = await _context.Horses
+            .FirstOrDefaultAsync(h => h.HorseId == horseId && h.OwnerId == ownerId.Value);
+
+        if (horse == null)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy ngựa hoặc bạn không có quyền xóa ngựa này."
+            });
+        }
+
+        var hasActiveRegistration = await _context.RaceRegistrations
+            .AnyAsync(r =>
+                r.HorseId == horseId &&
+                r.OwnerId == ownerId.Value &&
+                RaceRegistrationStatuses.HorseDeleteBlockingStatuses.Contains(r.Status));
+
+        if (hasActiveRegistration)
+        {
+            return BadRequest(new
+            {
+                message = "Không thể xóa ngựa đang có đăng ký cuộc đua đang hoạt động."
+            });
+        }
+
+        var hasRegistrationHistory = await _context.RaceRegistrations
+            .AnyAsync(r => r.HorseId == horseId);
+
+        if (hasRegistrationHistory)
+        {
+            return BadRequest(new
+            {
+                message = "Không thể xóa ngựa đã có lịch sử đăng ký cuộc đua. Bạn có thể chuyển ngựa sang Inactive."
+            });
+        }
+
+        _context.Horses.Remove(horse);
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
     [HttpGet("stats")]
     public async Task<IActionResult> GetHorseStats()
     {
