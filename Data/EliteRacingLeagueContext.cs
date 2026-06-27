@@ -58,6 +58,8 @@ public partial class EliteRacingLeagueContext : DbContext
 
     public virtual DbSet<RefereeReport> RefereeReports { get; set; }
 
+    public virtual DbSet<Season> Seasons { get; set; }
+
     public virtual DbSet<Tournament> Tournaments { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
@@ -905,6 +907,38 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasConstraintName("FK_referee_reports_referees");
         });
 
+        modelBuilder.Entity<Season>(entity =>
+        {
+            entity.HasKey(e => e.SeasonId).HasName("PK_seasons");
+
+            entity.ToTable("seasons");
+
+            entity.Property(e => e.SeasonId).HasColumnName("season_id");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasColumnName("created_at");
+
+            entity.Property(e => e.EndDate).HasColumnName("end_date");
+
+            entity.Property(e => e.PointsPerCorrectPrediction)
+                .HasDefaultValue(100)
+                .HasColumnName("points_per_correct_prediction");
+
+            entity.Property(e => e.SeasonName)
+                .HasMaxLength(200)
+                .HasColumnName("season_name");
+
+            entity.Property(e => e.StartDate).HasColumnName("start_date");
+
+            entity.Property(e => e.Status)
+                .HasMaxLength(30)
+                .IsUnicode(false)
+                .HasColumnName("status");
+
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+        });
+
         modelBuilder.Entity<Tournament>(entity =>
         {
             entity.HasKey(e => e.TournamentId).HasName("PK__tourname__B93AA09D92CAF19D");
@@ -944,6 +978,9 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.Rules)
                 .HasColumnName("rules");
 
+            entity.Property(e => e.SeasonId)
+                .HasColumnName("season_id");
+
             entity.Property(e => e.StartDate)
                 .HasColumnName("start_date");
 
@@ -963,6 +1000,11 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasForeignKey(d => d.CreatedBy)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_tournaments_users");
+
+            entity.HasOne(d => d.Season).WithMany(p => p.Tournaments)
+                .HasForeignKey(d => d.SeasonId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_tournaments_seasons");
         });
 
         modelBuilder.Entity<User>(entity =>

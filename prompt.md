@@ -1,339 +1,833 @@
 Tôi đồng ý cho sửa.
 
-Giai đoạn BE: chỉnh cơ chế System Time Override để dùng BusinessNow/EffectiveNow cho nghiệp vụ deadline/status.
+Giai đoạn BE: hoàn thiện Spectator phase gồm Season, prediction theo tournament, auto evaluate prediction, rewards, dashboard myRank, leaderboard và tournament horses.
 
 Lưu ý quan trọng:
 
-* Chỉ đọc và sửa source code hiện tại tôi vừa gửi.
+* Chỉ đọc và sửa source code BE hiện tại tôi vừa gửi.
 * Không dùng file cũ hoặc suy luận từ phiên bản cũ.
 * Nếu có nhiều file trùng tên hoặc nhiều phiên bản, ưu tiên file trong source hiện tại.
-* File nào đã đúng thì giữ nguyên.
-* Không sửa database.
-* Không migration.
-* Không tạo migration.
+* File nào đã có và đúng thì giữ nguyên.
 * Không sửa frontend.
-* Không refactor lớn toàn project.
+* Không refactor lớn.
 * Không đổi status flow hiện tại.
-* Không chuẩn hóa toàn bộ DB sang UTC trong giai đoạn này.
-* Không sửa dữ liệu cũ.
-* Không xử lý timezone phức tạp quá mức.
-* Không thay DateTime.UtcNow trong JWT/token/security logic.
+* Không tạo trùng controller/service/DTO.
+* Không tạo class rỗng chỉ để hết lỗi.
 * Không in code dài ra terminal.
 * Code sạch, dễ tái sử dụng, dễ bảo trì.
 
-Mục tiêu:
-Bổ sung hoặc chỉnh `IDateTimeProvider` để có thời gian nghiệp vụ rõ nghĩa:
-
-BusinessNow hoặc EffectiveNow
-
-Ý nghĩa:
-
-* BusinessNow/EffectiveNow = thời gian hệ thống dùng để xử lý nghiệp vụ.
-* Nếu không override: BusinessNow dùng giờ local/business hiện tại theo cách project đang lưu RaceDate/Deadline.
-* Nếu có override: BusinessNow chính là nowLocal Admin nhập vào.
-* RaceDate / Deadline đang lưu theo kiểu local/business time thì so sánh bằng BusinessNow, không so bằng UtcNow.
-
-Giai đoạn 1: Kiểm tra service thời gian hiện có
-
-Kiểm tra các file nếu đã tồn tại:
-
-* Services/SystemTime/IDateTimeProvider.cs
-* Services/SystemTime/SystemDateTimeProvider.cs
-* Services/SystemTime/RaceTimeStatusService.cs
-* Controllers/Admin/AdminSystemController.cs
-* Program.cs
-
-Nếu chưa có thì tạo theo prompt trước đó.
-Nếu đã có thì chỉ chỉnh nhẹ, không tạo trùng.
-
-Giai đoạn 2: Bổ sung BusinessNow hoặc EffectiveNow vào IDateTimeProvider
-
-Trong IDateTimeProvider, thêm property:
-
-DateTime BusinessNow { get; }
-
-hoặc nếu project đang dùng tên EffectiveNow thì dùng:
-
-DateTime EffectiveNow { get; }
-
-Ưu tiên dùng `BusinessNow` nếu chưa có tên nào.
-
-Interface nên có tối thiểu:
-
-* DateTime UtcNow { get; }
-* DateTime RealUtcNow { get; }
-* DateTime BusinessNow { get; }
-* bool IsOverridden { get; }
-* string TimeZoneId { get; }
-
-Ý nghĩa:
-
-* UtcNow: giờ UTC hiệu lực, dùng khi thật sự cần UTC.
-* RealUtcNow: giờ UTC thật của server.
-* BusinessNow: giờ nghiệp vụ dùng để so sánh RaceDate/Deadline.
-* Nếu override bằng nowLocal thì BusinessNow = nowLocal admin nhập.
-* Nếu không override thì BusinessNow = giờ local/business hiện tại theo timezone cấu hình hoặc local server.
-
-Không dùng BusinessNow cho:
-
-* JWT expiration
-* token validation
-* refresh token
-* password reset token
-* email verification token
-* security logic
-
-Giai đoạn 3: Chỉnh SystemDateTimeProvider
-
-Trong SystemDateTimeProvider:
-
-* Lưu override theo cả UTC và local/business time nếu cần.
-* Khi Admin gọi override với nowLocal:
-
-  * BusinessNow phải trả đúng nowLocal đó.
-  * UtcNow có thể là giá trị convert từ nowLocal sang UTC.
-* Khi không override:
-
-  * BusinessNow trả giờ local/business hiện tại.
-  * UtcNow trả DateTime.UtcNow.
-
-Ví dụ:
-Admin gửi:
-{
-"nowLocal": "2026-06-28T10:01:00",
-"timezone": "Asia/Ho_Chi_Minh"
-}
-
-Thì:
-
-* BusinessNow = 2026-06-28 10:01
-* UtcNow = thời điểm UTC tương ứng nếu cần hiển thị API time.
-* Sync nghiệp vụ phải dùng BusinessNow.
-
-Giai đoạn 4: Chỉnh RaceTimeStatusService dùng BusinessNow
-
-File:
-Services/SystemTime/RaceTimeStatusService.cs
-
-Trong SyncAsync, không dùng:
-
-var now = _dateTimeProvider.UtcNow;
-
-Đổi thành:
-
-var now = _dateTimeProvider.BusinessNow;
-
-hoặc nếu tên đã chọn là EffectiveNow:
-
-var now = _dateTimeProvider.EffectiveNow;
-
-Tất cả so sánh nghiệp vụ sau phải dùng BusinessNow:
-
-* race.RaceDate <= now
-* race.JockeySelectionDeadline <= now
-* race.PredictionDeadline <= now nếu có xử lý
-* tournament.StartDate <= now nếu có xử lý
-
-Lý do:
-Dữ liệu RaceDate/Deadline hiện tại đang được tạo theo local/business time. Nếu dùng UtcNow sẽ lệch giờ khi test/demo.
-
-Giai đoạn 5: Chỉnh các API có check deadline
-
-Chỉ chỉnh các API thật sự có check deadline/status theo thời gian.
-
-Các file cần kiểm tra:
-
-* Controllers/Owner/OwnerJockeyAssignmentController.cs
-* Controllers/Jockey/JockeyInvitationsController.cs
-* Controllers/Spectator/SpectatorPredictionsController.cs
-* Controllers/Owner/OwnerRegistrationsController.cs nếu có check ngày giờ race/deadline
-* Các service liên quan deadline nếu có
-
-Nếu có đoạn:
-
-DateTime.UtcNow
-
-dùng để so sánh:
-
-* JockeySelectionDeadline
-* PredictionDeadline
-* RaceDate
-* TournamentStartDate
-
-thì đổi sang:
-
-_dateTimeProvider.BusinessNow
-
-Ví dụ:
-
-if (race.JockeySelectionDeadline != null &&
-race.JockeySelectionDeadline <= _dateTimeProvider.BusinessNow)
-{
-return BadRequest(new { message = "Đã quá hạn chọn Jockey." });
-}
-
-Yêu cầu:
-
-* Inject IDateTimeProvider vào controller/service nếu cần.
-* Không thay DateTime.UtcNow ở CreatedAt/UpdatedAt thông thường nếu không cần cho test deadline.
-* Không thay DateTime.UtcNow trong JWT/token/security.
-* Không refactor toàn bộ project.
-
-Giai đoạn 6: Chỉnh AdminSystemController response time
-
-GET /api/admin/system/time nên trả rõ:
-
-* realUtcNow
-* effectiveUtcNow
-* businessNow hoặc effectiveBusinessNow
-* effectiveLocalNow
-* timezone
-* isOverridden
-* allowTimeOverride
-
-Ví dụ response:
-{
-"realUtcNow": "2026-06-27T03:00:00Z",
-"effectiveUtcNow": "2026-06-28T03:01:00Z",
-"businessNow": "2026-06-28T10:01:00",
-"effectiveLocalNow": "2026-06-28T10:01:00",
-"timezone": "Asia/Ho_Chi_Minh",
-"isOverridden": true,
-"allowTimeOverride": true
-}
-
-Yêu cầu:
-
-* Response API trả raw JSON string/date, không markdown.
-* Không đổi route cũ.
-
-Giai đoạn 7: Timezone xử lý an toàn
-
-Khi xử lý timezone:
-
-* Thử TimeZoneInfo.FindSystemTimeZoneById(timezone) trước.
-* Nếu timezone là "Asia/Ho_Chi_Minh" nhưng môi trường Windows không nhận, fallback sang "SE Asia Standard Time".
-* Nếu timezone vẫn không hợp lệ thì trả BadRequest rõ ràng:
-  "Invalid timezone. Use Asia/Ho_Chi_Minh or SE Asia Standard Time."
-
-Không hardcode cộng/trừ giờ thủ công nếu TimeZoneInfo dùng được.
-
-Giai đoạn 8: Không tự tạo status/field mới
-
-Khi dùng:
-
-* RaceStatuses
-* TournamentStatuses
-* InvitationStatuses
-
-Phải kiểm tra constants thật trong source hiện tại.
-
-Nếu status như:
-
-* AssignedReferee
-* RefereeReady
-* ClosedRegistration
-* Expired
-
-không tồn tại trong source hiện tại thì không tự thêm status mới trong task này.
-
-Chỉ dùng status đã có thật.
-Nếu thiếu status cần thiết thì bỏ qua phần tương ứng và báo rõ.
-
-Nếu model không có:
-
-* UpdatedAt
-* RespondedAt
-* StartDate
-* EndDate
-
-thì không thêm field mới.
-Chỉ bỏ qua mapping/cập nhật field đó và báo rõ.
-
-Giai đoạn 9: Test luồng chính
-
-Test hết hạn chọn Jockey:
-
-Bước 1:
-Tạo race:
-JockeySelectionDeadline = 2026-06-28 10:00
-
-Bước 2:
-Tạo invitation:
-Status = Pending
-
-Bước 3:
-Admin override time:
-
-POST /api/admin/system/time/override
-
-Body:
-{
-"nowLocal": "2026-06-28T10:01:00",
-"timezone": "Asia/Ho_Chi_Minh",
-"autoSync": true
-}
-
-Kết quả mong muốn:
-
-* BusinessNow = 2026-06-28 10:01.
-* Sync dùng BusinessNow.
-* Deadline = 2026-06-28 10:00.
-* Invitation Pending chuyển Expired.
-
-Test API accept invitation:
-
-* Nếu BusinessNow > JockeySelectionDeadline thì Jockey accept phải bị chặn.
-
-Test prediction:
-
-* Nếu BusinessNow > PredictionDeadline thì Spectator tạo prediction phải bị chặn nếu API có logic deadline.
-
-Test race:
-
-* Nếu BusinessNow >= RaceDate thì sync có thể chuyển Race sang Ongoing theo status hiện có.
-
-Giai đoạn 10: Search và build
+Lưu ý database:
+
+* Không tạo migration.
+* Không tự sửa DB/schema bằng code.
+* Giả định SQL Server đã được cập nhật riêng, gồm bảng `seasons` và cột `tournaments.season_id`.
+* Nếu khi build/test runtime phát hiện DB thật chưa có `seasons` hoặc `tournaments.season_id`, chỉ báo rõ cần chạy SQL update riêng.
+* Trong code chỉ map model/entity theo schema đã có.
+* Không thêm `tournament_id` vào `race_predictions`. Prediction vẫn lưu bằng `race_id` và `predicted_registration_id`.
+
+Điểm cần đúng theo dự án hiện tại:
+
+* `Scheduled` là Race status, không phải Tournament status.
+* Không dùng `Tournament.Status = Scheduled`.
+* Tournament status hợp lệ phải dùng constant hiện có trong dự án, ví dụ `OpenRegistration`, `ClosedRegistration`, `Ongoing`, `Completed`, `Cancelled` nếu có.
+* Race status phải dùng `RaceStatuses` hiện có.
+* Prediction status phải dùng `RacePredictionStatuses`, không dùng `PredictionStatuses`.
+* Reward status phải dùng `PredictionRewardStatuses` nếu đã có.
+* Registration status phải dùng `RaceRegistrationStatuses` hiện có.
+* Không tự tạo status mới nếu project đã có constants.
+* Không đổi kiểu `DateOnly`/`DateTime` hiện có của model cũ nếu source đang dùng ổn định.
+
+Mục tiêu API cần đạt:
+
+API mới:
+
+1. `GET /api/spectator/season/current`
+2. `GET /api/spectator/tournaments/{id}/horses`
+3. `GET /api/spectator/leaderboard/horses`
+4. `GET /api/spectator/leaderboard/predictors`
+
+API cũ cần sửa:
+
+1. `GET /api/spectator/dashboard` thêm `myRank`
+2. `GET /api/spectator/tournaments` thêm `hasPredicted`, `myPrediction`
+3. `GET /api/spectator/predictions/my` thêm tournament fields
+4. `POST /api/spectator/predictions` đổi sang `tournamentId + predictedHorseId`
+5. `GET /api/spectator/rewards` thêm `myRank`, `totalDays`, `pointHistory` theo tournament
+
+Giai đoạn 0: Kiểm tra source và build nền
 
 Chạy:
 
+```bash
 dotnet build
+```
 
-Search:
-rg -n "BusinessNow|EffectiveNow" .
-rg -n "DateTime.UtcNow" Controllers Services
-rg -n "IDateTimeProvider" Controllers Services Program.cs
+Nếu build nền đang lỗi:
+
+* Chỉ sửa lỗi build liên quan trực tiếp source hiện tại.
+* Không thêm chức năng mới nếu build nền lỗi nặng chưa xử lý được.
+* Báo rõ lỗi build nền nếu không xử lý được.
+
+Trước khi sửa, kiểm tra nhanh:
+
+```bash
+rg -n "class Tournament|SeasonId|season_id" Models Data
+rg -n "RacePredictionStatuses|PredictionStatuses|PredictionRewardStatuses" Constants Models Controllers Services
+rg -n "RaceStatuses|TournamentStatuses|RaceRegistrationStatuses|RaceResultStatuses" Constants Models Controllers Services
+rg -n "SpectatorDashboardController|SpectatorTournamentsController|SpectatorPredictionsController|SpectatorRewardsController" Controllers
+rg -n "AddScoped" Program.cs
+```
+
+Giai đoạn 1: Thêm Season model và mapping DbContext
+
+Nếu chưa có thì tạo:
+
+`Models/Season.cs`
+
+Model:
+
+```csharp
+public partial class Season
+{
+    public int SeasonId { get; set; }
+    public string SeasonName { get; set; } = null!;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    public string Status { get; set; } = null!;
+    public int PointsPerCorrectPrediction { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+
+    public virtual ICollection<Tournament> Tournaments { get; set; } = new List<Tournament>();
+}
+```
+
+Nếu chưa có thì tạo:
+
+`Constants/SeasonStatuses.cs`
+
+```csharp
+public static class SeasonStatuses
+{
+    public const string Draft = "Draft";
+    public const string Active = "Active";
+    public const string Closed = "Closed";
+    public const string Cancelled = "Cancelled";
+
+    public static readonly string[] All =
+    {
+        Draft,
+        Active,
+        Closed,
+        Cancelled
+    };
+}
+```
+
+Sửa `Models/Tournament.cs`:
+
+* Thêm `SeasonId` và navigation `Season`.
+* Nếu SQL đã ép `tournaments.season_id NOT NULL` thì dùng:
+
+```csharp
+public int SeasonId { get; set; }
+public virtual Season Season { get; set; } = null!;
+```
+
+* Nếu source/DB hiện tại vẫn để nullable thì dùng nullable, nhưng không tự sửa DB trong task này.
+* Không xóa field cũ.
+* Không đổi kiểu ngày tháng hiện có của Tournament.
+
+Sửa `Data/EliteRacingLeagueContext.cs`:
+
+* Thêm `DbSet<Season> Seasons`.
+* Map table `seasons`:
+
+  * `season_id`
+  * `season_name`
+  * `start_date`
+  * `end_date`
+  * `status`
+  * `points_per_correct_prediction`
+  * `created_at`
+  * `updated_at`
+* Map `Tournament.SeasonId` với column `season_id`.
+* Map relationship `Season -> Tournaments`.
+* Không tạo migration.
+
+Giai đoạn 2: Sửa DTO Spectator request
+
+File:
+
+`DTOs/Spectator/SpectatorRequests.cs`
+
+Sửa hoặc thêm request đúng:
+
+```csharp
+public class CreatePredictionRequest
+{
+    public int TournamentId { get; set; }
+    public int PredictedHorseId { get; set; }
+}
+```
 
 Yêu cầu:
 
-* Build pass.
-* RaceTimeStatusService dùng BusinessNow/EffectiveNow.
-* Deadline API cần test đã dùng BusinessNow/EffectiveNow.
-* DateTime.UtcNow còn lại là chấp nhận được nếu không liên quan deadline/status hoặc thuộc security/token.
-* Không có migration mới.
-* Không sửa DB.
-* Không sửa FE.
+* `POST /api/spectator/predictions` không còn yêu cầu FE gửi `raceId`.
+* `POST /api/spectator/predictions` không còn yêu cầu FE gửi `predictedRegistrationId`.
+* BE tự tìm race và registration từ `tournamentId + predictedHorseId`.
 
+Giai đoạn 3: Thêm DTO Spectator response nếu chưa có
 
-Bổ sung an toàn:
+Nếu chưa có DTO phù hợp thì tạo:
 
-* Trong SystemDateTimeProvider, việc set/clear/advance override phải thread-safe, dùng lock để tránh BackgroundService và Admin API truy cập cùng lúc.
-* Nếu interface hiện tại đang có OverrideUtcNow(DateTime utcNow, string timeZoneId), cần thêm hoặc đổi sang OverrideBusinessNow(DateTime businessNow, string timeZoneId). Không để AdminSystemController chỉ set UTC mà quên lưu BusinessNow.
-* Advance phải tăng từ BusinessNow hiện tại, không tăng từ RealUtcNow nếu đang override.
-* SyncTimeStatusesResponse nên trả thêm BusinessNow hoặc EffectiveBusinessNow để biết service đã sync theo giờ nghiệp vụ nào.
-* AdminSystemController khi autoSync=true phải gọi sync sau khi override/advance đã được set xong.
+`DTOs/Spectator/SpectatorLeaderboardDtos.cs`
+
+Tối thiểu cần các DTO response sau, đặt tên theo convention source hiện tại:
+
+Current season response:
+
+* `int SeasonId`
+* `string SeasonName`
+* `DateTime StartDate`
+* `DateTime EndDate`
+* `int DaysLeft`
+* `int TotalDays`
+* `int TotalPredictors`
+* `int TotalPredictions`
+
+Predictor leaderboard item:
+
+* `int Rank`
+* `int SpectatorId`
+* `string SpectatorName`
+* `int Points`
+* `int CorrectPredictions`
+* `decimal Accuracy`
+* `int TotalPredictions`
+
+Horse leaderboard item:
+
+* `int Rank`
+* `int HorseId`
+* `string HorseName`
+* `string? OwnerName`
+* `string? ImageUrl`
+* `string? BreedName`
+* `int Wins`
+* `int TotalRaces`
+* `decimal WinRate`
+
+Tournament horse item:
+
+* `int RegistrationId`
+* `int HorseId`
+* `string HorseName`
+* `string? ImageUrl`
+* `string? BreedName`
+* `int? Age`
+* `string? HealthStatus`
+* `string RegistrationStatus`
+* `string? OwnerName`
+* `string? JockeyName`
+
+Không tạo trùng DTO nếu source đã có DTO tương tự.
+
+Giai đoạn 4: Thêm SpectatorLeaderboardService
+
+Nếu chưa có thì tạo:
+
+`Services/SpectatorLeaderboardService.cs`
+
+Service dùng `EliteRacingLeagueContext`.
+
+Cần method hỗ trợ:
+
+1. Lấy active season.
+2. Lấy `myRank` của spectator trong active season.
+3. Lấy leaderboard predictors trong active season.
+4. Lấy leaderboard horses trong active season.
+5. Tính reward summary nếu dùng chung cho Dashboard/Rewards.
+
+Rank predictor theo thứ tự:
+
+1. `points DESC`
+2. `correctPredictions DESC`
+3. `accuracy DESC`
+4. `totalPredictions DESC`
+5. `spectatorId ASC`
+
+Điểm predictor tính từ:
+
+```txt
+RacePredictions.PointsAwarded
+```
+
+Accuracy:
+
+```txt
+correctPredictions / totalPredictions * 100
+```
+
+Nếu `totalPredictions = 0` thì accuracy = 0.
+
+Yêu cầu:
+
+* Không trả entity trực tiếp.
+* Query read-only phải dùng `AsNoTracking`.
+* Không dùng `PredictionStatuses`.
+* Dùng `RacePredictionStatuses`.
+* Không hard-code status nếu source đã có constants phù hợp.
+* Không dùng raw SQL nếu LINQ làm được ổn định.
+
+Giai đoạn 5: Thêm PredictionEvaluationService
+
+Nếu chưa có thì tạo:
+
+`Services/PredictionEvaluationService.cs`
+
+Service dùng:
+
+* `EliteRacingLeagueContext`
+
+Method chính:
+
+```csharp
+Task EvaluateRacePredictionsAsync(int raceId)
+```
+
+Logic:
+
+1. Tìm winner của race:
+
+   * `RaceResult.RaceId == raceId`
+   * `FinishPosition == 1`
+   * Status thuộc result approved/published theo constants thật trong source, ví dụ `RaceResultStatuses.AdminApproved` hoặc `RaceResultStatuses.Published` nếu có.
+2. Nếu chưa có winner thì không evaluate.
+3. Lấy points:
+
+   * Ưu tiên `Season.PointsPerCorrectPrediction` của season thuộc tournament/race đó.
+   * Nếu không lấy được thì default `100`.
+4. Lấy các `RacePrediction` của race:
+
+   * chưa `Evaluated`
+   * chưa `Cancelled`
+5. Với mỗi prediction:
+
+   * `ActualWinnerRegistrationId = winnerRegistrationId`
+   * `IsCorrect = prediction.PredictedRegistrationId == winnerRegistrationId`
+   * `PointsAwarded = pointsPerCorrectPrediction` nếu đúng, ngược lại `0`
+   * `Status = RacePredictionStatuses.Evaluated`
+   * `RewardStatus = PredictionRewardStatuses.Pending` nếu đúng, ngược lại `PredictionRewardStatuses.None`
+   * `EvaluatedAt = now`
+   * cập nhật `UpdatedAt` nếu entity có field này
+6. Nếu spectator đoán đúng thì tạo notification:
+
+   * `Title = "Prediction Correct"`
+   * `Message = "You predicted the winner correctly."`
+   * `IsRead = false`
+   * `CreatedAt = now`
+   * Nếu Notification entity có `Type`, `RelatedId`, `RelatedType` thì map theo field thật.
+   * Không tự thêm field DB mới.
+
+Yêu cầu:
+
+* Không tạo reward table mới.
+* Không tạo migration.
+* Không evaluate prediction `Cancelled`.
+* Không evaluate trùng prediction đã `Evaluated`.
+* Không phá PrizeAward logic hiện có.
+
+Giai đoạn 6: Sửa AdminRaceResultsController gọi evaluate
+
+File:
+
+`Controllers/Admin/AdminRaceResultsController.cs`
+
+Inject thêm:
+
+```csharp
+private readonly PredictionEvaluationService _predictionEvaluationService;
+```
+
+Constructor thêm service theo style hiện tại.
+
+Trong action approve result:
+
+* Giữ nguyên logic approve result hiện có.
+* Không đổi route/response nếu không cần.
+* Không phá `PrizeAward` logic nếu có.
+* Chỉ gọi evaluate sau khi approve thành công.
+* Sau khi result được approve và SaveChanges hợp lý, gọi:
+
+```csharp
+await _predictionEvaluationService.EvaluateRacePredictionsAsync(result.RaceId);
+```
+
+Yêu cầu:
+
+* Không gọi evaluate nếu approve thất bại.
+* Không đổi điều kiện admin approve hiện tại.
+* Không đổi status flow hiện tại.
+
+Giai đoạn 7: Thêm SpectatorSeasonController
+
+Nếu chưa có thì tạo:
+
+`Controllers/Spectator/SpectatorSeasonController.cs`
+
+Route:
+
+```csharp
+[Route("api/spectator/season")]
+```
+
+API:
+
+```http
+GET /api/spectator/season/current
+```
+
+Logic:
+
+* Lấy Season có `Status = SeasonStatuses.Active`.
+* Nếu nhiều Active thì lấy mới nhất theo `StartDate DESC`, sau đó `SeasonId DESC`.
+* Nếu không có Active thì trả 404 với message rõ ràng.
+* Tính:
+
+  * `daysLeft = max(0, endDate.Date - today.Date)`
+  * `totalDays = endDate.Date - startDate.Date + 1`
+  * `totalPredictors = count distinct spectator đã prediction trong season`
+  * `totalPredictions = count prediction trong season`
+* Không fake data.
+
+Response cần có:
+
+```json
+{
+  "seasonId": 1,
+  "seasonName": "Season 2026",
+  "startDate": "2026-01-01T00:00:00Z",
+  "endDate": "2026-12-31T23:59:59Z",
+  "daysLeft": 45,
+  "totalDays": 365,
+  "totalPredictors": 128,
+  "totalPredictions": 340
+}
+```
+
+Giai đoạn 8: Sửa SpectatorPredictionsController
+
+File:
+
+`Controllers/Spectator/SpectatorPredictionsController.cs`
+
+Sửa:
+
+```http
+POST /api/spectator/predictions
+```
+
+Payload mới:
+
+```json
+{
+  "tournamentId": 3,
+  "predictedHorseId": 12
+}
+```
+
+Logic:
+
+1. Lấy `spectatorId` từ token theo helper hiện có.
+2. Lấy tournament theo `TournamentId`.
+3. Lấy race thuộc tournament.
+4. Check tournament tồn tại.
+5. Check race tồn tại.
+6. Check tournament không `Cancelled`, không `Completed`.
+7. Không dùng `Scheduled` làm tournament status.
+8. Check race chưa đóng prediction:
+
+   * Nếu có helper `RaceStatuses.IsClosedForPrediction(race.Status)` thì dùng helper.
+   * Nếu không có helper thì dùng constants race status hiện có để chặn `Ongoing`, `Finished`, `ResultPending`, `Published`, `Cancelled`.
+9. Check deadline:
+
+   * Nếu `race.PredictionDeadline` có giá trị thì `now <= PredictionDeadline`.
+   * Nếu project có date time provider thì dùng provider hiện có.
+   * Nếu không có thì dùng `DateTime.UtcNow`.
+10. Check spectator chưa predict tournament này:
+
+* Không dựa vào raceId từ FE.
+* Query:
+
+  * `p.SpectatorId == spectatorId`
+  * `p.Status != RacePredictionStatuses.Cancelled`
+  * `p.Race.TournamentId == request.TournamentId`
+
+11. Nếu đã predict thì trả `409 Conflict`:
+
+```json
+{
+  "error": "You have already predicted for this tournament.",
+  "message": "You have already predicted for this tournament."
+}
+```
+
+12. Tìm registration:
+
+* `RaceId == race.RaceId`
+* `HorseId == request.PredictedHorseId`
+* status nằm trong predictable registration statuses.
+
+13. Predictable registration statuses chỉ gồm constants thật đang có, ưu tiên:
+
+* `Approved`
+* `JockeyInvited`
+* `ReadyToRace`
+
+14. Nếu horse không thuộc tournament/race thì trả `400 BadRequest`:
+
+```json
+{
+  "error": "Horse is not registered in this tournament.",
+  "message": "Horse is not registered in this tournament."
+}
+```
+
+15. Tạo `RacePrediction`:
+
+* `RaceId = race.RaceId`
+* `SpectatorId = spectatorId`
+* `PredictedRegistrationId = registration.RegistrationId`
+* `Status = RacePredictionStatuses.Pending`
+* `IsCorrect = null`
+* `PointsAwarded = 0`
+* `RewardStatus = PredictionRewardStatuses.None`
+* `PredictedAt = now`
+* `CreatedAt = now` nếu entity có field này
+
+Sửa:
+
+```http
+GET /api/spectator/predictions/my
+```
+
+Response mỗi item cần có thêm:
+
+```json
+{
+  "predictionId": 1,
+  "tournamentId": 3,
+  "tournamentName": "Dubai Sprint Cup",
+  "tournamentStatus": "Ongoing",
+  "raceId": 5,
+  "raceName": "Dubai Sprint Race",
+  "predictedHorseId": 5,
+  "predictedHorseName": "Thunder",
+  "actualWinnerHorseName": null,
+  "isCorrect": null,
+  "pointsAwarded": 0,
+  "status": "Pending"
+}
+```
+
+Yêu cầu:
+
+* Giữ field cũ nếu FE cũ đang dùng.
+* Không trả prediction của spectator khác.
+* Không dùng `PredictionStatuses`.
+
+Giai đoạn 9: Sửa SpectatorTournamentsController
+
+File:
+
+`Controllers/Spectator/SpectatorTournamentsController.cs`
+
+Sửa:
+
+```http
+GET /api/spectator/tournaments
+```
+
+Mỗi tournament trả thêm:
+
+```json
+{
+  "hasPredicted": true,
+  "myPrediction": {
+    "predictedHorseId": 5,
+    "predictedHorseName": "Thunder",
+    "isCorrect": null,
+    "pointsAwarded": 0
+  }
+}
+```
+
+Yêu cầu:
+
+* Dựa trên spectatorId hiện tại.
+* Nếu chưa predict thì:
+
+  * `hasPredicted = false`
+  * `myPrediction = null`
+* Không trả prediction của spectator khác.
+* Không làm mất các field cũ FE đang dùng.
+
+Thêm API:
+
+```http
+GET /api/spectator/tournaments/{id}/horses
+```
+
+Logic:
+
+* Lấy tournament theo id.
+* Lấy race thuộc tournament.
+* Lấy registration của race có status predict được.
+* Join horse, owner, jockey nếu có.
+* Không lỗi null khi chưa có jockey.
+
+Response mỗi item:
+
+```json
+{
+  "registrationId": 10,
+  "horseId": 5,
+  "horseName": "Thunder",
+  "imageUrl": null,
+  "breedName": null,
+  "age": 4,
+  "healthStatus": "Healthy",
+  "registrationStatus": "ReadyToRace",
+  "ownerName": "John Smith",
+  "jockeyName": "Ahmed Al-Rashid"
+}
+```
+
+Yêu cầu:
+
+* Chỉ lấy horse đã đăng ký trong race/tournament.
+* Không trả horse ngoài tournament.
+* Không bắt FE gửi registrationId khi predict.
+
+Giai đoạn 10: Thêm SpectatorLeaderboardController
+
+Nếu chưa có thì tạo:
+
+`Controllers/Spectator/SpectatorLeaderboardController.cs`
+
+Route:
+
+```csharp
+[Route("api/spectator/leaderboard")]
+```
+
+API:
+
+```http
+GET /api/spectator/leaderboard/horses
+GET /api/spectator/leaderboard/predictors
+```
+
+Dùng `SpectatorLeaderboardService`.
+
+Yêu cầu:
+
+* Không trả entity trực tiếp.
+* Trả top 50 mặc định nếu project chưa có convention phân trang.
+* Ranking ổn định theo tie-breaker đã nêu.
+* Chỉ tính trong active season nếu có active season.
+* Nếu không có active season thì trả list rỗng hoặc 404 theo convention hiện tại, ưu tiên không làm FE crash.
+
+Predictors response item:
+
+```json
+{
+  "rank": 1,
+  "spectatorId": 10,
+  "spectatorName": "Nguyen Van A",
+  "points": 450,
+  "correctPredictions": 6,
+  "accuracy": 85,
+  "totalPredictions": 7
+}
+```
+
+Horses response item:
+
+```json
+{
+  "rank": 1,
+  "horseId": 5,
+  "horseName": "Thunder",
+  "ownerName": "John Smith",
+  "wins": 3,
+  "totalRaces": 4,
+  "winRate": 75
+}
+```
+
+Giai đoạn 11: Sửa SpectatorDashboardController
+
+File:
+
+`Controllers/Spectator/SpectatorDashboardController.cs`
+
+Sửa:
+
+```http
+GET /api/spectator/dashboard
+```
+
+Response cần có:
+
+```json
+{
+  "upcomingTournaments": 5,
+  "predictionsSubmitted": 12,
+  "rewardPoints": 1250,
+  "myRank": 3,
+  "featuredTournament": {
+    "tournamentId": 1,
+    "tournamentName": "Dubai Sprint Cup",
+    "status": "OpenRegistration",
+    "location": "Dubai Meydan",
+    "prizePool": 2000000,
+    "race": {
+      "raceDate": "2025-08-01T10:00:00Z",
+      "distanceMeters": 2400
+    }
+  }
+}
+```
+
+Yêu cầu:
+
+* `myRank` lấy từ `SpectatorLeaderboardService`.
+* `predictionsSubmitted` count theo spectator hiện tại.
+* `rewardPoints` sum `PointsAwarded` theo spectator hiện tại.
+* `featuredTournament` chọn tournament mở đăng ký/sắp tới theo logic hiện có.
+* Không làm vỡ field cũ FE đang dùng.
+
+Giai đoạn 12: Sửa SpectatorRewardsController
+
+File:
+
+`Controllers/Spectator/SpectatorRewardsController.cs`
+
+Sửa:
+
+```http
+GET /api/spectator/rewards
+```
+
+Response cần có:
+
+```json
+{
+  "rewardPoints": 1250,
+  "correctPredictions": 8,
+  "predictionAccuracy": 67,
+  "myRank": 3,
+  "totalDays": 92,
+  "pointHistory": [
+    {
+      "tournamentId": 1,
+      "tournamentName": "Dubai Sprint Cup",
+      "points": 100,
+      "awardedAt": "2025-08-10T12:00:00Z"
+    }
+  ]
+}
+```
+
+Yêu cầu:
+
+* `myRank` lấy từ `SpectatorLeaderboardService`.
+* `totalDays` lấy từ active season nếu có; nếu không có season thì `0`.
+* `pointHistory` lấy từ prediction của spectator hiện tại có `PointsAwarded > 0`.
+* `awardedAt` ưu tiên `EvaluatedAt`, fallback `UpdatedAt`/`CreatedAt` nếu entity có.
+* Không trả reward của spectator khác.
+* Dùng `tournamentName`, không chỉ dùng `raceName`.
+
+Giai đoạn 13: Program.cs đăng ký service
+
+File:
+
+`Program.cs`
+
+Thêm nếu chưa có:
+
+```csharp
+builder.Services.AddScoped<SpectatorLeaderboardService>();
+builder.Services.AddScoped<PredictionEvaluationService>();
+```
+
+Yêu cầu:
+
+* Không đăng ký trùng.
+* Thêm using namespace Services nếu cần.
+* Giữ các service hiện có.
+
+Giai đoạn 14: Build và search kiểm tra
+
+Chạy:
+
+```bash
+dotnet build
+```
+
+Chạy search:
+
+```bash
+rg -n "Season" Models Constants Data Controllers Services DTOs
+rg -n "SpectatorLeaderboardService|PredictionEvaluationService" .
+rg -n "PredictionStatuses" Controllers/Spectator Controllers/Admin Services
+rg -n "RacePredictionStatuses" Controllers/Spectator Controllers/Admin Services
+rg -n "predictedHorseId|TournamentId|PredictedHorseId" Controllers DTOs
+```
+
+Yêu cầu:
+
+* Không còn Spectator/Admin prediction flow dùng `PredictionStatuses`.
+* POST spectator predictions dùng `TournamentId + PredictedHorseId`.
+* Admin approve result gọi `PredictionEvaluationService`.
+* `Program.cs` đã đăng ký service.
+* `dotnet build` pass hoặc báo rõ lỗi còn lại.
+
+Giai đoạn 15: Test API cần đạt
+
+Test API mới:
+
+1. `GET /api/spectator/season/current`
+2. `GET /api/spectator/tournaments/{id}/horses`
+3. `GET /api/spectator/leaderboard/horses`
+4. `GET /api/spectator/leaderboard/predictors`
+
+Test API đã sửa:
+
+1. `GET /api/spectator/dashboard` có `myRank`.
+2. `GET /api/spectator/tournaments` có `hasPredicted`, `myPrediction`.
+3. `POST /api/spectator/predictions` nhận `tournamentId + predictedHorseId`.
+4. POST prediction lần 2 cùng tournament trả `409 Conflict`.
+5. POST prediction horse không thuộc tournament trả `400 BadRequest`.
+6. `GET /api/spectator/predictions/my` trả đúng prediction của spectator hiện tại.
+7. `GET /api/spectator/rewards` có `rewardPoints`, `correctPredictions`, `predictionAccuracy`, `myRank`, `totalDays`, `pointHistory`.
+8. Admin approve result có winner thì prediction được `Evaluated`.
+9. Spectator đoán đúng được cộng `PointsAwarded` và `RewardStatus = Pending`.
+10. Spectator đoán sai `PointsAwarded = 0` và `RewardStatus = None`.
 
 Sau khi sửa xong chỉ trả lời tối đa 12 dòng:
 
-1. File đã tạo/sửa
-2. IDateTimeProvider đã có BusinessNow/EffectiveNow chưa
-3. SystemDateTimeProvider override nowLocal có giữ BusinessNow đúng local không
-4. RaceTimeStatusService đã dùng BusinessNow chưa
-5. Jockey deadline API đã dùng BusinessNow chưa
-6. Prediction deadline API đã dùng BusinessNow chưa
-7. Owner/Jockey assignment deadline đã dùng BusinessNow chưa
-8. Admin system time response đã trả businessNow chưa
-9. Có thay DateTime.UtcNow trong JWT/token/security không
-10. Có sửa DB/migration/frontend không
-11. Search DateTime.UtcNow còn lại thuộc nhóm nào
+1. Build nền ban đầu có lỗi không
+2. File tạo mới
+3. File đã sửa
+4. Season model/SeasonStatuses/DbContext đã thêm chưa
+5. POST spectator predictions đã đổi sang tournamentId + predictedHorseId chưa
+6. Tournament horses API đã thêm chưa
+7. PredictionEvaluationService đã hoạt động và được Admin approve gọi chưa
+8. Leaderboard service/controller đã thêm chưa
+9. Dashboard myRank và tournaments hasPredicted/myPrediction đã có chưa
+10. Rewards response mới đã có chưa
+11. Có sửa DB/migration/frontend không
 12. dotnet build kết quả/lỗi còn lại
