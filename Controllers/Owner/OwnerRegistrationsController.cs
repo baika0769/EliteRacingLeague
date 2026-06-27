@@ -43,13 +43,7 @@ public class OwnerRegistrationsController : OwnerBaseController
     private static string? GetHorseIneligibleReason(
         bool isActive,
         string healthStatus,
-        bool alreadyRegistered,
-        int age,
-        decimal weightKg,
-        int? minAge,
-        int? maxAge,
-        decimal? minWeight,
-        decimal? maxWeight)
+        bool alreadyRegistered)
     {
         if (!isActive)
         {
@@ -64,26 +58,6 @@ public class OwnerRegistrationsController : OwnerBaseController
         if (healthStatus != HorseHealthStatuses.Healthy)
         {
             return "Ngựa không ở trạng thái Healthy.";
-        }
-
-        if (minAge.HasValue && age < minAge.Value)
-        {
-            return $"Ngựa chưa đủ tuổi tối thiểu {minAge.Value}.";
-        }
-
-        if (maxAge.HasValue && age > maxAge.Value)
-        {
-            return $"Ngựa vượt quá tuổi tối đa {maxAge.Value}.";
-        }
-
-        if (minWeight.HasValue && weightKg < minWeight.Value)
-        {
-            return $"Ngựa chưa đạt cân nặng tối thiểu {minWeight.Value}kg.";
-        }
-
-        if (maxWeight.HasValue && weightKg > maxWeight.Value)
-        {
-            return $"Ngựa vượt quá cân nặng tối đa {maxWeight.Value}kg.";
         }
 
         return null;
@@ -106,7 +80,7 @@ public class OwnerRegistrationsController : OwnerBaseController
 
 
     [HttpGet("open-tournaments")]
-    public async Task<IActionResult> GetOpenTournaments([FromQuery] int limit = 3)
+    public async Task<IActionResult> GetOpenTournaments([FromQuery] int limit = 6)
     {
         var ownerId = GetCurrentUserId();
 
@@ -122,8 +96,15 @@ public class OwnerRegistrationsController : OwnerBaseController
             return ownerProfileError;
         }
 
-        if (limit <= 0) limit = 3;
-        if (limit > 20) limit = 20;
+        if (limit <= 0)
+        {
+            limit = 6;
+        }
+
+        if (limit > 20)
+        {
+            limit = 20;
+        }
 
         var today = DateTime.UtcNow.Date;
 
@@ -132,7 +113,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
                 t.Race != null &&
-                t.Race.Status == RaceStatuses.Scheduled &&
+                RaceStatuses.RegisterableStatuses.Contains(t.Race.Status) &&
                 t.Race.RaceDate >= today)
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
@@ -141,13 +122,17 @@ public class OwnerRegistrationsController : OwnerBaseController
                 t.TournamentName,
                 t.Location,
                 t.PrizePool,
+                t.ImageUrl,
+
                 RaceId = t.Race!.RaceId,
                 RaceDate = t.Race.RaceDate,
                 DistanceMeters = t.Race.DistanceMeters,
                 MaxHorses = t.Race.MaxHorses,
+
                 RegisteredCount = t.Race.RaceRegistrations.Count(r =>
                     r.Status != RaceRegistrationStatuses.Rejected &&
                     r.Status != RaceRegistrationStatuses.Cancelled),
+
                 OwnerAlreadyRegistered = t.Race.RaceRegistrations.Any(r =>
                     r.OwnerId == ownerId.Value &&
                     r.Status != RaceRegistrationStatuses.Rejected &&
@@ -171,8 +156,9 @@ public class OwnerRegistrationsController : OwnerBaseController
                 RegisteredCount = t.RegisteredCount,
                 AvailableSlots = Math.Max(0, t.MaxHorses - t.RegisteredCount),
                 OwnerAlreadyRegistered = t.OwnerAlreadyRegistered,
-                ImageUrl = null
-            });
+                ImageUrl = t.ImageUrl
+            })
+            .ToList();
 
         return Ok(response);
     }
@@ -206,10 +192,7 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.Status,
                 r.RaceDate,
                 TournamentStatus = r.Tournament.Status,
-                TournamentMinAge = r.Tournament.MinHorseAge,
-                TournamentMaxAge = r.Tournament.MaxHorseAge,
-                TournamentMinWeight = r.Tournament.MinHorseWeightKg,
-                TournamentMaxWeight = r.Tournament.MaxHorseWeightKg
+                
             })
             .FirstOrDefaultAsync();
 
@@ -226,7 +209,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             });
         }
 
-        if (race.Status != RaceStatuses.Scheduled)
+        if (!RaceStatuses.CanRegister(race.Status))
         {
             return BadRequest(new
             {
@@ -265,15 +248,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var response = horses.Select(h =>
         {
             var reason = GetHorseIneligibleReason(
-                h.IsActive,
-                h.HealthStatus,
-                h.AlreadyRegistered,
-                h.Age,
-                h.WeightKg,
-                race.TournamentMinAge,
-                race.TournamentMaxAge,
-                race.TournamentMinWeight,
-                race.TournamentMaxWeight);
+    h.IsActive,
+    h.HealthStatus,
+    h.AlreadyRegistered);
+
 
             return new OwnerEligibleHorseResponse
             {
@@ -325,7 +303,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             return BadRequest(new { message = "Tournament hiện không mở đăng ký." });
         }
 
-        if (race.Status != RaceStatuses.Open)
+        if (!RaceStatuses.CanRegister(race.Status))
         {
             return BadRequest(new { message = "Race hiện không mở đăng ký." });
         }
@@ -368,18 +346,12 @@ public class OwnerRegistrationsController : OwnerBaseController
         }
 
         var ineligibleReason = GetHorseIneligibleReason(
-            horse.IsActive,
-            horse.HealthStatus,
-            horse.RaceRegistrations.Any(r =>
-                r.RaceId == request.RaceId &&
-                r.Status != RaceRegistrationStatuses.Rejected &&
-                r.Status != RaceRegistrationStatuses.Cancelled),
-            horse.Age,
-            horse.WeightKg,
-            race.Tournament.MinHorseAge,
-            race.Tournament.MaxHorseAge,
-            race.Tournament.MinHorseWeightKg,
-            race.Tournament.MaxHorseWeightKg);
+    horse.IsActive,
+    horse.HealthStatus,
+    horse.RaceRegistrations.Any(r =>
+        r.RaceId == request.RaceId &&
+        r.Status != RaceRegistrationStatuses.Rejected &&
+        r.Status != RaceRegistrationStatuses.Cancelled));
 
         if (ineligibleReason != null)
         {
@@ -429,8 +401,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.OwnerId == ownerId.Value &&
-                r.Status == RaceRegistrationStatuses.Pending)
+    r.OwnerId == ownerId.Value &&
+    r.Status == RaceRegistrationStatuses.Pending &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.SubmittedAt)
             .Select(r => new
             {
@@ -480,8 +454,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.OwnerId == ownerId.Value &&
-                ApprovedRegistrationStatuses.Contains(r.Status))
+    r.OwnerId == ownerId.Value &&
+    ApprovedRegistrationStatuses.Contains(r.Status) &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.Race.RaceDate)
             .Select(r => new
             {
@@ -531,8 +507,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var data = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.RegistrationId == registrationId &&
-                r.OwnerId == ownerId.Value)
+    r.RegistrationId == registrationId &&
+    r.OwnerId == ownerId.Value &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 r.RegistrationId,
@@ -594,8 +572,10 @@ public class OwnerRegistrationsController : OwnerBaseController
         var registration = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
-                r.RegistrationId == registrationId &&
-                r.OwnerId == ownerId.Value)
+    r.RegistrationId == registrationId &&
+    r.OwnerId == ownerId.Value &&
+    r.Race.Status != RaceStatuses.Cancelled &&
+    r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => new
             {
                 r.RegistrationId,
@@ -638,7 +618,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 3,
-                Key = "Approved",
+                Key = RaceRegistrationStatuses.Approved,
                 Label = "Đã được duyệt",
                 Description = "Đơn đăng ký đã được Admin duyệt.",
                 IsCompleted = currentStep >= 3 &&
@@ -649,7 +629,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 4,
-                Key = "JockeyInvited",
+                Key = RaceRegistrationStatuses.JockeyInvited,
                 Label = "Mời Jockey",
                 Description = "Owner đã mời Jockey tham gia race.",
                 IsCompleted = currentStep >= 4 &&
@@ -660,7 +640,7 @@ public class OwnerRegistrationsController : OwnerBaseController
             new RegistrationJourneyStepResponse
             {
                 StepNumber = 5,
-                Key = "ReadyToRace",
+                Key = RaceRegistrationStatuses.ReadyToRace,
                 Label = "Sẵn sàng thi đấu",
                 Description = "Ngựa và Jockey đã sẵn sàng tham gia race.",
                 IsCompleted = currentStep >= 5 &&

@@ -44,17 +44,26 @@ public class OwnerDashboardController : OwnerBaseController
             .CountAsync(h => h.OwnerId == ownerId.Value && h.IsActive);
 
         var registrations = await _context.RaceRegistrations
-            .CountAsync(r => r.OwnerId == ownerId.Value);
+            .CountAsync(r =>
+                r.OwnerId == ownerId.Value &&
+                r.Status != RaceRegistrationStatuses.Cancelled &&
+                r.Status != RaceRegistrationStatuses.Rejected &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         var pendingInvitations = await _context.JockeyInvitations
             .CountAsync(i =>
                 i.InvitedByOwnerId == ownerId.Value &&
-                i.Status == InvitationStatuses.Pending);
+                i.Status == InvitationStatuses.Pending &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         var approvedRaces = await _context.RaceRegistrations
             .Where(r =>
                 r.OwnerId == ownerId.Value &&
-                ApprovedRegistrationStatuses.Contains(r.Status))
+                ApprovedRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(r => r.RaceId)
             .Distinct()
             .CountAsync();
@@ -91,7 +100,9 @@ public class OwnerDashboardController : OwnerBaseController
             .AsNoTracking()
             .Where(r =>
                 r.OwnerId == ownerId.Value &&
-                ApprovedRegistrationStatuses.Contains(r.Status))
+                ApprovedRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.Race.RaceDate)
             .Select(r => new
             {

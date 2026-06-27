@@ -3,10 +3,11 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Jockey;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.JockeyMatching;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Jockey;
 
@@ -17,11 +18,19 @@ public class JockeyInvitationsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly JockeyAccessService _jockeyAccess;
+    private readonly IJockeyMatchScoreService _matchScoreService;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
-    public JockeyInvitationsController(EliteRacingLeagueContext context, JockeyAccessService jockeyAccess)
+    public JockeyInvitationsController(
+        EliteRacingLeagueContext context,
+        JockeyAccessService jockeyAccess,
+        IJockeyMatchScoreService matchScoreService,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
         _jockeyAccess = jockeyAccess;
+        _matchScoreService = matchScoreService;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet("pending")]
@@ -41,27 +50,162 @@ public class JockeyInvitationsController : ControllerBase
             return profileError;
         }
 
+        var jockey = await _context.Jockeys
+            .AsNoTracking()
+            .Include(j => j.JockeyDistanceExperiences)
+            .Include(j => j.JockeyBreedExperiences)
+            .FirstAsync(j => j.JockeyId == jockeyId.Value);
+
         var invitations = await _context.JockeyInvitations
             .AsNoTracking()
-            .Where(i => i.JockeyId == jockeyId.Value
-                && i.Status == InvitationStatuses.Pending)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Horse)
+                    .ThenInclude(h => h.Breed)
+            .Include(i => i.InvitedByOwner)
+                .ThenInclude(o => o.Owner)
+            .Where(i =>
+                i.JockeyId == jockeyId.Value &&
+                i.Status == InvitationStatuses.Pending &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(i => i.SentAt)
-            .Select(i => new JockeyPendingInvitationResponse
+            .ToListAsync();
+
+        var response = invitations.Select(i =>
+        {
+            var match = _matchScoreService.Calculate(
+                jockey,
+                i.Registration.Horse,
+                i.Registration.Race,
+                i.Registration.Horse.Breed);
+
+            return new JockeyPendingInvitationResponse
             {
                 InvitationId = i.InvitationId,
                 RegistrationId = i.RegistrationId,
+                TournamentId = i.Registration.Race.TournamentId,
+                TournamentName = i.Registration.Race.Tournament.TournamentName,
                 RaceId = i.Registration.RaceId,
                 RaceName = i.Registration.Race.RaceName,
                 RaceDate = i.Registration.Race.RaceDate,
-                Location = i.Registration.Race.Location,
+                Location = i.Registration.Race.Location ?? i.Registration.Race.Tournament.Location,
+                DistanceMeters = i.Registration.Race.DistanceMeters,
+                SurfaceType = null,
+                JockeySelectionDeadline = i.Registration.Race.JockeySelectionDeadline,
+                HorseId = i.Registration.HorseId,
+                HorseName = i.Registration.Horse.HorseName,
+                HorseImageUrl = i.Registration.Horse.ImageUrl,
+                HealthCertificateImageUrl = i.Registration.Horse.HealthCertificateImageUrl,
+                BreedName = i.Registration.Horse.Breed.BreedName,
+                Age = i.Registration.Horse.Age,
+                HorseHealthStatus = i.Registration.Horse.HealthStatus,
                 OwnerId = i.InvitedByOwnerId,
                 OwnerName = i.InvitedByOwner.Owner.FullName,
+                OwnerMessage = i.Message,
+                FeeAmount = i.FeeAmount,
                 Status = i.Status,
-                SentAt = i.SentAt
-            })
-            .ToListAsync();
+                SentAt = i.SentAt,
+                MatchScore = match.MatchScore,
+                MatchReasons = match.MatchReasons
+            };
+        }).ToList();
 
-        return Ok(invitations);
+        return Ok(response);
+    }
+
+    [HttpGet("{invitationId:int}")]
+    public async Task<IActionResult> GetInvitationDetail(int invitationId)
+    {
+        var jockeyId = GetCurrentJockeyId();
+
+        if (jockeyId == null)
+        {
+            return InvalidToken();
+        }
+
+        var profileError = await ValidateActiveJockeyAsync(jockeyId.Value);
+
+        if (profileError != null)
+        {
+            return profileError;
+        }
+
+        var jockey = await _context.Jockeys
+            .AsNoTracking()
+            .Include(j => j.JockeyDistanceExperiences)
+            .Include(j => j.JockeyBreedExperiences)
+            .FirstAsync(j => j.JockeyId == jockeyId.Value);
+
+        var invitation = await _context.JockeyInvitations
+            .AsNoTracking()
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Horse)
+                    .ThenInclude(h => h.Breed)
+            .Include(i => i.InvitedByOwner)
+                .ThenInclude(o => o.Owner)
+            .FirstOrDefaultAsync(i =>
+                i.InvitationId == invitationId &&
+                i.JockeyId == jockeyId.Value &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (invitation == null)
+        {
+            return NotFound(new { message = "Invitation not found or race has been cancelled." });
+        }
+
+        var registration = invitation.Registration;
+        var race = registration.Race;
+        var horse = registration.Horse;
+        var match = _matchScoreService.Calculate(jockey, horse, race, horse.Breed);
+
+        return Ok(new JockeyInvitationDetailResponse
+        {
+            InvitationId = invitation.InvitationId,
+            Status = invitation.Status,
+            SentAt = invitation.SentAt,
+            RespondedAt = invitation.RespondedAt,
+            OwnerMessage = invitation.Message,
+            FeeAmount = invitation.FeeAmount,
+            Race = new JockeyInvitationRaceResponse
+            {
+                RaceId = race.RaceId,
+                RaceName = race.RaceName,
+                RaceDate = race.RaceDate,
+                Location = race.Location ?? race.Tournament.Location,
+                DistanceMeters = race.DistanceMeters,
+                SurfaceType = null,
+                JockeySelectionDeadline = race.JockeySelectionDeadline
+            },
+            Tournament = new JockeyInvitationTournamentResponse
+            {
+                TournamentId = race.TournamentId,
+                TournamentName = race.Tournament.TournamentName
+            },
+            Horse = new JockeyInvitationHorseResponse
+            {
+                HorseId = horse.HorseId,
+                HorseName = horse.HorseName,
+                ImageUrl = horse.ImageUrl,
+                HealthCertificateImageUrl = horse.HealthCertificateImageUrl,
+                BreedName = horse.Breed.BreedName,
+                Age = horse.Age,
+                HealthStatus = horse.HealthStatus
+            },
+            Owner = new JockeyInvitationOwnerResponse
+            {
+                OwnerId = invitation.InvitedByOwnerId,
+                OwnerName = invitation.InvitedByOwner.Owner.FullName
+            },
+            MatchScore = match.MatchScore,
+            MatchReasons = match.MatchReasons
+        });
     }
 
     [HttpPut("{id}/accept")]
@@ -81,13 +225,45 @@ public class JockeyInvitationsController : ControllerBase
             return profileError;
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-
         var invitation = await LoadOwnedInvitationAsync(id, jockeyId.Value);
 
         if (invitation == null)
         {
-            return NotFound(new { message = "Không tìm thấy lời mời." });
+            return NotFound(new { message = "Không tìm thấy lời mời hoặc race đã bị hủy." });
+        }
+
+        if (invitation.Registration.JockeyId != null)
+        {
+            return BadRequest(new
+            {
+                message = "Official jockey has already been selected for this registration."
+            });
+        }
+
+        var healthStatus = await _context.Jockeys
+            .AsNoTracking()
+            .Where(j => j.JockeyId == jockeyId.Value)
+            .Select(j => j.HealthStatus)
+            .FirstAsync();
+
+        if (!JockeyHealthStatuses.CanRace(healthStatus))
+        {
+            return BadRequest(new
+            {
+                message = "Jockey health status is not eligible to race.",
+                healthStatus
+            });
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+        var deadline = invitation.Registration.Race.JockeySelectionDeadline;
+
+        if (deadline.HasValue && now > deadline.Value)
+        {
+            return BadRequest(new
+            {
+                message = "The jockey selection deadline has passed."
+            });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -99,34 +275,29 @@ public class JockeyInvitationsController : ControllerBase
             });
         }
 
-        var now = DateTime.UtcNow;
-        var registration = invitation.Registration;
-
         invitation.Status = InvitationStatuses.Accepted;
         invitation.RespondedAt = now;
 
-        registration.JockeyId = jockeyId.Value;
-        registration.Status = RaceRegistrationStatuses.ReadyToRace;
-        registration.JockeyConfirmedAt = now;
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
 
-        var otherPendingInvitations = await _context.JockeyInvitations
-            .Where(i => i.RegistrationId == invitation.RegistrationId
-                && i.InvitationId != invitation.InvitationId
-                && i.Status == InvitationStatuses.Pending)
-            .ToListAsync();
-
-        foreach (var otherInvitation in otherPendingInvitations)
+        _context.Notifications.Add(new Notification
         {
-            otherInvitation.Status = InvitationStatuses.Cancelled;
-            otherInvitation.RespondedAt = now;
-        }
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Accepted",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} accepted invitation for {horseName}."
+                    : "A jockey accepted your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
 
         await _context.SaveChangesAsync();
-        await transaction.CommitAsync();
 
         return Ok(new
         {
-            message = "Đã chấp nhận lời mời.",
+            message = "Đã chấp nhận lời mời. Vui lòng chờ Owner xác nhận chính thức.",
             status = invitation.Status
         });
     }
@@ -152,7 +323,7 @@ public class JockeyInvitationsController : ControllerBase
 
         if (invitation == null)
         {
-            return NotFound(new { message = "Không tìm thấy lời mời." });
+            return NotFound(new { message = "Không tìm thấy lời mời hoặc race đã bị hủy." });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -167,12 +338,20 @@ public class JockeyInvitationsController : ControllerBase
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
 
-        if (invitation.Registration.JockeyId == jockeyId.Value)
+        var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
+        var horseName = invitation.Registration.Horse.HorseName;
+
+        _context.Notifications.Add(new Notification
         {
-            invitation.Registration.JockeyId = null;
-            invitation.Registration.JockeyConfirmedAt = null;
-            invitation.Registration.Status = RaceRegistrationStatuses.JockeyInvited;
-        }
+            UserId = invitation.InvitedByOwnerId,
+            Title = "Invitation Rejected",
+            Message = !string.IsNullOrWhiteSpace(jockeyName) &&
+                !string.IsNullOrWhiteSpace(horseName)
+                    ? $"{jockeyName} rejected invitation for {horseName}."
+                    : "A jockey rejected your invitation.",
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        });
 
         await _context.SaveChangesAsync();
 
@@ -288,7 +467,31 @@ public class JockeyInvitationsController : ControllerBase
     {
         return await _context.JockeyInvitations
             .Include(i => i.Registration)
-            .FirstOrDefaultAsync(i => i.InvitationId == invitationId
-                && i.JockeyId == jockeyId);
+                .ThenInclude(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.Horse)
+            .Include(i => i.Jockey)
+                .ThenInclude(j => j.JockeyNavigation)
+            .FirstOrDefaultAsync(i =>
+                i.InvitationId == invitationId &&
+                i.JockeyId == jockeyId &&
+                i.Registration.Race.Status != RaceStatuses.Cancelled &&
+                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
+    }
+
+    private static Notification CreateOwnerNotification(
+        int ownerId,
+        string title,
+        string message)
+    {
+        return new Notification
+        {
+            UserId = ownerId,
+            Title = title,
+            Message = message,
+            IsRead = false,
+            CreatedAt = DateTime.UtcNow
+        };
     }
 }

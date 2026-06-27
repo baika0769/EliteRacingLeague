@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Eliteracingleague.API.Services;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
+using System.Globalization;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
@@ -15,16 +17,26 @@ namespace Eliteracingleague.API.Controllers.Admin
     public class AdminTournamentsController : ControllerBase
     {
         private readonly EliteRacingLeagueContext _context;
+        private readonly IWebHostEnvironment _env;
+        private readonly TournamentStatusService _tournamentStatusService;
 
-        public AdminTournamentsController(EliteRacingLeagueContext context)
+        public AdminTournamentsController(
+    EliteRacingLeagueContext context,
+    IWebHostEnvironment env,
+    TournamentStatusService tournamentStatusService)
         {
             _context = context;
+            _env = env;
+            _tournamentStatusService = tournamentStatusService;
         }
 
         [HttpGet]
         public async Task<IActionResult> GetTournaments()
         {
+            await _tournamentStatusService.SyncTournamentStatusesAsync();
+
             var tournaments = await _context.Tournaments
+                .AsNoTracking()
                 .Select(t => new AdminTournamentResponse
                 {
                     TournamentId = t.TournamentId,
@@ -35,20 +47,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                     EndDate = t.EndDate,
                     MaxHorses = t.MaxHorses,
                     PrizePool = t.PrizePool,
+                    ImageUrl = t.ImageUrl,
                     Status = t.Status,
-                    MinHorseAge = t.MinHorseAge,
-                    MaxHorseAge = t.MaxHorseAge,
-                    MinHorseWeightKg = t.MinHorseWeightKg,
-                    MaxHorseWeightKg = t.MaxHorseWeightKg,
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
+
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
+
                     EntriesText =
                         _context.RaceRegistrations
                             .Count(r => r.Race.TournamentId == t.TournamentId)
-                        + "/" + t.MaxHorses
+                        + "/" + t.MaxHorses,
+
+                    Referee = t.Race == null
+                        ? "Unassigned"
+                        : t.Race.RefereeAssignments
+                            .OrderByDescending(a => a.AssignedAt)
+                            .Select(a => a.Referee.Referee.FullName)
+                            .FirstOrDefault() ?? "Unassigned"
                 })
                 .OrderByDescending(t => t.TournamentId)
                 .ToListAsync();
@@ -59,7 +77,10 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet("{id}")]
         public async Task<IActionResult> GetTournamentById(int id)
         {
+            await _tournamentStatusService.SyncTournamentStatusesAsync();
+
             var tournament = await _context.Tournaments
+                .AsNoTracking()
                 .Where(t => t.TournamentId == id)
                 .Select(t => new AdminTournamentResponse
                 {
@@ -71,20 +92,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                     EndDate = t.EndDate,
                     MaxHorses = t.MaxHorses,
                     PrizePool = t.PrizePool,
+                    ImageUrl = t.ImageUrl,
                     Status = t.Status,
-                    MinHorseAge = t.MinHorseAge,
-                    MaxHorseAge = t.MaxHorseAge,
-                    MinHorseWeightKg = t.MinHorseWeightKg,
-                    MaxHorseWeightKg = t.MaxHorseWeightKg,
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
+
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
+
                     EntriesText =
                         _context.RaceRegistrations
                             .Count(r => r.Race.TournamentId == t.TournamentId)
-                        + "/" + t.MaxHorses
+                        + "/" + t.MaxHorses,
+
+                    Referee = t.Race == null
+                        ? "Unassigned"
+                        : t.Race.RefereeAssignments
+                            .OrderByDescending(a => a.AssignedAt)
+                            .Select(a => a.Referee.Referee.FullName)
+                            .FirstOrDefault() ?? "Unassigned"
                 })
                 .FirstOrDefaultAsync();
 
@@ -101,9 +128,9 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpPost]
-        public async Task<IActionResult> CreateTournament([FromBody] AdminTournamentRequest request)
+        public async Task<IActionResult> CreateTournament([FromForm] AdminTournamentRequest request)
         {
-            var validationResult = ValidateTournamentRequest(request, 0 );
+            var validationResult = ValidateTournamentRequest(request, 0);
             if (validationResult != null)
             {
                 return validationResult;
@@ -119,6 +146,20 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            string? imageUrl;
+
+            try
+            {
+                imageUrl = await SaveTournamentImageAsync(request.TournamentImage);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = ex.Message
+                });
+            }
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
@@ -129,16 +170,13 @@ namespace Eliteracingleague.API.Controllers.Admin
                 {
                     TournamentName = request.TournamentName.Trim(),
                     Description = request.Description,
-                    Location = request.Location.Trim(),
+                    Location = request.Location!.Trim(),
                     StartDate = request.RegistrationDeadline,
                     EndDate = request.RaceDate,
                     MaxHorses = request.MaxHorses,
                     PrizePool = request.PrizePool,
+                    ImageUrl = imageUrl,
                     Status = TournamentStatuses.Draft,
-                    MinHorseAge = request.MinHorseAge,
-                    MaxHorseAge = request.MaxHorseAge,
-                    MinHorseWeightKg = request.MinHorseWeightKg,
-                    MaxHorseWeightKg = request.MaxHorseWeightKg,
                     Rules = request.Rules,
                     CreatedAt = now,
                     CreatedBy = adminId,
@@ -148,7 +186,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 _context.Tournaments.Add(tournament);
                 await _context.SaveChangesAsync();
 
-                var raceDateTime = request.RaceDate.ToDateTime(TimeOnly.MinValue);
+                var raceDateTime = BuildRaceDateTime(request);
                 var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
                 var race = new Race
@@ -177,7 +215,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                     tournamentId = tournament.TournamentId,
                     raceId = race.RaceId,
                     name = tournament.TournamentName,
-                    status = tournament.Status
+                    status = tournament.Status,
+                    imageUrl = tournament.ImageUrl
                 });
             }
             catch
@@ -188,7 +227,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateTournament(int id, [FromBody] AdminTournamentRequest request)
+        public async Task<IActionResult> UpdateTournament(int id, [FromForm] AdminTournamentRequest request)
         {
             var validationResult = ValidateTournamentRequest(request, id);
             if (validationResult != null)
@@ -220,17 +259,29 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var now = DateTime.UtcNow;
 
+            if (request.TournamentImage != null && request.TournamentImage.Length > 0)
+            {
+                try
+                {
+                    tournament.ImageUrl = await SaveTournamentImageAsync(request.TournamentImage);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    return BadRequest(new AdminActionResponse
+                    {
+                        Message = ex.Message,
+                        Id = id
+                    });
+                }
+            }
+
             tournament.TournamentName = request.TournamentName.Trim();
             tournament.Description = request.Description;
-            tournament.Location = request.Location.Trim();
+            tournament.Location = request.Location!.Trim();
             tournament.StartDate = request.RegistrationDeadline;
             tournament.EndDate = request.RaceDate;
             tournament.MaxHorses = request.MaxHorses;
             tournament.PrizePool = request.PrizePool;
-            tournament.MinHorseAge = request.MinHorseAge;
-            tournament.MaxHorseAge = request.MaxHorseAge;
-            tournament.MinHorseWeightKg = request.MinHorseWeightKg;
-            tournament.MaxHorseWeightKg = request.MaxHorseWeightKg;
             tournament.Rules = request.Rules;
 
             if (!string.IsNullOrWhiteSpace(request.Status))
@@ -243,7 +294,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             var race = await _context.Races
                 .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
 
-            var raceDateTime = request.RaceDate.ToDateTime(TimeOnly.MinValue);
+            var raceDateTime = BuildRaceDateTime(request);
             var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
             if (race == null)
@@ -256,7 +307,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     DistanceMeters = request.DistanceMeters,
                     Location = tournament.Location,
                     MaxHorses = request.MaxHorses,
-                    Status = RaceStatuses.Scheduled,
+                    Status = MapTournamentStatusToRaceStatus(tournament.Status, RaceStatuses.Scheduled),
                     JockeySelectionDeadline = registrationDeadline,
                     PredictionDeadline = raceDateTime.AddHours(-1),
                     CreatedAt = now,
@@ -274,6 +325,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                 race.MaxHorses = request.MaxHorses;
                 race.JockeySelectionDeadline = registrationDeadline;
                 race.PredictionDeadline = raceDateTime.AddHours(-1);
+
+                if (!string.IsNullOrWhiteSpace(request.Status))
+                {
+                    race.Status = MapTournamentStatusToRaceStatus(tournament.Status, race.Status);
+                }
+
                 race.UpdatedAt = now;
             }
 
@@ -287,6 +344,85 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = tournament.Status
             });
         }
+
+        [HttpPut("{id}/status")]
+        public async Task<IActionResult> UpdateTournamentStatus(int id, [FromBody] UpdateTournamentStatusRequest request)
+        {
+            var tournament = await _context.Tournaments
+                .Include(t => t.Race)
+                .FirstOrDefaultAsync(t => t.TournamentId == id);
+
+            if (tournament == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Status) ||
+                !TournamentStatuses.IsValid(request.Status))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Invalid tournament status",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+
+            if (tournament.Status == TournamentStatuses.Completed &&
+                request.Status != TournamentStatuses.Completed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Completed tournament cannot be changed to another status",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            if (request.Status == TournamentStatuses.OpenRegistration &&
+                tournament.StartDate < DateOnly.FromDateTime(now))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cannot open registration because the registration deadline has passed. Please update the registration deadline first.",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            tournament.Status = request.Status;
+            tournament.UpdatedAt = now;
+
+            if (tournament.Race != null)
+            {
+                tournament.Race.Status = MapTournamentStatusToRaceStatus(
+                    tournament.Status,
+                    tournament.Race.Status
+                );
+
+                tournament.Race.UpdatedAt = now;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Tournament status updated successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
+            });
+        }
+
 
         [HttpPut("{id}/approve")]
         public async Task<IActionResult> ApproveTournament(int id)
@@ -316,6 +452,15 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             tournament.Status = TournamentStatuses.OpenRegistration;
             tournament.UpdatedAt = DateTime.UtcNow;
+
+            var race = await _context.Races
+                .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
+
+            if (race != null && race.Status == RaceStatuses.Cancelled)
+            {
+                race.Status = RaceStatuses.Scheduled;
+                race.UpdatedAt = DateTime.UtcNow;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -358,8 +503,10 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             try
             {
+                var now = DateTime.UtcNow;
+
                 tournament.Status = TournamentStatuses.Cancelled;
-                tournament.UpdatedAt = DateTime.UtcNow;
+                tournament.UpdatedAt = now;
 
                 var races = await _context.Races
                     .Where(r => r.TournamentId == id)
@@ -368,8 +515,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                 foreach (var race in races)
                 {
                     race.Status = RaceStatuses.Cancelled;
-                    race.UpdatedAt = DateTime.UtcNow;
+                    race.UpdatedAt = now;
                 }
+
+                var raceIds = races.Select(r => r.RaceId).ToList();
+
+                await CancelTournamentRelatedDataAsync(raceIds, now);
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -415,8 +566,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var now = DateTime.UtcNow;
+
             tournament.Status = TournamentStatuses.Draft;
-            tournament.UpdatedAt = DateTime.UtcNow;
+            tournament.UpdatedAt = now;
 
             var races = await _context.Races
                 .Where(r => r.TournamentId == id)
@@ -425,7 +578,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             foreach (var race in races)
             {
                 race.Status = RaceStatuses.Scheduled;
-                race.UpdatedAt = DateTime.UtcNow;
+                race.UpdatedAt = now;
             }
 
             await _context.SaveChangesAsync();
@@ -438,7 +591,6 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = tournament.Status
             });
         }
-
 
         [HttpGet("referees")]
         public async Task<IActionResult> GetRaceReferees()
@@ -459,10 +611,11 @@ namespace Eliteracingleague.API.Controllers.Admin
 
         [HttpPut("{id}/assign-referee")]
         public async Task<IActionResult> AssignReferee(
-    int id,
-    [FromBody] AssignRefereeRequest request)
+            int id,
+            [FromBody] AssignRefereeRequest request)
         {
             var race = await _context.Races
+                .Include(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.TournamentId == id);
 
             if (race == null)
@@ -490,13 +643,20 @@ namespace Eliteracingleague.API.Controllers.Admin
             if (existing != null)
             {
                 existing.RefereeId = request.RefereeId;
+                existing.Status = RefereeAssignmentStatuses.Assigned;
                 existing.AssignedAt = DateTime.UtcNow;
             }
             else
             {
-                var adminId = int.Parse(
-                    User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!
-                        .Value);
+                var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (!int.TryParse(adminIdText, out var adminId))
+                {
+                    return Unauthorized(new
+                    {
+                        message = "Invalid admin token"
+                    });
+                }
 
                 _context.RefereeAssignments.Add(
                     new RefereeAssignment
@@ -504,10 +664,21 @@ namespace Eliteracingleague.API.Controllers.Admin
                         RaceId = race.RaceId,
                         RefereeId = request.RefereeId,
                         AssignedBy = adminId,
-                        Status = "Assigned",
+                        Status = RefereeAssignmentStatuses.Assigned,
                         AssignedAt = DateTime.UtcNow
                     });
             }
+
+            if (race.Tournament.Status == TournamentStatuses.Ongoing)
+            {
+                race.Status = RaceStatuses.Ongoing;
+            }
+            else if (race.Status == RaceStatuses.Scheduled)
+            {
+                race.Status = RaceStatuses.AssignedReferee;
+            }
+
+            race.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -516,7 +687,6 @@ namespace Eliteracingleague.API.Controllers.Admin
                 message = "Referee assigned successfully"
             });
         }
-
 
         [HttpPut("{id}/cancel")]
         public async Task<IActionResult> CancelTournament(int id)
@@ -544,8 +714,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var now = DateTime.UtcNow;
+
             tournament.Status = TournamentStatuses.Cancelled;
-            tournament.UpdatedAt = DateTime.UtcNow;
+            tournament.UpdatedAt = now;
 
             var races = await _context.Races
                 .Where(r => r.TournamentId == id)
@@ -554,8 +726,12 @@ namespace Eliteracingleague.API.Controllers.Admin
             foreach (var race in races)
             {
                 race.Status = RaceStatuses.Cancelled;
-                race.UpdatedAt = DateTime.UtcNow;
+                race.UpdatedAt = now;
             }
+
+            var raceIds = races.Select(r => r.RaceId).ToList();
+
+            await CancelTournamentRelatedDataAsync(raceIds, now);
 
             await _context.SaveChangesAsync();
 
@@ -566,6 +742,38 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Name = tournament.TournamentName,
                 Status = tournament.Status
             });
+        }
+
+        private static readonly string[] RaceStartTimeFormats =
+        {
+            "HH:mm",
+            "H:mm",
+            "HH:mm:ss",
+            "H:mm:ss"
+        };
+
+        private static bool TryParseRaceStartTime(string? value, out TimeOnly raceStartTime)
+        {
+            raceStartTime = default;
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return TimeOnly.TryParseExact(
+                value.Trim(),
+                RaceStartTimeFormats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out raceStartTime);
+        }
+
+        private static DateTime BuildRaceDateTime(AdminTournamentRequest request)
+        {
+            TryParseRaceStartTime(request.RaceStartTime, out var raceStartTime);
+
+            return request.RaceDate.ToDateTime(raceStartTime);
         }
 
         private IActionResult? ValidateTournamentRequest(AdminTournamentRequest request, int id)
@@ -597,6 +805,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (!TryParseRaceStartTime(request.RaceStartTime, out _))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Race start time is required and must be in HH:mm format. Example: 14:30",
+                    Id = id
+                });
+            }
+
             if (request.MaxHorses < 1 || request.MaxHorses > 20)
             {
                 return BadRequest(new AdminActionResponse
@@ -611,7 +828,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 request.DistanceMeters != 2400)
             {
                 return BadRequest(new AdminActionResponse
-                {   
+                {
                     Message = "Distance must be 1000, 1500, or 2400 meters",
                     Id = id
                 });
@@ -619,5 +836,115 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             return null;
         }
+
+        private async Task<string?> SaveTournamentImageAsync(IFormFile? file)
+        {
+            if (file == null || file.Length == 0)
+            {
+                return null;
+            }
+
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+
+            if (!allowedExtensions.Contains(extension))
+            {
+                throw new InvalidOperationException("Only JPG, JPEG, PNG, and WEBP images are allowed.");
+            }
+
+            if (file.Length > 5 * 1024 * 1024)
+            {
+                throw new InvalidOperationException("Tournament image must be less than 5MB.");
+            }
+
+            var webRootPath = _env.WebRootPath;
+
+            if (string.IsNullOrWhiteSpace(webRootPath))
+            {
+                webRootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            }
+
+            var uploadFolder = Path.Combine(webRootPath, "uploads", "tournaments");
+
+            if (!Directory.Exists(uploadFolder))
+            {
+                Directory.CreateDirectory(uploadFolder);
+            }
+
+            var fileName = $"{Guid.NewGuid():N}{extension}";
+            var fullPath = Path.Combine(uploadFolder, fileName);
+
+            await using var stream = System.IO.File.Create(fullPath);
+            await file.CopyToAsync(stream);
+
+            return $"/uploads/tournaments/{fileName}";
+        }
+
+
+        private async Task CancelTournamentRelatedDataAsync(List<int> raceIds, DateTime now)
+        {
+            if (raceIds == null || raceIds.Count == 0)
+            {
+                return;
+            }
+
+            var registrations = await _context.RaceRegistrations
+                .Where(r => raceIds.Contains(r.RaceId)
+                    && r.Status != RaceRegistrationStatuses.Cancelled
+                    && r.Status != RaceRegistrationStatuses.Rejected)
+                .ToListAsync();
+
+            foreach (var registration in registrations)
+            {
+                registration.Status = RaceRegistrationStatuses.Cancelled;
+                registration.AdminNote = "Tournament cancelled";
+                registration.ReviewedAt = now;
+            }
+
+            var invitations = await _context.JockeyInvitations
+                .Where(i => raceIds.Contains(i.Registration.RaceId)
+                    && i.Status == InvitationStatuses.Pending)
+                .ToListAsync();
+
+            foreach (var invitation in invitations)
+            {
+                invitation.Status = InvitationStatuses.Cancelled;
+                invitation.RespondedAt = now;
+            }
+
+            var assignments = await _context.RefereeAssignments
+                .Where(a => raceIds.Contains(a.RaceId)
+                    && a.Status == RefereeAssignmentStatuses.Assigned)
+                .ToListAsync();
+
+            foreach (var assignment in assignments)
+            {
+                assignment.Status = RefereeAssignmentStatuses.Cancelled;
+            }
+        }
+
+        private static string MapTournamentStatusToRaceStatus(
+            string tournamentStatus,
+            string currentRaceStatus)
+        {
+            return tournamentStatus switch
+            {
+                TournamentStatuses.Ongoing => RaceStatuses.Ongoing,
+                TournamentStatuses.Completed => RaceStatuses.Finished,
+                TournamentStatuses.Cancelled => RaceStatuses.Cancelled,
+                TournamentStatuses.Draft => RaceStatuses.Scheduled,
+                TournamentStatuses.OpenRegistration => currentRaceStatus == RaceStatuses.Cancelled
+                    ? RaceStatuses.Scheduled
+                    : currentRaceStatus,
+                TournamentStatuses.ClosedRegistration => currentRaceStatus == RaceStatuses.Scheduled
+                    ? RaceStatuses.Scheduled
+                    : currentRaceStatus,
+                _ => string.IsNullOrWhiteSpace(currentRaceStatus)
+                    ? RaceStatuses.Scheduled
+                    : currentRaceStatus
+            };
+        }
     }
+
+
 }

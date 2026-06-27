@@ -102,6 +102,9 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.ImageUrl)
                 .HasMaxLength(500)
                 .HasColumnName("image_url");
+            entity.Property(e => e.HealthCertificateImageUrl)
+                .HasMaxLength(500)
+                .HasColumnName("health_certificate_image_url");
             entity.Property(e => e.IsActive)
                 .HasDefaultValue(true)
                 .HasColumnName("is_active");
@@ -909,41 +912,52 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.ToTable("tournaments");
 
             entity.Property(e => e.TournamentId).HasColumnName("tournament_id");
+
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("created_at");
+
             entity.Property(e => e.CreatedBy).HasColumnName("created_by");
+
             entity.Property(e => e.Description)
                 .HasMaxLength(1000)
                 .HasColumnName("description");
+
             entity.Property(e => e.EndDate).HasColumnName("end_date");
+
             entity.Property(e => e.Location)
                 .HasMaxLength(255)
                 .HasColumnName("location");
-            entity.Property(e => e.MaxHorseAge).HasColumnName("max_horse_age");
-            entity.Property(e => e.MaxHorseWeightKg)
-                .HasColumnType("decimal(6, 2)")
-                .HasColumnName("max_horse_weight_kg");
+
             entity.Property(e => e.MaxHorses)
                 .HasDefaultValue(10)
                 .HasColumnName("max_horses");
-            entity.Property(e => e.MinHorseAge).HasColumnName("min_horse_age");
-            entity.Property(e => e.MinHorseWeightKg)
-                .HasColumnType("decimal(6, 2)")
-                .HasColumnName("min_horse_weight_kg");
+
             entity.Property(e => e.PrizePool)
                 .HasColumnType("decimal(18, 2)")
                 .HasColumnName("prize_pool");
-            entity.Property(e => e.Rules).HasColumnName("rules");
-            entity.Property(e => e.StartDate).HasColumnName("start_date");
+
+            entity.Property(e => e.ImageUrl)
+                .HasMaxLength(500)
+                .HasColumnName("image_url");
+
+            entity.Property(e => e.Rules)
+                .HasColumnName("rules");
+
+            entity.Property(e => e.StartDate)
+                .HasColumnName("start_date");
+
             entity.Property(e => e.Status)
                 .HasMaxLength(30)
                 .IsUnicode(false)
                 .HasColumnName("status");
+
             entity.Property(e => e.TournamentName)
                 .HasMaxLength(200)
                 .HasColumnName("tournament_name");
-            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnName("updated_at");
 
             entity.HasOne(d => d.CreatedByNavigation).WithMany(p => p.Tournaments)
                 .HasForeignKey(d => d.CreatedBy)

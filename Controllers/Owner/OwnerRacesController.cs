@@ -45,19 +45,61 @@ public class OwnerRacesController : OwnerBaseController
             .Where(r =>
                 r.RaceId == raceId &&
                 (
-                    r.Status == "Open" ||
+                    RaceStatuses.RegisterableStatuses.Contains(r.Status) ||
                     r.RaceRegistrations.Any(rr => rr.OwnerId == ownerId.Value)
                 ))
             .Select(r => new
             {
                 r.RaceId,
+                r.TournamentId,
                 r.RaceName,
                 r.RaceDate,
                 r.DistanceMeters,
                 r.Location,
+                r.MaxHorses,
                 r.Status,
+                r.JockeySelectionDeadline,
+                r.PredictionDeadline,
                 TournamentName = r.Tournament.TournamentName,
-                TournamentLocation = r.Tournament.Location
+                TournamentDescription = r.Tournament.Description,
+                TournamentStatus = r.Tournament.Status,
+                TournamentImageUrl = r.Tournament.ImageUrl,
+                r.Tournament.PrizePool,
+                r.Tournament.Rules,
+                TournamentStartDate = r.Tournament.StartDate,
+                TournamentEndDate = r.Tournament.EndDate,
+                TournamentLocation = r.Tournament.Location,
+                Registration = r.RaceRegistrations
+                    .Where(rr => rr.OwnerId == ownerId.Value)
+                    .OrderByDescending(rr => rr.SubmittedAt)
+                    .ThenByDescending(rr => rr.RegistrationId)
+                    .Select(rr => new
+                    {
+                        rr.RegistrationId,
+                        rr.Status,
+                        rr.Horse.HorseName,
+                        OfficialJockeyName = rr.Jockey != null
+                            ? rr.Jockey.JockeyNavigation.FullName
+                            : null
+                    })
+                    .FirstOrDefault(),
+                RefereeAssignment = r.RefereeAssignments
+                    .Where(ra => ra.Status == RefereeAssignmentStatuses.Assigned)
+                    .OrderByDescending(ra => ra.AssignedAt)
+                    .ThenByDescending(ra => ra.RefereeAssignmentId)
+                    .Select(ra => new
+                    {
+                        ra.RefereeAssignmentId,
+                        ra.RefereeId,
+                        RefereeName = ra.Referee.Referee.FullName,
+                        RefereeEmail = ra.Referee.Referee.Email,
+                        RefereePhone = ra.Referee.Referee.Phone,
+                        ra.Referee.LicenseNo,
+                        ra.Referee.ExperienceYears,
+                        ra.Status,
+                        ra.AssignedAt
+                    })
+                    .FirstOrDefault()
             })
             .FirstOrDefaultAsync();
 
@@ -72,12 +114,36 @@ public class OwnerRacesController : OwnerBaseController
         var response = new OwnerRaceDetailResponse
         {
             RaceId = race.RaceId,
+            TournamentId = race.TournamentId,
             TournamentName = race.TournamentName,
+            TournamentDescription = race.TournamentDescription,
+            TournamentStatus = race.TournamentStatus,
+            TournamentImageUrl = race.TournamentImageUrl,
+            PrizePool = race.PrizePool,
+            Rules = race.Rules,
+            TournamentStartDate = race.TournamentStartDate.ToString("yyyy-MM-dd"),
+            TournamentEndDate = race.TournamentEndDate.ToString("yyyy-MM-dd"),
             RaceName = race.RaceName,
             RaceDate = race.RaceDate.ToString("yyyy-MM-dd"),
             Location = race.Location ?? race.TournamentLocation,
             Distance = race.DistanceMeters,
-            Status = race.Status
+            MaxHorses = race.MaxHorses,
+            Status = race.Status,
+            JockeySelectionDeadline = race.JockeySelectionDeadline?.ToString("yyyy-MM-dd HH:mm"),
+            PredictionDeadline = race.PredictionDeadline?.ToString("yyyy-MM-dd HH:mm"),
+            RegistrationId = race.Registration?.RegistrationId,
+            RegistrationStatus = race.Registration?.Status,
+            HorseName = race.Registration?.HorseName,
+            OfficialJockeyName = race.Registration?.OfficialJockeyName,
+            RefereeAssignmentId = race.RefereeAssignment?.RefereeAssignmentId,
+            RefereeId = race.RefereeAssignment?.RefereeId,
+            RefereeName = race.RefereeAssignment?.RefereeName,
+            RefereeEmail = race.RefereeAssignment?.RefereeEmail,
+            RefereePhone = race.RefereeAssignment?.RefereePhone,
+            RefereeLicenseNo = race.RefereeAssignment?.LicenseNo,
+            RefereeExperienceYears = race.RefereeAssignment?.ExperienceYears,
+            RefereeAssignmentStatus = race.RefereeAssignment?.Status,
+            RefereeAssignedAt = race.RefereeAssignment?.AssignedAt.ToString("yyyy-MM-dd HH:mm")
         };
 
         return Ok(response);
@@ -136,8 +202,7 @@ public class OwnerRacesController : OwnerBaseController
             });
         }
 
-        if (registration.Race.Status == RaceStatuses.Cancelled ||
-            registration.Race.Status == RaceStatuses.Completed)
+        if (RaceStatuses.IsClosedForJockeyAssignment(registration.Race.Status))
         {
             return BadRequest(new
             {

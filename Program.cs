@@ -6,6 +6,8 @@ using Eliteracingleague.API.Data;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Email;
+using Eliteracingleague.API.Services.JockeyMatching;
+using Eliteracingleague.API.Services.SystemTime;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -38,6 +40,14 @@ builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
 
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
 builder.Services.AddScoped<JockeyAccessService>();
+builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
+builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+builder.Services.AddScoped<IRaceTimeStatusService, RaceTimeStatusService>();
+
+if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
+{
+    builder.Services.AddHostedService<RaceTimeStatusBackgroundService>();
+}
 
 // JWT Authentication configuration
 builder.Services.AddAuthentication(options =>

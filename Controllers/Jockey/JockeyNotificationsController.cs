@@ -432,6 +432,9 @@ public class JockeyNotificationsController : ControllerBase
                 HorseId = i.Registration.HorseId,
                 HorseName = i.Registration.Horse.HorseName,
                 HorseAge = i.Registration.Horse.Age,
+                HorseImageUrl = i.Registration.Horse.ImageUrl,
+                HorseHealthStatus = i.Registration.Horse.HealthStatus,
+                HealthCertificateImageUrl = i.Registration.Horse.HealthCertificateImageUrl,
                 OwnerName = i.InvitedByOwner.Owner.FullName,
                 OwnerMessage = i.Message
             })

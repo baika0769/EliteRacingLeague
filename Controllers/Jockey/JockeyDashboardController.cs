@@ -48,34 +48,48 @@ public class JockeyDashboardController : ControllerBase
             .CountAsync(i => i.JockeyId == jockeyId
                 && i.Status == InvitationStatuses.Pending);
 
+        var acceptedInvitations = await _context.JockeyInvitations
+            .AsNoTracking()
+            .CountAsync(i => i.JockeyId == jockeyId
+                && i.Status == InvitationStatuses.Accepted);
+
         var acceptedRaces = await _context.RaceRegistrations
             .AsNoTracking()
             .CountAsync(r => r.JockeyId == jockeyId
                 && AcceptedRegistrationStatuses.Contains(r.Status));
 
-        var upcomingRaces = await _context.RaceRegistrations
+        var jockeyRaceRegistrations = await _context.RaceRegistrations
             .AsNoTracking()
-            .Where(r => r.JockeyId == jockeyId
-                && AcceptedRegistrationStatuses.Contains(r.Status)
-                && r.Race.RaceDate > now
-                && r.Race.Status != RaceStatuses.Cancelled
-                && r.Race.Status != RaceStatuses.Completed)
-            .Select(r => r.RaceId)
-            .Distinct()
-            .CountAsync();
+            .Where(r => r.JockeyId == jockeyId)
+            .Select(r => new
+            {
+                r.RaceId,
+                RegistrationStatus = r.Status,
+                r.Race.RaceDate,
+                RaceStatus = r.Race.Status
+            })
+            .ToListAsync();
 
-        var completedRaces = await _context.RaceRegistrations
-            .AsNoTracking()
-            .Where(r => r.JockeyId == jockeyId
-                && (r.Status == RaceRegistrationStatuses.Completed
-                    || r.Race.Status == RaceStatuses.Completed))
+        var upcomingRaces = jockeyRaceRegistrations
+            .Where(r => AcceptedRegistrationStatuses.Contains(r.RegistrationStatus)
+                && r.RaceDate >= now
+                && r.RaceStatus != RaceStatuses.Cancelled
+                && !RaceStatuses.IsCompletedForDashboard(r.RaceStatus))
             .Select(r => r.RaceId)
             .Distinct()
-            .CountAsync();
+            .Count();
+
+        var completedRaces = jockeyRaceRegistrations
+            .Where(r => r.RegistrationStatus == RaceRegistrationStatuses.Completed
+                || RaceStatuses.IsCompletedForDashboard(r.RaceStatus))
+            .Select(r => r.RaceId)
+            .Distinct()
+            .Count();
 
         return Ok(new JockeyDashboardResponse
         {
             PendingInvitations = pendingInvitations,
+            AcceptedInvitations = acceptedInvitations,
             AcceptedRaces = acceptedRaces,
             UpcomingRaces = upcomingRaces,
             CompletedRaces = completedRaces,
