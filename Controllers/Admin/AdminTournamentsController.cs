@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
+using Eliteracingleague.API.Services;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
@@ -17,18 +18,23 @@ namespace Eliteracingleague.API.Controllers.Admin
     {
         private readonly EliteRacingLeagueContext _context;
         private readonly IWebHostEnvironment _env;
+        private readonly TournamentStatusService _tournamentStatusService;
 
         public AdminTournamentsController(
-            EliteRacingLeagueContext context,
-            IWebHostEnvironment env)
+    EliteRacingLeagueContext context,
+    IWebHostEnvironment env,
+    TournamentStatusService tournamentStatusService)
         {
             _context = context;
             _env = env;
+            _tournamentStatusService = tournamentStatusService;
         }
 
         [HttpGet]
         public async Task<IActionResult> GetTournaments()
         {
+            await _tournamentStatusService.SyncTournamentStatusesAsync();
+
             var tournaments = await _context.Tournaments
                 .AsNoTracking()
                 .Select(t => new AdminTournamentResponse
@@ -71,6 +77,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet("{id}")]
         public async Task<IActionResult> GetTournamentById(int id)
         {
+            await _tournamentStatusService.SyncTournamentStatusesAsync();
+
             var tournament = await _context.Tournaments
                 .AsNoTracking()
                 .Where(t => t.TournamentId == id)
@@ -336,6 +344,85 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = tournament.Status
             });
         }
+
+        [HttpPut("{id}/status")]
+        public async Task<IActionResult> UpdateTournamentStatus(int id, [FromBody] UpdateTournamentStatusRequest request)
+        {
+            var tournament = await _context.Tournaments
+                .Include(t => t.Race)
+                .FirstOrDefaultAsync(t => t.TournamentId == id);
+
+            if (tournament == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Tournament not found",
+                    Id = id
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Status) ||
+                !TournamentStatuses.IsValid(request.Status))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Invalid tournament status",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+
+            if (tournament.Status == TournamentStatuses.Completed &&
+                request.Status != TournamentStatuses.Completed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Completed tournament cannot be changed to another status",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            if (request.Status == TournamentStatuses.OpenRegistration &&
+                tournament.StartDate < DateOnly.FromDateTime(now))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cannot open registration because the registration deadline has passed. Please update the registration deadline first.",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            tournament.Status = request.Status;
+            tournament.UpdatedAt = now;
+
+            if (tournament.Race != null)
+            {
+                tournament.Race.Status = MapTournamentStatusToRaceStatus(
+                    tournament.Status,
+                    tournament.Race.Status
+                );
+
+                tournament.Race.UpdatedAt = now;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Tournament status updated successfully",
+                Id = tournament.TournamentId,
+                Name = tournament.TournamentName,
+                Status = tournament.Status
+            });
+        }
+
 
         [HttpPut("{id}/approve")]
         public async Task<IActionResult> ApproveTournament(int id)
