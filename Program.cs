@@ -43,6 +43,7 @@ builder.Services.AddScoped<JockeyAccessService>();
 builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 builder.Services.AddScoped<IRaceTimeStatusService, RaceTimeStatusService>();
+builder.Services.AddScoped<TournamentStatusService>();
 
 if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
 {
