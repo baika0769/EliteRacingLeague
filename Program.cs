@@ -45,6 +45,7 @@ builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 builder.Services.AddScoped<IRaceTimeStatusService, RaceTimeStatusService>();
 builder.Services.AddScoped<SpectatorLeaderboardService>();
 builder.Services.AddScoped<PredictionEvaluationService>();
+builder.Services.AddScoped<TournamentStatusService>();
 
 if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
 {
