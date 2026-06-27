@@ -33,8 +33,9 @@ public class RaceTimeStatusService : IRaceTimeStatusService
 
     public async Task<SyncTimeStatusesResponse> SyncAsync(CancellationToken cancellationToken = default)
     {
-        var now = _dateTimeProvider.UtcNow;
-        var localToday = DateOnly.FromDateTime(_dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId));
+        var effectiveUtcNow = _dateTimeProvider.UtcNow;
+        var now = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(now);
 
         var expiredInvitations = await _context.JockeyInvitations
             .Include(i => i.Registration)
@@ -66,7 +67,8 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         var tournamentsToStart = await _context.Tournaments
             .Where(t =>
                 TournamentStatusesBeforeStart.Contains(t.Status) &&
-                t.StartDate <= localToday)
+                t.Race != null &&
+                t.Race.RaceDate <= now)
             .ToListAsync(cancellationToken);
 
         foreach (var tournament in tournamentsToStart)
@@ -75,7 +77,23 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             tournament.UpdatedAt = now;
         }
 
-        if (expiredInvitations.Count > 0 || racesToStart.Count > 0 || tournamentsToStart.Count > 0)
+        var tournamentsToCloseRegistration = await _context.Tournaments
+            .Where(t =>
+                t.Status == TournamentStatuses.OpenRegistration &&
+                t.StartDate <= localToday &&
+                (t.Race == null || t.Race.RaceDate > now))
+            .ToListAsync(cancellationToken);
+
+        foreach (var tournament in tournamentsToCloseRegistration)
+        {
+            tournament.Status = TournamentStatuses.ClosedRegistration;
+            tournament.UpdatedAt = now;
+        }
+
+        if (expiredInvitations.Count > 0 ||
+            racesToStart.Count > 0 ||
+            tournamentsToStart.Count > 0 ||
+            tournamentsToCloseRegistration.Count > 0)
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
@@ -83,10 +101,10 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         return new SyncTimeStatusesResponse
         {
             Message = "Time statuses synchronized.",
-            EffectiveUtcNow = now,
+            EffectiveUtcNow = effectiveUtcNow,
             ExpiredInvitations = expiredInvitations.Count,
             UpdatedRaces = racesToStart.Count,
-            UpdatedTournaments = tournamentsToStart.Count
+            UpdatedTournaments = tournamentsToStart.Count + tournamentsToCloseRegistration.Count
         };
     }
 }
