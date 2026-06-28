@@ -466,10 +466,20 @@ public class RefereeRacesController : ControllerBase
 
     [HttpPost("{raceId}/reports")]
     public async Task<IActionResult> CreateReport(
-        int raceId,
-        CreateRefereeReportRequest request)
+    int raceId,
+    CreateRefereeReportRequest request)
     {
         var refereeId = GetRefereeId();
+
+        if (!RefereeReportTypes.IsValid(request.ReportType))
+        {
+            return BadRequest("Invalid report type.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReportContent))
+        {
+            return BadRequest("Report content is required.");
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -478,11 +488,54 @@ public class RefereeRacesController : ControllerBase
             return Forbid();
         }
 
+        var race = await _context.Races
+            .Include(r => r.Tournament)
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        var now = DateTime.Now;
+
+        if (request.ReportType == RefereeReportTypes.PreRace)
+        {
+            if (race.Tournament.Status != TournamentStatuses.ClosedRegistration)
+            {
+                return BadRequest("Pre-race report can only be submitted when tournament status is ClosedRegistration.");
+            }
+
+            if (race.RaceDate <= now)
+            {
+                return BadRequest("Pre-race report must be submitted before race start time.");
+            }
+        }
+
+        if (request.ReportType == RefereeReportTypes.PostRace)
+        {
+            if (race.Tournament.Status != TournamentStatuses.Ongoing)
+            {
+                return BadRequest("Post-race report can only be submitted when tournament status is Ongoing.");
+            }
+
+            if (race.Status != RaceStatuses.ResultPending &&
+                race.Status != RaceStatuses.Finished &&
+                race.Status != RaceStatuses.Ongoing)
+            {
+                return BadRequest("Post-race report can only be submitted after the race has started.");
+            }
+        }
+
         var report = new RefereeReport
         {
             RaceId = raceId,
             RefereeId = refereeId,
-            ReportContent = request.ReportContent,
+            ReportContent = request.ReportContent.Trim(),
+            ReportType = request.ReportType,
             SubmittedAt = DateTime.UtcNow
         };
 
@@ -492,7 +545,8 @@ public class RefereeRacesController : ControllerBase
         return Ok(new
         {
             message = "Referee report submitted successfully",
-            reportId = report.ReportId
+            reportId = report.ReportId,
+            reportType = report.ReportType
         });
     }
 
