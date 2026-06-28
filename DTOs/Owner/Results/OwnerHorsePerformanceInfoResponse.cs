@@ -16,6 +16,8 @@ public class OwnerHorsePerformanceInfoResponse
 
     public decimal WeightKg { get; set; }
 
+    public string HealthStatus { get; set; } = null!;
+
     public string OwnerName { get; set; } = null!;
 
     public string? AssignedJockeyName { get; set; }

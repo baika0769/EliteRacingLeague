@@ -603,6 +603,7 @@ public class OwnerHorsesController : OwnerBaseController
                 h.HealthCertificateImageUrl,
                 h.Age,
                 h.WeightKg,
+                h.HealthStatus,
                 Award = h.AchievementSummary
             })
             .FirstOrDefaultAsync();
@@ -697,6 +698,7 @@ public class OwnerHorsesController : OwnerBaseController
                 HealthCertificateImageUrl = horseInfo.HealthCertificateImageUrl,
                 Age = horseInfo.Age,
                 WeightKg = horseInfo.WeightKg,
+                HealthStatus = horseInfo.HealthStatus,
                 OwnerName = ownerName ?? string.Empty,
                 AssignedJockeyName = assignedJockeyName
             },
