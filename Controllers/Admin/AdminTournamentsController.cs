@@ -146,6 +146,17 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var raceDateTime = BuildRaceDateTime(request);
+            var season = await FindSeasonForRaceDateAsync(raceDateTime);
+
+            if (season == null)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "No quarter season found for race date. Please create quarter seasons first."
+                });
+            }
+
             string? imageUrl;
 
             try
@@ -178,6 +189,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     ImageUrl = imageUrl,
                     Status = TournamentStatuses.Draft,
                     Rules = request.Rules,
+                    SeasonId = season.SeasonId,
                     CreatedAt = now,
                     CreatedBy = adminId,
                     UpdatedAt = now
@@ -186,7 +198,6 @@ namespace Eliteracingleague.API.Controllers.Admin
                 _context.Tournaments.Add(tournament);
                 await _context.SaveChangesAsync();
 
-                var raceDateTime = BuildRaceDateTime(request);
                 var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
                 var race = new Race
@@ -774,6 +785,21 @@ namespace Eliteracingleague.API.Controllers.Admin
             TryParseRaceStartTime(request.RaceStartTime, out var raceStartTime);
 
             return request.RaceDate.ToDateTime(raceStartTime);
+        }
+
+        private async Task<Season?> FindSeasonForRaceDateAsync(DateTime raceDateTime)
+        {
+            var matchingSeasons = await _context.Seasons
+                .Where(s =>
+                    s.Status != SeasonStatuses.Cancelled &&
+                    s.StartDate <= raceDateTime &&
+                    s.EndDate >= raceDateTime)
+                .ToListAsync();
+
+            return matchingSeasons
+                .OrderBy(s => (s.EndDate.Date - s.StartDate.Date).Days)
+                .ThenByDescending(s => s.StartDate)
+                .FirstOrDefault();
         }
 
         private IActionResult? ValidateTournamentRequest(AdminTournamentRequest request, int id)
