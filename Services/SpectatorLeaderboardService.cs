@@ -1,0 +1,211 @@
+using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Data;
+using Eliteracingleague.API.DTOs.Spectator;
+using Eliteracingleague.API.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace Eliteracingleague.API.Services;
+
+public class SpectatorLeaderboardService
+{
+    private readonly EliteRacingLeagueContext _context;
+    private static readonly string[] CountedResultStatuses =
+    {
+        RaceResultStatuses.AdminApproved,
+        RaceResultStatuses.Published
+    };
+
+    public SpectatorLeaderboardService(EliteRacingLeagueContext context)
+    {
+        _context = context;
+    }
+
+    public async Task<Season?> GetActiveSeasonAsync()
+    {
+        return await _context.Seasons
+            .AsNoTracking()
+            .Where(s => s.Status == SeasonStatuses.Active)
+            .OrderByDescending(s => s.StartDate)
+            .ThenByDescending(s => s.SeasonId)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<CurrentSeasonResponse?> GetCurrentSeasonResponseAsync()
+    {
+        var season = await GetActiveSeasonAsync();
+        if (season == null)
+        {
+            return null;
+        }
+
+        var today = DateTime.UtcNow.Date;
+        var startDate = season.StartDate.Date;
+        var endDate = season.EndDate.Date;
+
+        var totalPredictions = await _context.RacePredictions
+            .AsNoTracking()
+            .CountAsync(p => p.Race.Tournament.SeasonId == season.SeasonId);
+
+        var totalPredictors = await _context.RacePredictions
+            .AsNoTracking()
+            .Where(p => p.Race.Tournament.SeasonId == season.SeasonId)
+            .Select(p => p.SpectatorId)
+            .Distinct()
+            .CountAsync();
+
+        return new CurrentSeasonResponse
+        {
+            SeasonId = season.SeasonId,
+            SeasonName = season.SeasonName,
+            StartDate = season.StartDate,
+            EndDate = season.EndDate,
+            DaysLeft = Math.Max(0, (endDate - today).Days),
+            TotalDays = Math.Max(0, (endDate - startDate).Days + 1),
+            TotalPredictors = totalPredictors,
+            TotalPredictions = totalPredictions
+        };
+    }
+
+    public async Task<int> GetMyRankAsync(int spectatorId)
+    {
+        var season = await GetActiveSeasonAsync();
+        if (season == null)
+        {
+            return 0;
+        }
+
+        var leaderboard = await GetPredictorLeaderboardAsync(int.MaxValue, season.SeasonId);
+        return leaderboard.FirstOrDefault(p => p.SpectatorId == spectatorId)?.Rank ?? 0;
+    }
+
+    public async Task<int> GetActiveSeasonTotalDaysAsync()
+    {
+        var season = await GetActiveSeasonAsync();
+        if (season == null)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, (season.EndDate.Date - season.StartDate.Date).Days + 1);
+    }
+
+    public async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit = 50)
+    {
+        var season = await GetActiveSeasonAsync();
+        if (season == null)
+        {
+            return Array.Empty<PredictorLeaderboardItem>();
+        }
+
+        return await GetPredictorLeaderboardAsync(limit, season.SeasonId);
+    }
+
+    public async Task<IReadOnlyList<HorseLeaderboardItem>> GetHorseLeaderboardAsync(int limit = 50)
+    {
+        var season = await GetActiveSeasonAsync();
+        if (season == null)
+        {
+            return Array.Empty<HorseLeaderboardItem>();
+        }
+
+        var rows = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.Race.Tournament.SeasonId == season.SeasonId &&
+                r.RaceResult != null &&
+                CountedResultStatuses.Contains(r.RaceResult.Status))
+            .GroupBy(r => new
+            {
+                r.HorseId,
+                r.Horse.HorseName,
+                r.Horse.ImageUrl,
+                BreedName = r.Horse.Breed.BreedName,
+                OwnerName = r.Horse.Owner.Owner.FullName
+            })
+            .Select(g => new
+            {
+                g.Key.HorseId,
+                g.Key.HorseName,
+                g.Key.ImageUrl,
+                g.Key.BreedName,
+                g.Key.OwnerName,
+                Wins = g.Count(r => r.RaceResult != null && r.RaceResult.FinishPosition == 1),
+                TotalRaces = g.Count()
+            })
+            .ToListAsync();
+
+        var ranked = rows
+            .Select(r => new HorseLeaderboardItem
+            {
+                HorseId = r.HorseId,
+                HorseName = r.HorseName,
+                ImageUrl = r.ImageUrl,
+                BreedName = r.BreedName,
+                OwnerName = r.OwnerName,
+                Wins = r.Wins,
+                TotalRaces = r.TotalRaces,
+                WinRate = r.TotalRaces == 0 ? 0 : Math.Round((decimal)r.Wins / r.TotalRaces * 100, 2)
+            })
+            .OrderByDescending(r => r.Wins)
+            .ThenByDescending(r => r.WinRate)
+            .ThenByDescending(r => r.TotalRaces)
+            .ThenBy(r => r.HorseId)
+            .Take(limit)
+            .ToList();
+
+        for (var i = 0; i < ranked.Count; i++)
+        {
+            ranked[i].Rank = i + 1;
+        }
+
+        return ranked;
+    }
+
+    private async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit, int seasonId)
+    {
+        var rows = await _context.RacePredictions
+            .AsNoTracking()
+            .Where(p => p.Race.Tournament.SeasonId == seasonId)
+            .GroupBy(p => new
+            {
+                p.SpectatorId,
+                SpectatorName = p.Spectator.FullName
+            })
+            .Select(g => new
+            {
+                g.Key.SpectatorId,
+                g.Key.SpectatorName,
+                Points = g.Sum(p => p.PointsAwarded),
+                CorrectPredictions = g.Count(p => p.IsCorrect == true),
+                TotalPredictions = g.Count()
+            })
+            .ToListAsync();
+
+        var ranked = rows
+            .Select(r => new PredictorLeaderboardItem
+            {
+                SpectatorId = r.SpectatorId,
+                SpectatorName = r.SpectatorName,
+                Points = r.Points,
+                CorrectPredictions = r.CorrectPredictions,
+                TotalPredictions = r.TotalPredictions,
+                Accuracy = r.TotalPredictions == 0
+                    ? 0
+                    : Math.Round((decimal)r.CorrectPredictions / r.TotalPredictions * 100, 2)
+            })
+            .OrderByDescending(r => r.Points)
+            .ThenByDescending(r => r.CorrectPredictions)
+            .ThenByDescending(r => r.Accuracy)
+            .ThenByDescending(r => r.TotalPredictions)
+            .ThenBy(r => r.SpectatorId)
+            .Take(limit)
+            .ToList();
+
+        for (var i = 0; i < ranked.Count; i++)
+        {
+            ranked[i].Rank = i + 1;
+        }
+
+        return ranked;
+    }
+}

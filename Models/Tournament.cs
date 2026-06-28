@@ -27,6 +27,8 @@ public partial class Tournament
 
     public string Status { get; set; } = null!;
 
+    public int SeasonId { get; set; }
+
     public int CreatedBy { get; set; }
 
     public DateTime CreatedAt { get; set; }
@@ -36,4 +38,6 @@ public partial class Tournament
     public virtual User CreatedByNavigation { get; set; } = null!;
 
     public virtual Race? Race { get; set; }
+
+    public virtual Season Season { get; set; } = null!;
 }
