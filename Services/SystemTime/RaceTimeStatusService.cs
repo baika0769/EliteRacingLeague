@@ -1,6 +1,7 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Eliteracingleague.API.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Services.SystemTime;
@@ -18,6 +19,13 @@ public class RaceTimeStatusService : IRaceTimeStatusService
     {
         TournamentStatuses.OpenRegistration,
         TournamentStatuses.ClosedRegistration
+    };
+
+    private static readonly string[] RecalculatableTournamentStatuses =
+    {
+        TournamentStatuses.OpenRegistration,
+        TournamentStatuses.ClosedRegistration,
+        TournamentStatuses.Ongoing
     };
 
     private readonly EliteRacingLeagueContext _context;
@@ -106,5 +114,65 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             UpdatedRaces = racesToStart.Count,
             UpdatedTournaments = tournamentsToStart.Count + tournamentsToCloseRegistration.Count
         };
+    }
+
+    public async Task<SyncTimeStatusesResponse> RecalculateTournamentStatusesAsync(CancellationToken cancellationToken = default)
+    {
+        var effectiveUtcNow = _dateTimeProvider.UtcNow;
+        var now = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(now);
+
+        var tournaments = await _context.Tournaments
+            .Include(t => t.Race)
+            .Where(t => RecalculatableTournamentStatuses.Contains(t.Status))
+            .ToListAsync(cancellationToken);
+
+        var updatedTournaments = 0;
+
+        foreach (var tournament in tournaments)
+        {
+            var desiredStatus = GetDesiredTournamentStatus(tournament, now, localToday);
+
+            if (tournament.Status == desiredStatus)
+            {
+                continue;
+            }
+
+            tournament.Status = desiredStatus;
+            tournament.UpdatedAt = now;
+            updatedTournaments++;
+        }
+
+        if (updatedTournaments > 0)
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        return new SyncTimeStatusesResponse
+        {
+            Message = "Tournament statuses recalculated using current real time.",
+            EffectiveUtcNow = effectiveUtcNow,
+            ExpiredInvitations = 0,
+            UpdatedRaces = 0,
+            UpdatedTournaments = updatedTournaments
+        };
+    }
+
+    private static string GetDesiredTournamentStatus(
+        Tournament tournament,
+        DateTime now,
+        DateOnly localToday)
+    {
+        if (tournament.Race != null && tournament.Race.RaceDate <= now)
+        {
+            return TournamentStatuses.Ongoing;
+        }
+
+        if (tournament.StartDate <= localToday)
+        {
+            return TournamentStatuses.ClosedRegistration;
+        }
+
+        return TournamentStatuses.OpenRegistration;
     }
 }

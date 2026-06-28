@@ -104,7 +104,7 @@ public class AdminSystemController : ControllerBase
     }
 
     [HttpDelete("time/override")]
-    public IActionResult ClearOverride()
+    public async Task<IActionResult> ClearOverride(CancellationToken cancellationToken)
     {
         if (!AllowTimeOverride)
         {
@@ -112,7 +112,13 @@ public class AdminSystemController : ControllerBase
         }
 
         _dateTimeProvider.ClearOverride();
-        return Ok(BuildTimeResponse());
+        var recalculateResult = await _raceTimeStatusService.RecalculateTournamentStatusesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            time = BuildTimeResponse(),
+            syncResult = recalculateResult
+        });
     }
 
     [HttpPost("sync-time-statuses")]
