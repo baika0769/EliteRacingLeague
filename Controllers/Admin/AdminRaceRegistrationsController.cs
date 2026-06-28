@@ -48,6 +48,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     HealthStatus = r.Horse.HealthStatus,
                     HorseIsActive = r.Horse.IsActive,
                     HorseImageUrl = r.Horse.ImageUrl,
+                    HealthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
 
                     OwnerId = r.OwnerId,
                     OwnerName = r.Owner.Owner.FullName,

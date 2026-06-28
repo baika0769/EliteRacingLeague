@@ -13,10 +13,14 @@ namespace Eliteracingleague.API.Controllers.Spectator;
 public class SpectatorDashboardController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
+    private readonly Eliteracingleague.API.Services.SpectatorLeaderboardService _leaderboardService;
 
-    public SpectatorDashboardController(EliteRacingLeagueContext context)
+    public SpectatorDashboardController(
+        EliteRacingLeagueContext context,
+        Eliteracingleague.API.Services.SpectatorLeaderboardService leaderboardService)
     {
         _context = context;
+        _leaderboardService = leaderboardService;
     }
 
     private int GetUserId()
@@ -36,6 +40,8 @@ public class SpectatorDashboardController : ControllerBase
         var rewardPoints = await _context.RacePredictions
             .Where(p => p.SpectatorId == userId)
             .SumAsync(p => p.PointsAwarded);
+
+        var myRank = await _leaderboardService.GetMyRankAsync(userId);
 
         var featuredTournament = await _context.Tournaments
             .Where(t => t.Status != TournamentStatuses.Cancelled)
@@ -67,6 +73,7 @@ public class SpectatorDashboardController : ControllerBase
             upcomingTournaments,
             predictionsSubmitted,
             rewardPoints,
+            myRank,
             featuredTournament
         });
     }

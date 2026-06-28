@@ -59,6 +59,9 @@ public class JockeyRacesController : ControllerBase
                 Location = r.Race.Location,
                 HorseId = r.HorseId,
                 HorseName = r.Horse.HorseName,
+                HorseImageUrl = r.Horse.ImageUrl,
+                HorseHealthStatus = r.Horse.HealthStatus,
+                HealthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 OwnerName = r.Owner.Owner.FullName,
                 Status = r.Status
             })
@@ -96,6 +99,9 @@ public class JockeyRacesController : ControllerBase
                 Location = r.Race.Location,
                 HorseId = r.HorseId,
                 HorseName = r.Horse.HorseName,
+                HorseImageUrl = r.Horse.ImageUrl,
+                HorseHealthStatus = r.Horse.HealthStatus,
+                HealthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 OwnerName = r.Owner.Owner.FullName,
                 Status = r.Status
             })

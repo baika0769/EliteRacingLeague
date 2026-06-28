@@ -25,9 +25,14 @@ public class SpectatorTournamentsController : ControllerBase
         _context = context;
     }
 
+    private int GetUserId()
+        => int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+
     [HttpGet]
     public async Task<IActionResult> GetTournaments()
     {
+        var spectatorId = GetUserId();
+
         var tournaments = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
@@ -45,6 +50,25 @@ public class SpectatorTournamentsController : ControllerBase
                 prizePool = t.PrizePool,
                 imageUrl = t.ImageUrl,
                 status = t.Status,
+                hasPredicted = _context.RacePredictions
+                    .Any(p =>
+                        p.SpectatorId == spectatorId &&
+                        p.Status != RacePredictionStatuses.Cancelled &&
+                        p.Race.TournamentId == t.TournamentId),
+                myPrediction = _context.RacePredictions
+                    .Where(p =>
+                        p.SpectatorId == spectatorId &&
+                        p.Status != RacePredictionStatuses.Cancelled &&
+                        p.Race.TournamentId == t.TournamentId)
+                    .OrderByDescending(p => p.PredictedAt)
+                    .Select(p => new
+                    {
+                        predictedHorseId = p.PredictedRegistration.HorseId,
+                        predictedHorseName = p.PredictedRegistration.Horse.HorseName,
+                        isCorrect = p.IsCorrect,
+                        pointsAwarded = p.PointsAwarded
+                    })
+                    .FirstOrDefault(),
                 race = _context.Races
                     .Where(r =>
                         r.TournamentId == t.TournamentId &&
@@ -109,6 +133,53 @@ public class SpectatorTournamentsController : ControllerBase
         }
 
         return Ok(tournament);
+    }
+
+    [HttpGet("{id}/horses")]
+    public async Task<IActionResult> GetTournamentHorses(int id)
+    {
+        var tournamentExists = await _context.Tournaments
+            .AsNoTracking()
+            .AnyAsync(t => t.TournamentId == id && t.Status != TournamentStatuses.Cancelled);
+
+        if (!tournamentExists)
+        {
+            return NotFound("Tournament not found.");
+        }
+
+        var race = await _context.Races
+            .AsNoTracking()
+            .Where(r => r.TournamentId == id && r.Status != RaceStatuses.Cancelled)
+            .OrderBy(r => r.RaceDate)
+            .Select(r => new { r.RaceId })
+            .FirstOrDefaultAsync();
+
+        if (race == null)
+        {
+            return NotFound("Race not found.");
+        }
+
+        var horses = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == race.RaceId &&
+                VisibleRegistrationStatuses.Contains(r.Status))
+            .Select(r => new Eliteracingleague.API.DTOs.Spectator.TournamentHorseItem
+            {
+                RegistrationId = r.RegistrationId,
+                HorseId = r.HorseId,
+                HorseName = r.Horse.HorseName,
+                ImageUrl = r.Horse.ImageUrl,
+                BreedName = r.Horse.Breed.BreedName,
+                Age = r.Horse.Age,
+                HealthStatus = r.Horse.HealthStatus,
+                RegistrationStatus = r.Status,
+                OwnerName = r.Owner.Owner.FullName,
+                JockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName
+            })
+            .ToListAsync();
+
+        return Ok(horses);
     }
 
     [HttpGet("/api/spectator/races/{raceId}/registrations")]

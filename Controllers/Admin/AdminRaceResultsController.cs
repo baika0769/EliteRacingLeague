@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
+using Eliteracingleague.API.Services;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -14,10 +16,18 @@ namespace Eliteracingleague.API.Controllers.Admin
     public class AdminRaceResultsController : ControllerBase
     {
         private readonly EliteRacingLeagueContext _context;
+        private readonly PredictionEvaluationService _predictionEvaluationService;
 
-        public AdminRaceResultsController(EliteRacingLeagueContext context)
+public AdminRaceResultsController(
+    EliteRacingLeagueContext context,
+    PredictionEvaluationService predictionEvaluationService)
+{
+    _context = context;
+    _predictionEvaluationService = predictionEvaluationService;
+}
         {
             _context = context;
+            _predictionEvaluationService = predictionEvaluationService;
         }
 
         private int GetAdminId()
@@ -233,6 +243,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             await _context.SaveChangesAsync();
+            await _predictionEvaluationService.EvaluateRacePredictionsAsync(result.RaceId);
 
             return Ok(new AdminActionResponse
             {

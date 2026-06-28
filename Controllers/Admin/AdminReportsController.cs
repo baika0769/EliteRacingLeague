@@ -21,53 +21,60 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpGet]
         public async Task<IActionResult> GetReports()
         {
-            var reports = await _context.RaceViolations
+            var refereeReports = await _context.RefereeReports
+                .AsNoTracking()
                 .Select(r => new AdminReportResponse
                 {
-                    ViolationId = r.ViolationId,
+                    ReportId = r.ReportId,
+                    Type = "RefereeReport",
+
                     RaceId = r.RaceId,
-                    RegistrationId = r.RegistrationId,
+                    RaceName = r.Race.RaceName,
+
                     RefereeId = r.RefereeId,
-                    ViolationType = r.ViolationType,
-                    Description = r.Description,
-                    PenaltyPoints = r.PenaltyPoints,
-                    Action = r.Action,
-                    CreatedAt = r.CreatedAt
+                    RefereeName = r.Referee.Referee.FullName,
+
+                    ReportContent = r.ReportContent,
+
+                    SubmittedAt = r.SubmittedAt,
+                    CreatedAt = r.SubmittedAt
                 })
                 .ToListAsync();
 
-            return Ok(reports);
-        }
-
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetReportById(int id)
-        {
-            var report = await _context.RaceViolations
-                .Where(r => r.ViolationId == id)
-                .Select(r => new AdminReportResponse
+            var violationReports = await _context.RaceViolations
+                .AsNoTracking()
+                .Select(v => new AdminReportResponse
                 {
-                    ViolationId = r.ViolationId,
-                    RaceId = r.RaceId,
-                    RegistrationId = r.RegistrationId,
-                    RefereeId = r.RefereeId,
-                    ViolationType = r.ViolationType,
-                    Description = r.Description,
-                    PenaltyPoints = r.PenaltyPoints,
-                    Action = r.Action,
-                    CreatedAt = r.CreatedAt
+                    ViolationId = v.ViolationId,
+                    Type = "Violation",
+
+                    RaceId = v.RaceId,
+                    RaceName = v.Race.RaceName,
+
+                    RegistrationId = v.RegistrationId,
+                    HorseId = v.Registration.HorseId,
+                    HorseName = v.Registration.Horse.HorseName,
+
+                    RefereeId = v.RefereeId,
+                    RefereeName = v.Referee.Referee.FullName,
+
+                    ReportContent = v.Description,
+                    ViolationType = v.ViolationType,
+                    Description = v.Description,
+                    PenaltyPoints = v.PenaltyPoints,
+                    Action = v.Action,
+
+                    SubmittedAt = v.CreatedAt,
+                    CreatedAt = v.CreatedAt
                 })
-                .FirstOrDefaultAsync();
+                .ToListAsync();
 
-            if (report == null)
-            {
-                return NotFound(new AdminActionResponse
-                {
-                    Message = "Report not found",
-                    Id = id
-                });
-            }
+            var reports = refereeReports
+                .Concat(violationReports)
+                .OrderByDescending(r => r.SubmittedAt)
+                .ToList();
 
-            return Ok(report);
+            return Ok(reports);
         }
 
         [HttpGet("today")]

@@ -4,6 +4,7 @@ using Eliteracingleague.API.DTOs.Jockey;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.JockeyMatching;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,15 +19,18 @@ public class JockeyInvitationsController : ControllerBase
     private readonly EliteRacingLeagueContext _context;
     private readonly JockeyAccessService _jockeyAccess;
     private readonly IJockeyMatchScoreService _matchScoreService;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     public JockeyInvitationsController(
         EliteRacingLeagueContext context,
         JockeyAccessService jockeyAccess,
-        IJockeyMatchScoreService matchScoreService)
+        IJockeyMatchScoreService matchScoreService,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
         _jockeyAccess = jockeyAccess;
         _matchScoreService = matchScoreService;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet("pending")]
@@ -94,6 +98,7 @@ public class JockeyInvitationsController : ControllerBase
                 HorseId = i.Registration.HorseId,
                 HorseName = i.Registration.Horse.HorseName,
                 HorseImageUrl = i.Registration.Horse.ImageUrl,
+                HealthCertificateImageUrl = i.Registration.Horse.HealthCertificateImageUrl,
                 BreedName = i.Registration.Horse.Breed.BreedName,
                 Age = i.Registration.Horse.Age,
                 HorseHealthStatus = i.Registration.Horse.HealthStatus,
@@ -188,6 +193,7 @@ public class JockeyInvitationsController : ControllerBase
                 HorseId = horse.HorseId,
                 HorseName = horse.HorseName,
                 ImageUrl = horse.ImageUrl,
+                HealthCertificateImageUrl = horse.HealthCertificateImageUrl,
                 BreedName = horse.Breed.BreedName,
                 Age = horse.Age,
                 HealthStatus = horse.HealthStatus
@@ -249,9 +255,10 @@ public class JockeyInvitationsController : ControllerBase
             });
         }
 
+        var now = _dateTimeProvider.UtcNow;
         var deadline = invitation.Registration.Race.JockeySelectionDeadline;
 
-        if (deadline.HasValue && DateTime.UtcNow > deadline.Value)
+        if (deadline.HasValue && now > deadline.Value)
         {
             return BadRequest(new
             {
@@ -269,7 +276,7 @@ public class JockeyInvitationsController : ControllerBase
         }
 
         invitation.Status = InvitationStatuses.Accepted;
-        invitation.RespondedAt = DateTime.UtcNow;
+        invitation.RespondedAt = now;
 
         var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
         var horseName = invitation.Registration.Horse.HorseName;

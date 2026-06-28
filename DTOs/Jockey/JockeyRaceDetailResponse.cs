@@ -9,6 +9,9 @@ public class JockeyRaceDetailResponse
     public string? Location { get; set; }
     public int HorseId { get; set; }
     public string HorseName { get; set; } = null!;
+    public string? HorseImageUrl { get; set; }
+    public string? HorseHealthStatus { get; set; }
+    public string? HealthCertificateImageUrl { get; set; }
     public string OwnerName { get; set; } = null!;
     public string Status { get; set; } = null!;
 }

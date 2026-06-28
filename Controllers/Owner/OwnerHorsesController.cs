@@ -1,6 +1,7 @@
 ﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
+using Eliteracingleague.API.DTOs.Owner.Results;
 using Eliteracingleague.API.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -143,6 +144,7 @@ public class OwnerHorsesController : OwnerBaseController
             HealthStatus = request.HealthStatus.Trim(),
             AchievementSummary = request.AchievementSummary,
             ImageUrl = request.ImageUrl,
+            HealthCertificateImageUrl = request.HealthCertificateImageUrl,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -258,6 +260,7 @@ public class OwnerHorsesController : OwnerBaseController
                 WeightKg = h.WeightKg,
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
+                HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                 IsActive = h.IsActive,
                 Status = h.IsActive
                     ? HorseActivityStatuses.Active
@@ -309,6 +312,7 @@ public class OwnerHorsesController : OwnerBaseController
                 WeightKg = h.WeightKg,
                 HealthStatus = h.HealthStatus,
                 ImageUrl = h.ImageUrl,
+                HealthCertificateImageUrl = h.HealthCertificateImageUrl,
                 IsActive = h.IsActive,
                 Status = h.IsActive
                     ? HorseActivityStatuses.Active
@@ -408,6 +412,7 @@ public class OwnerHorsesController : OwnerBaseController
         horse.HealthStatus = request.HealthStatus.Trim();
         horse.AchievementSummary = request.AchievementSummary;
         horse.ImageUrl = request.ImageUrl;
+        horse.HealthCertificateImageUrl = request.HealthCertificateImageUrl;
         horse.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -465,6 +470,65 @@ public class OwnerHorsesController : OwnerBaseController
         });
     }
 
+    [HttpDelete("{horseId:int}")]
+    public async Task<IActionResult> DeleteHorse(int horseId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerError = await ValidateOwnerCanManageHorsesAsync(ownerId.Value);
+
+        if (ownerError != null)
+        {
+            return ownerError;
+        }
+
+        var horse = await _context.Horses
+            .FirstOrDefaultAsync(h => h.HorseId == horseId && h.OwnerId == ownerId.Value);
+
+        if (horse == null)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy ngựa hoặc bạn không có quyền xóa ngựa này."
+            });
+        }
+
+        var hasActiveRegistration = await _context.RaceRegistrations
+            .AnyAsync(r =>
+                r.HorseId == horseId &&
+                r.OwnerId == ownerId.Value &&
+                RaceRegistrationStatuses.HorseDeleteBlockingStatuses.Contains(r.Status));
+
+        if (hasActiveRegistration)
+        {
+            return BadRequest(new
+            {
+                message = "Không thể xóa ngựa đang có đăng ký cuộc đua đang hoạt động."
+            });
+        }
+
+        var hasRegistrationHistory = await _context.RaceRegistrations
+            .AnyAsync(r => r.HorseId == horseId);
+
+        if (hasRegistrationHistory)
+        {
+            return BadRequest(new
+            {
+                message = "Không thể xóa ngựa đã có lịch sử đăng ký cuộc đua. Bạn có thể chuyển ngựa sang Inactive."
+            });
+        }
+
+        _context.Horses.Remove(horse);
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
     [HttpGet("stats")]
     public async Task<IActionResult> GetHorseStats()
     {
@@ -505,6 +569,145 @@ public class OwnerHorsesController : OwnerBaseController
             ActiveHorses = activeHorses,
             InjuredHorses = injuredHorses,
             InRaces = inRaces
+        };
+
+        return Ok(response);
+    }
+
+    [HttpGet("{horseId:int}/performance")]
+    public async Task<IActionResult> GetHorsePerformance(int horseId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerError = await ValidateOwnerCanManageHorsesAsync(ownerId.Value);
+
+        if (ownerError != null)
+        {
+            return ownerError;
+        }
+
+        var horseInfo = await _context.Horses
+            .AsNoTracking()
+            .Where(h => h.HorseId == horseId && h.OwnerId == ownerId.Value)
+            .Select(h => new
+            {
+                h.HorseId,
+                h.HorseName,
+                BreedName = h.Breed.BreedName,
+                h.ImageUrl,
+                h.HealthCertificateImageUrl,
+                h.Age,
+                h.WeightKg,
+                Award = h.AchievementSummary
+            })
+            .FirstOrDefaultAsync();
+
+        if (horseInfo == null)
+        {
+            return NotFound(new
+            {
+                message = "Không tìm thấy ngựa hoặc bạn không có quyền xem ngựa này."
+            });
+        }
+
+        var ownerName = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == ownerId.Value)
+            .Select(u => u.FullName)
+            .FirstOrDefaultAsync();
+
+        var assignedJockeyName = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.HorseId == horseId &&
+                r.OwnerId == ownerId.Value &&
+                r.JockeyId != null)
+            .OrderByDescending(r => r.Race.RaceDate)
+            .ThenByDescending(r => r.RegistrationId)
+            .Select(r => r.Jockey == null
+                ? null
+                : r.Jockey.JockeyNavigation.FullName)
+            .FirstOrDefaultAsync();
+
+        var visibleStatuses = new[]
+        {
+            RaceResultStatuses.AdminApproved,
+            RaceResultStatuses.Published
+        };
+
+        var raceHistory = await _context.RaceResults
+            .AsNoTracking()
+            .Where(r =>
+                r.Registration.HorseId == horseId &&
+                r.Registration.OwnerId == ownerId.Value &&
+                visibleStatuses.Contains(r.Status))
+            .OrderByDescending(r => r.Race.RaceDate)
+            .ThenByDescending(r => r.ResultId)
+            .Select(r => new OwnerHorseRaceHistoryResponse
+            {
+                RaceId = r.RaceId,
+                ResultId = r.ResultId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                RaceDate = r.Race.RaceDate,
+                Track = r.Race.Location,
+                DistanceMeters = r.Race.DistanceMeters,
+                JockeyName = r.Registration.Jockey == null
+                    ? null
+                    : r.Registration.Jockey.JockeyNavigation.FullName,
+                Position = r.FinishPosition,
+                FinishTime = r.FinishTimeSeconds,
+                Status = r.Status
+            })
+            .ToListAsync();
+
+        var currentWinStreak = 0;
+
+        foreach (var race in raceHistory)
+        {
+            if (race.Position != 1)
+            {
+                break;
+            }
+
+            currentWinStreak++;
+        }
+
+        var finishTimes = raceHistory
+            .Where(r => r.FinishTime.HasValue)
+            .Select(r => r.FinishTime!.Value)
+            .ToList();
+
+        var bestTime = finishTimes.Count > 0
+            ? finishTimes.Min()
+            : (decimal?)null;
+
+        var response = new OwnerHorsePerformanceResponse
+        {
+            Horse = new OwnerHorsePerformanceInfoResponse
+            {
+                HorseId = horseInfo.HorseId,
+                HorseName = horseInfo.HorseName,
+                BreedName = horseInfo.BreedName,
+                ImageUrl = horseInfo.ImageUrl,
+                HealthCertificateImageUrl = horseInfo.HealthCertificateImageUrl,
+                Age = horseInfo.Age,
+                WeightKg = horseInfo.WeightKg,
+                OwnerName = ownerName ?? string.Empty,
+                AssignedJockeyName = assignedJockeyName
+            },
+            Achievements = new OwnerHorseAchievementResponse
+            {
+                ChampionTitles = raceHistory.Count(r => r.Position == 1),
+                BestTime = bestTime,
+                CurrentWinStreak = currentWinStreak,
+                Award = horseInfo.Award
+            },
+            RaceHistory = raceHistory
         };
 
         return Ok(response);

@@ -70,6 +70,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 HorseId = r.HorseId,
                 HorseName = r.Horse.HorseName,
                 HorseImageUrl = r.Horse.ImageUrl,
+                HealthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 RegistrationStatus = r.Status,
                 HasOfficialJockey = r.JockeyId.HasValue,
                 OfficialJockeyId = r.JockeyId,
@@ -139,6 +140,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             HeightCm = data.HeightCm,
             WeightKg = data.WeightKg,
             HealthStatus = data.HealthStatus,
+            HealthCertificateImageUrl = data.HealthCertificateImageUrl,
             HorseIsActive = data.HorseIsActive,
             AssignedJockeyId = data.AssignedJockeyId,
             AssignedJockeyName = data.AssignedJockeyName,
@@ -839,6 +841,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 HeightCm = r.Horse.HeightCm,
                 WeightKg = r.Horse.WeightKg,
                 HealthStatus = r.Horse.HealthStatus,
+                HealthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
                 HorseIsActive = r.Horse.IsActive,
                 AssignedJockeyId = r.JockeyId,
                 AssignedJockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName
@@ -1160,6 +1163,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         public decimal? HeightCm { get; set; }
         public decimal WeightKg { get; set; }
         public string HealthStatus { get; set; } = null!;
+        public string? HealthCertificateImageUrl { get; set; }
         public bool HorseIsActive { get; set; }
         public int? AssignedJockeyId { get; set; }
         public string? AssignedJockeyName { get; set; }
