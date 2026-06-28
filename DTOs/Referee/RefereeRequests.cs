@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.DTOs.Referee;
+namespace Eliteracingleague.API.DTOs.Referee;
 
 public class CreateInspectionRequest
 {
@@ -9,6 +9,7 @@ public class CreateInspectionRequest
 
 public class CreateRaceResultRequest
 {
+    public int? ResultId { get; set; }
     public int RegistrationId { get; set; }
     public decimal? FinishTimeSeconds { get; set; }
     public int? FinishPosition { get; set; }
