@@ -895,6 +895,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.SubmittedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("submitted_at");
+            entity.Property(e => e.ReportType).HasColumnName("report_type");
 
             entity.HasOne(d => d.Race).WithMany(p => p.RefereeReports)
                 .HasForeignKey(d => d.RaceId)
