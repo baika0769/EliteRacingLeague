@@ -18,4 +18,5 @@ public partial class RefereeReport
     public virtual Race Race { get; set; } = null!;
 
     public virtual RaceReferee Referee { get; set; } = null!;
+    public string ReportType { get; set; } = null!;
 }
