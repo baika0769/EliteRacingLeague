@@ -51,7 +51,6 @@ builder.Services.AddScoped<TournamentStatusService>();
 builder.Services.AddScoped<RefereeRaceLifecycleService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILeaderboardService, LeaderboardService>();
-builder.Services.AddScoped<SpectatorLeaderboardService>();
 builder.Services.AddScoped<PredictionEvaluationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
