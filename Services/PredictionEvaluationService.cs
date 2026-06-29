@@ -1,6 +1,7 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Services;
@@ -8,15 +9,20 @@ namespace Eliteracingleague.API.Services;
 public class PredictionEvaluationService
 {
     private readonly EliteRacingLeagueContext _context;
+    private readonly IDateTimeProvider _dateTimeProvider;
+
     private static readonly string[] WinnerResultStatuses =
     {
         RaceResultStatuses.AdminApproved,
         RaceResultStatuses.Published
     };
 
-    public PredictionEvaluationService(EliteRacingLeagueContext context)
+    public PredictionEvaluationService(
+        EliteRacingLeagueContext context,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     public async Task EvaluateRacePredictionsAsync(int raceId)
@@ -56,7 +62,7 @@ public class PredictionEvaluationService
             return;
         }
 
-        var now = DateTime.UtcNow;
+        var now = _dateTimeProvider.UtcNow;
 
         foreach (var prediction in predictions)
         {

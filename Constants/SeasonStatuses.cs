@@ -14,4 +14,10 @@ public static class SeasonStatuses
         Closed,
         Cancelled
     };
+
+    public static bool IsValid(string? status)
+    {
+        return !string.IsNullOrWhiteSpace(status)
+            && All.Contains(status);
+    }
 }

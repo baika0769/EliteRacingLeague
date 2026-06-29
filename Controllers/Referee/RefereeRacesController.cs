@@ -899,6 +899,38 @@ public class RefereeRacesController : ControllerBase
         });
     }
 
+    [HttpPost("{raceId}/reports")]
+    public async Task<IActionResult> CreateReport(
+        int raceId,
+        CreateRefereeReportRequest request)
+    {
+        var refereeId = GetRefereeId();
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var report = new RefereeReport
+        {
+            RaceId = raceId,
+            RefereeId = refereeId,
+            ReportContent = request.ReportContent,
+            SubmittedAt = DateTime.UtcNow
+        };
+
+        _context.RefereeReports.Add(report);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Referee report submitted successfully",
+            reportId = report.ReportId
+        });
+    }
+
     [HttpGet("{raceId}/violations")]
     public async Task<IActionResult> GetViolations(int raceId)
     {
@@ -973,79 +1005,7 @@ public class RefereeRacesController : ControllerBase
         return Ok(results);
     }
 
-    [HttpPost("{raceId}/reports")]
-    public async Task<IActionResult> CreateReport(
-        int raceId,
-        CreateRefereeReportRequest request)
-    {
-        var refereeId = GetRefereeId();
-
-        if (!RefereeReportTypes.IsValid(request.ReportType))
-        {
-            return BadRequest("Invalid report type.");
-        }
-
-        if (string.IsNullOrWhiteSpace(request.ReportContent))
-        {
-            return BadRequest("Report content is required.");
-        }
-
-        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
-
-        if (!assigned)
-        {
-            return Forbid();
-        }
-
-        var race = await _context.Races
-            .Include(r => r.Tournament)
-            .FirstOrDefaultAsync(r =>
-                r.RaceId == raceId &&
-                r.Status != RaceStatuses.Cancelled &&
-                r.Tournament.Status != TournamentStatuses.Cancelled);
-
-        if (race == null)
-        {
-            return NotFound("Race not found or has been cancelled.");
-        }
-
-        if (request.ReportType == RefereeReportTypes.PreRace)
-        {
-            if (race.Status != RaceStatuses.AssignedReferee &&
-                race.Status != RaceStatuses.RefereeReady)
-            {
-                return BadRequest("Pre-race report can only be submitted when race status is AssignedReferee or RefereeReady.");
-            }
-        }
-
-        if (request.ReportType == RefereeReportTypes.PostRace)
-        {
-            if (race.Status != RaceStatuses.Finished &&
-                race.Status != RaceStatuses.ResultPending)
-            {
-                return BadRequest("Post-race report can only be submitted when race status is Finished or ResultPending.");
-            }
-        }
-
-        var report = new RefereeReport
-        {
-            RaceId = raceId,
-            RefereeId = refereeId,
-            ReportContent = request.ReportContent.Trim(),
-            ReportType = request.ReportType,
-            SubmittedAt = DateTime.UtcNow
-        };
-
-        _context.RefereeReports.Add(report);
-        await _context.SaveChangesAsync();
-
-        return Ok(new
-        {
-            message = "Referee report submitted successfully",
-            reportId = report.ReportId,
-            reportType = report.ReportType
-        });
-    }
+    
 
     [HttpGet("{raceId}/reports")]
     public async Task<IActionResult> GetReports(int raceId)

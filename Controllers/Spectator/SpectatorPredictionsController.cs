@@ -3,18 +3,21 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Spectator;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize(Roles = UserRoles.Spectator)]
+[Authorize]
 [ApiController]
 [Route("api/spectator/predictions")]
 public class SpectatorPredictionsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
+    private readonly IDateTimeProvider _dateTimeProvider;
+
     private static readonly string[] PredictableRegistrationStatuses =
     {
         RaceRegistrationStatuses.Approved,
@@ -22,32 +25,36 @@ public class SpectatorPredictionsController : ControllerBase
         RaceRegistrationStatuses.ReadyToRace
     };
 
-    public SpectatorPredictionsController(EliteRacingLeagueContext context)
+    public SpectatorPredictionsController(
+        EliteRacingLeagueContext context,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
+        _dateTimeProvider = dateTimeProvider;
     }
 
-    private bool TryGetUserId(out int userId)
-        => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out userId);
+    private int GetUserId()
+        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
     [HttpPost]
     public async Task<IActionResult> CreatePrediction(CreatePredictionRequest request)
     {
-        if (!TryGetUserId(out var spectatorId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
-        }
-        var now = DateTime.UtcNow;
+        var spectatorId = GetUserId();
+        var now = _dateTimeProvider.UtcNow;
 
         var tournament = await _context.Tournaments
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.TournamentId == request.TournamentId);
 
         if (tournament == null)
+        {
             return NotFound("Tournament not found.");
+        }
 
         if (tournament.Status is TournamentStatuses.Cancelled or TournamentStatuses.Completed)
+        {
             return BadRequest("Prediction is not allowed for this tournament status.");
+        }
 
         var race = await _context.Races
             .AsNoTracking()
@@ -58,13 +65,19 @@ public class SpectatorPredictionsController : ControllerBase
             .FirstOrDefaultAsync();
 
         if (race == null)
+        {
             return NotFound("Race not found.");
+        }
 
         if (RaceStatuses.IsClosedForPrediction(race.Status))
+        {
             return BadRequest("Prediction is not allowed for this race status.");
+        }
 
         if (race.PredictionDeadline.HasValue && now > race.PredictionDeadline.Value)
+        {
             return BadRequest("Prediction deadline has passed.");
+        }
 
         var existing = await _context.RacePredictions
             .AsNoTracking()
@@ -74,11 +87,13 @@ public class SpectatorPredictionsController : ControllerBase
                 p.Race.TournamentId == request.TournamentId);
 
         if (existing)
+        {
             return Conflict(new
             {
                 error = "You have already predicted for this tournament.",
                 message = "You have already predicted for this tournament."
             });
+        }
 
         var registration = await _context.RaceRegistrations
             .AsNoTracking()
@@ -88,11 +103,13 @@ public class SpectatorPredictionsController : ControllerBase
                 PredictableRegistrationStatuses.Contains(r.Status));
 
         if (registration == null)
+        {
             return BadRequest(new
             {
                 error = "Horse is not registered in this tournament.",
                 message = "Horse is not registered in this tournament."
             });
+        }
 
         var prediction = new RacePrediction
         {
@@ -121,12 +138,10 @@ public class SpectatorPredictionsController : ControllerBase
     [HttpGet("my")]
     public async Task<IActionResult> GetMyPredictions()
     {
-        if (!TryGetUserId(out var spectatorId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
-        }
+        var spectatorId = GetUserId();
 
         var predictions = await _context.RacePredictions
+            .AsNoTracking()
             .Where(p => p.SpectatorId == spectatorId)
             .OrderByDescending(p => p.PredictedAt)
             .Select(p => new

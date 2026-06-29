@@ -5,8 +5,9 @@ using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
-using Eliteracingleague.API.Services;
 using System.Security.Claims;
+using Eliteracingleague.API.Services;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -17,10 +18,9 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly EliteRacingLeagueContext _context;
         private readonly PredictionEvaluationService _predictionEvaluationService;
 
-
         public AdminRaceResultsController(
-        EliteRacingLeagueContext context,
-        PredictionEvaluationService predictionEvaluationService)
+            EliteRacingLeagueContext context,
+            PredictionEvaluationService predictionEvaluationService)
         {
             _context = context;
             _predictionEvaluationService = predictionEvaluationService;
@@ -35,6 +35,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetResults()
         {
             var results = await _context.RaceResults
+                .AsNoTracking()
                 .Select(r => new AdminRaceResultResponse
                 {
                     ResultId = r.ResultId,
@@ -60,6 +61,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetResultById(int id)
         {
             var result = await _context.RaceResults
+                .AsNoTracking()
                 .Where(r => r.ResultId == id)
                 .Select(r => new AdminRaceResultResponse
                 {
@@ -95,6 +97,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         public async Task<IActionResult> GetPendingResults()
         {
             var results = await _context.RaceResults
+                .AsNoTracking()
                 .Where(r => r.Status == RaceResultStatuses.RefereeConfirmed)
                 .Select(r => new AdminRaceResultResponse
                 {
@@ -106,7 +109,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Score = r.Score,
                     Status = r.Status,
                     EnteredByRefereeId = r.EnteredByRefereeId,
-                    CreatedAt = r.CreatedAt
+                    AdminConfirmedBy = r.AdminConfirmedBy,
+                    PublishedAt = r.PublishedAt,
+                    Note = r.Note,
+                    CreatedAt = r.CreatedAt,
+                    UpdatedAt = r.UpdatedAt
                 })
                 .ToListAsync();
 
@@ -239,6 +246,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             await _context.SaveChangesAsync();
+
             await _predictionEvaluationService.EvaluateRacePredictionsAsync(result.RaceId);
 
             return Ok(new AdminActionResponse
@@ -291,6 +299,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             result.Status = RaceResultStatuses.Returned;
             result.Note = "Returned by admin";
+            result.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
 
@@ -302,5 +311,4 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
     }
-
 }
