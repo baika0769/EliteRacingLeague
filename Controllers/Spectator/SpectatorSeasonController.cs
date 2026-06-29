@@ -1,11 +1,10 @@
-using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize(Roles = UserRoles.Spectator)]
+[Authorize]
 [ApiController]
 [Route("api/spectator/season")]
 public class SpectatorSeasonController : ControllerBase
@@ -21,9 +20,13 @@ public class SpectatorSeasonController : ControllerBase
     public async Task<IActionResult> GetCurrentSeason()
     {
         var season = await _leaderboardService.GetCurrentSeasonResponseAsync();
+
         if (season == null)
         {
-            return NotFound(new { message = "Active season not found." });
+            return NotFound(new
+            {
+                message = "No active season found."
+            });
         }
 
         return Ok(season);

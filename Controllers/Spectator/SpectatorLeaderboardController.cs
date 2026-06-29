@@ -1,11 +1,10 @@
-using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize(Roles = UserRoles.Spectator)]
+[Authorize]
 [ApiController]
 [Route("api/spectator/leaderboard")]
 public class SpectatorLeaderboardController : ControllerBase
@@ -20,14 +19,14 @@ public class SpectatorLeaderboardController : ControllerBase
     [HttpGet("horses")]
     public async Task<IActionResult> GetHorseLeaderboard()
     {
-        var leaderboard = await _leaderboardService.GetHorseLeaderboardAsync();
+        var leaderboard = await _leaderboardService.GetHorseLeaderboardAsync(50);
         return Ok(leaderboard);
     }
 
     [HttpGet("predictors")]
     public async Task<IActionResult> GetPredictorLeaderboard()
     {
-        var leaderboard = await _leaderboardService.GetPredictorLeaderboardAsync();
+        var leaderboard = await _leaderboardService.GetPredictorLeaderboardAsync(50);
         return Ok(leaderboard);
     }
 }

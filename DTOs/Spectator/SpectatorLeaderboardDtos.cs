@@ -49,3 +49,11 @@ public class TournamentHorseItem
     public string? OwnerName { get; set; }
     public string? JockeyName { get; set; }
 }
+
+public class SpectatorRewardSummary
+{
+    public int RewardPoints { get; set; }
+    public int CorrectPredictions { get; set; }
+    public decimal PredictionAccuracy { get; set; }
+    public int TotalPredictions { get; set; }
+}

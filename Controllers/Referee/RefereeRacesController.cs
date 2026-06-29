@@ -935,6 +935,73 @@ public class RefereeRacesController : ControllerBase
         });
     }
 
+    [HttpPost("{raceId}/reports")]
+    public async Task<IActionResult> CreateReport(
+    int raceId,
+    CreateRefereeReportRequest request)
+    {
+        var refereeId = GetRefereeId();
+
+        if (!RefereeReportTypes.IsValid(request.ReportType))
+        {
+            return BadRequest("Invalid report type.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReportContent))
+        {
+            return BadRequest("Report content is required.");
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var race = await _context.Races
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        var report = new RefereeReport
+        {
+            RaceId = raceId,
+            RefereeId = refereeId,
+            ReportContent = request.ReportContent.Trim(),
+            ReportType = request.ReportType,
+            SubmittedAt = DateTime.UtcNow
+        };
+
+        _context.RefereeReports.Add(report);
+
+        if (request.ReportType == RefereeReportTypes.PostRace)
+        {
+            await _notificationService.CreateForAdminsAsync(
+                "Post-race Report Submitted",
+                $"Referee submitted a post-race report for {race.RaceName}.",
+                "PostRaceReport",
+                "/admin/referee-reports",
+                "RefereeReport",
+                report.ReportId);
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Referee report submitted successfully",
+            reportId = report.ReportId,
+            reportType = report.ReportType
+        });
+    }
+
     [HttpGet("{raceId}/violations")]
     public async Task<IActionResult> GetViolations(int raceId)
     {

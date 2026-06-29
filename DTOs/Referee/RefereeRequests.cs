@@ -29,6 +29,5 @@ public class CreateViolationRequest
 public class CreateRefereeReportRequest
 {
     public string ReportContent { get; set; } = null!;
-
     public string ReportType { get; set; } = null!;
 }

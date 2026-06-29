@@ -1,58 +1,47 @@
 ﻿using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize(Roles = UserRoles.Spectator)]
+[Authorize]
 [ApiController]
 [Route("api/spectator/rewards")]
 public class SpectatorRewardsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
-    private readonly Eliteracingleague.API.Services.SpectatorLeaderboardService _leaderboardService;
+    private readonly SpectatorLeaderboardService _leaderboardService;
 
     public SpectatorRewardsController(
         EliteRacingLeagueContext context,
-        Eliteracingleague.API.Services.SpectatorLeaderboardService leaderboardService)
+        SpectatorLeaderboardService leaderboardService)
     {
         _context = context;
         _leaderboardService = leaderboardService;
     }
 
-    private bool TryGetUserId(out int userId)
-        => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out userId);
+    private int GetUserId()
+        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
     [HttpGet]
     public async Task<IActionResult> GetRewards()
     {
-        if (!TryGetUserId(out var userId))
-        {
-            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
-        }
+        var userId = GetUserId();
 
-        var totalPredictions = await _context.RacePredictions
-            .CountAsync(p => p.SpectatorId == userId);
-
-        var correctPredictions = await _context.RacePredictions
-            .CountAsync(p => p.SpectatorId == userId && p.IsCorrect == true);
-
-        var rewardPoints = await _context.RacePredictions
-            .Where(p => p.SpectatorId == userId)
-            .SumAsync(p => p.PointsAwarded);
-
-        var accuracy = totalPredictions == 0
-            ? 0
-            : Math.Round((decimal)correctPredictions / totalPredictions * 100, 2);
-
+        var rewardSummary = await _leaderboardService.GetRewardSummaryAsync(userId);
         var myRank = await _leaderboardService.GetMyRankAsync(userId);
         var totalDays = await _leaderboardService.GetActiveSeasonTotalDaysAsync();
 
         var pointHistory = await _context.RacePredictions
-            .Where(p => p.SpectatorId == userId && p.PointsAwarded > 0)
+            .AsNoTracking()
+            .Where(p =>
+                p.SpectatorId == userId &&
+                p.Status != RacePredictionStatuses.Cancelled &&
+                p.PointsAwarded > 0)
             .OrderByDescending(p => p.EvaluatedAt ?? p.UpdatedAt ?? p.CreatedAt)
             .Select(p => new
             {
@@ -70,9 +59,9 @@ public class SpectatorRewardsController : ControllerBase
 
         return Ok(new
         {
-            correctPredictions,
-            rewardPoints,
-            predictionAccuracy = accuracy,
+            rewardPoints = rewardSummary.RewardPoints,
+            correctPredictions = rewardSummary.CorrectPredictions,
+            predictionAccuracy = rewardSummary.PredictionAccuracy,
             myRank,
             totalDays,
             pointHistory
