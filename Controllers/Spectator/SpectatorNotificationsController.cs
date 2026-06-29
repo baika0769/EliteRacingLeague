@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/notifications")]
 public class SpectatorNotificationsController : ControllerBase
@@ -18,13 +19,16 @@ public class SpectatorNotificationsController : ControllerBase
         _context = context;
     }
 
-    private int GetUserId()
-        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+    private bool TryGetUserId(out int userId)
+        => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out userId);
 
     [HttpGet]
     public async Task<IActionResult> GetNotifications()
     {
-        var userId = GetUserId();
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var notifications = await _context.Notifications
             .Where(n => n.UserId == userId)
@@ -45,7 +49,10 @@ public class SpectatorNotificationsController : ControllerBase
     [HttpGet("unread-count")]
     public async Task<IActionResult> GetUnreadCount()
     {
-        var userId = GetUserId();
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var count = await _context.Notifications
             .CountAsync(n => n.UserId == userId && !n.IsRead);
@@ -56,7 +63,10 @@ public class SpectatorNotificationsController : ControllerBase
     [HttpPut("{id}/read")]
     public async Task<IActionResult> MarkNotificationAsRead(int id)
     {
-        var userId = GetUserId();
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var notification = await _context.Notifications
             .FirstOrDefaultAsync(n => n.NotificationId == id && n.UserId == userId);

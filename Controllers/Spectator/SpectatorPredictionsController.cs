@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/predictions")]
 public class SpectatorPredictionsController : ControllerBase
@@ -27,13 +27,16 @@ public class SpectatorPredictionsController : ControllerBase
         _context = context;
     }
 
-    private int GetUserId()
-        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+    private bool TryGetUserId(out int userId)
+        => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out userId);
 
     [HttpPost]
     public async Task<IActionResult> CreatePrediction(CreatePredictionRequest request)
     {
-        var spectatorId = GetUserId();
+        if (!TryGetUserId(out var spectatorId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
         var now = DateTime.UtcNow;
 
         var tournament = await _context.Tournaments
@@ -118,7 +121,10 @@ public class SpectatorPredictionsController : ControllerBase
     [HttpGet("my")]
     public async Task<IActionResult> GetMyPredictions()
     {
-        var spectatorId = GetUserId();
+        if (!TryGetUserId(out var spectatorId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var predictions = await _context.RacePredictions
             .Where(p => p.SpectatorId == spectatorId)

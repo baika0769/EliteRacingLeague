@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/rewards")]
 public class SpectatorRewardsController : ControllerBase
@@ -22,13 +23,16 @@ public class SpectatorRewardsController : ControllerBase
         _leaderboardService = leaderboardService;
     }
 
-    private int GetUserId()
-        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+    private bool TryGetUserId(out int userId)
+        => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out userId);
 
     [HttpGet]
     public async Task<IActionResult> GetRewards()
     {
-        var userId = GetUserId();
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var totalPredictions = await _context.RacePredictions
             .CountAsync(p => p.SpectatorId == userId);

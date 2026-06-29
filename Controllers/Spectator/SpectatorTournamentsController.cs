@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/tournaments")]
 public class SpectatorTournamentsController : ControllerBase
@@ -25,13 +25,16 @@ public class SpectatorTournamentsController : ControllerBase
         _context = context;
     }
 
-    private int GetUserId()
-        => int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+    private bool TryGetUserId(out int userId)
+        => int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out userId);
 
     [HttpGet]
     public async Task<IActionResult> GetTournaments()
     {
-        var spectatorId = GetUserId();
+        if (!TryGetUserId(out var spectatorId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var tournaments = await _context.Tournaments
             .AsNoTracking()
