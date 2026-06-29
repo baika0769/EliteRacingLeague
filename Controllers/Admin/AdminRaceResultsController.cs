@@ -249,6 +249,31 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
 
+        [HttpDelete("{id:int}")]
+        public async Task<IActionResult> DeleteResult(int id)
+        {
+            var result = await _context.RaceResults
+                .FirstOrDefaultAsync(r => r.ResultId == id);
+
+            if (result == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Race result not found",
+                    Id = id
+                });
+            }
+
+            _context.RaceResults.Remove(result);
+            await _context.SaveChangesAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Race result deleted successfully",
+                Id = id
+            });
+        }
+
         [HttpPut("{id}/reject")]
         public async Task<IActionResult> RejectResult(int id)
         {
