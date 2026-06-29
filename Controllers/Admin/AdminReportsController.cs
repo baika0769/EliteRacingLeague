@@ -175,6 +175,81 @@ namespace Eliteracingleague.API.Controllers.Admin
                 Status = report.Action
             });
         }
+        [HttpDelete("{idOrSlug}")]
+        public async Task<IActionResult> DeleteReport(string idOrSlug)
+        {
+            var value = (idOrSlug ?? string.Empty).Trim();
+
+            var isRefereeReport = value.StartsWith("report-", StringComparison.OrdinalIgnoreCase);
+            var isViolation = value.StartsWith("violation-", StringComparison.OrdinalIgnoreCase);
+
+            var numericText = value
+                .Replace("report-", string.Empty, StringComparison.OrdinalIgnoreCase)
+                .Replace("violation-", string.Empty, StringComparison.OrdinalIgnoreCase);
+
+            if (!int.TryParse(numericText, out var id))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Invalid report id",
+                    Id = 0
+                });
+            }
+
+            if (isRefereeReport)
+            {
+                var refereeReport = await _context.RefereeReports
+                    .FirstOrDefaultAsync(r => r.ReportId == id);
+
+                if (refereeReport == null)
+                {
+                    return NotFound(new AdminActionResponse
+                    {
+                        Message = "Referee report not found",
+                        Id = id
+                    });
+                }
+
+                _context.RefereeReports.Remove(refereeReport);
+                await _context.SaveChangesAsync();
+
+                return Ok(new AdminActionResponse
+                {
+                    Message = "Referee report deleted successfully",
+                    Id = id
+                });
+            }
+
+            if (isViolation || !isRefereeReport)
+            {
+                var violation = await _context.RaceViolations
+                    .FirstOrDefaultAsync(r => r.ViolationId == id);
+
+                if (violation == null)
+                {
+                    return NotFound(new AdminActionResponse
+                    {
+                        Message = "Violation report not found",
+                        Id = id
+                    });
+                }
+
+                _context.RaceViolations.Remove(violation);
+                await _context.SaveChangesAsync();
+
+                return Ok(new AdminActionResponse
+                {
+                    Message = "Violation report deleted successfully",
+                    Id = id
+                });
+            }
+
+            return BadRequest(new AdminActionResponse
+            {
+                Message = "Invalid report type",
+                Id = id
+            });
+        }
     }
 
 }
