@@ -215,9 +215,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseCors("AllowFrontend");
-
 app.UseStaticFiles();
+
+app.UseRouting();
+
+app.UseCors("AllowFrontend");
 
 app.UseRateLimiter();
 

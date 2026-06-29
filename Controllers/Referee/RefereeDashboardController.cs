@@ -1,5 +1,4 @@
-﻿using System.Security.Claims;
-using Eliteracingleague.API.Constants;
+﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Extensions;
 using Microsoft.AspNetCore.Authorization;
