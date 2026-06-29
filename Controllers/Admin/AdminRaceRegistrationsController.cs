@@ -4,8 +4,8 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Services.Notifications;
-using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Admin
 {
@@ -133,7 +133,14 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var adminId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            if (!User.TryGetUserId(out var adminId))
+            {
+                return Unauthorized(new AdminActionResponse
+                {
+                    Message = "Invalid admin token",
+                    Id = id
+                });
+            }
             var statusChanged = registration.Status != RaceRegistrationStatuses.Approved;
 
             registration.Status = RaceRegistrationStatuses.Approved;
@@ -199,9 +206,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            if (!int.TryParse(adminIdText, out var adminId))
+            if (!User.TryGetUserId(out var adminId))
             {
                 return Unauthorized(new AdminActionResponse
                 {

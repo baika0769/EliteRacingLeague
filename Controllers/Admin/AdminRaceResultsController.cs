@@ -4,9 +4,9 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
-using System.Security.Claims;
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -24,11 +24,6 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             _context = context;
             _predictionEvaluationService = predictionEvaluationService;
-        }
-
-        private int GetAdminId()
-        {
-            return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
         }
 
         [HttpGet]
@@ -138,8 +133,16 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (!User.TryGetUserId(out var adminId))
+            {
+                return Unauthorized(new AdminActionResponse
+                {
+                    Message = "Invalid admin token",
+                    Id = id
+                });
+            }
+
             var now = DateTime.UtcNow;
-            var adminId = GetAdminId();
 
             var registration = await _context.RaceRegistrations
                 .FirstOrDefaultAsync(r => r.RegistrationId == result.RegistrationId);

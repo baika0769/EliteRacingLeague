@@ -10,6 +10,10 @@ using Eliteracingleague.API.Services.JockeyMatching;
 using Eliteracingleague.API.Services.Leaderboards;
 using Eliteracingleague.API.Services.Notifications;
 using Eliteracingleague.API.Services.SystemTime;
+using Eliteracingleague.API.Constants;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -57,6 +61,41 @@ if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
     builder.Services.AddHostedService<RaceTimeStatusBackgroundService>();
 }
 
+var configuredJwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(configuredJwtKey)
+    || configuredJwtKey == "CHANGE_ME_USE_USER_SECRETS_OR_ENVIRONMENT"
+    || configuredJwtKey.Length < 32)
+{
+    throw new InvalidOperationException("Jwt:Key is missing, placeholder, or too short.");
+}
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        if (!context.HttpContext.Response.HasStarted)
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await context.HttpContext.Response.WriteAsJsonAsync(
+                new { message = "Too many login attempts. Please try again later." },
+                cancellationToken);
+        }
+    };
+
+    options.AddPolicy("LoginRateLimit", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
+
 // JWT Authentication configuration
 builder.Services.AddAuthentication(options =>
 {
@@ -65,20 +104,58 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    var jwtKey = builder.Configuration["Jwt:Key"];
-
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
+        ClockSkew = TimeSpan.FromMinutes(1),
+        NameClaimType = ClaimTypes.NameIdentifier,
+        RoleClaimType = ClaimTypes.Role,
 
         ValidIssuer = builder.Configuration["Jwt:Issuer"],
         ValidAudience = builder.Configuration["Jwt:Audience"],
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(jwtKey!)
+            Encoding.UTF8.GetBytes(configuredJwtKey)
         )
+    };
+
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async context =>
+        {
+            var userIdText = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (!int.TryParse(userIdText, out var userId))
+            {
+                context.Fail("Invalid token.");
+                return;
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<EliteRacingLeagueContext>();
+            var user = await db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.UserId == userId);
+
+            if (user == null || !user.EmailVerified)
+            {
+                context.Fail("Invalid token.");
+                return;
+            }
+
+            if (user.Status == UserStatuses.Inactive || user.Status == UserStatuses.Banned)
+            {
+                context.Fail("Invalid token.");
+                return;
+            }
+
+            var tokenRole = context.Principal?.FindFirst(ClaimTypes.Role)?.Value;
+            if (!string.Equals(user.Role, tokenRole, StringComparison.Ordinal))
+            {
+                context.Fail("Invalid token.");
+            }
+        }
     };
 });
 
@@ -141,6 +218,8 @@ app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 
 app.UseStaticFiles();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

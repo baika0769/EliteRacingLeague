@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,15 +20,18 @@ public class RefereeDashboardController : ControllerBase
         _context = context;
     }
 
-    private int GetRefereeId()
+    private bool TryGetRefereeId(out int refereeId)
     {
-        return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        return User.TryGetUserId(out refereeId);
     }
 
     [HttpGet]
     public async Task<IActionResult> GetDashboard()
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assignedRaceIds = await _context.RefereeAssignments
             .Where(a => a.RefereeId == refereeId &&
