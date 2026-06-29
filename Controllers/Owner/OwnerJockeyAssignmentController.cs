@@ -479,7 +479,11 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 ? $"{ownerName} đã mời bạn tham gia cuộc đua {registration.Race.RaceName}."
                 : request.Message.Trim(),
             IsRead = false,
-            CreatedAt = now
+            CreatedAt = now,
+            ActionType = "JockeyInvitation",
+            ActionUrl = "/jockey/invitations",
+            RelatedType = "RaceRegistration",
+            RelatedId = registration.RegistrationId
         });
 
         await _context.SaveChangesAsync();

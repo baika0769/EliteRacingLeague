@@ -55,7 +55,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Title = n.Title,
                     Message = n.Message,
                     IsRead = n.IsRead,
-                    CreatedAt = n.CreatedAt
+                    CreatedAt = n.CreatedAt,
+                    RelatedType = n.RelatedType,
+                    RelatedId = n.RelatedId,
+                    ActionType = n.ActionType,
+                    ActionUrl = n.ActionUrl
                 })
                 .ToListAsync();
 
@@ -86,6 +90,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpPut("{id:int}/read")]
+        [HttpPatch("{id:int}/read")]
         public async Task<IActionResult> MarkAsRead(int id)
         {
             var adminId = GetCurrentAdminId();
