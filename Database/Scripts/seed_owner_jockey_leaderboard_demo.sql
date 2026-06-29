@@ -55,7 +55,7 @@ WHERE NOT EXISTS
 (
     SELECT 1
     FROM dbo.horse_owners existing
-    WHERE existing.owner_id = owners.owner_id
+WHERE existing.owner_id = owners.owner_id
 );
 
 INSERT INTO dbo.jockeys (jockey_id, weight_kg, years_of_experience, health_status, certificate_no, is_active, created_at)
@@ -119,7 +119,6 @@ BEGIN
     INSERT INTO dbo.seasons (season_name, start_date, end_date, status, points_per_correct_prediction, created_at)
     VALUES (N'Demo Leaderboard Historical Season', '2024-01-01', '2026-12-31', 'Closed', 100, SYSUTCDATETIME());
 END;
-
 DECLARE @SeasonId int = (SELECT season_id FROM dbo.seasons WHERE season_name = N'Demo Leaderboard Historical Season');
 
 DECLARE @Events table
@@ -151,7 +150,7 @@ WHERE NOT EXISTS
 );
 
 INSERT INTO dbo.races (tournament_id, race_name, race_date, distance_meters, location, max_horses, status, created_at)
-SELECT t.tournament_id, e.RaceName, e.RaceDate, 1600, e.Location, 4, 'Published', SYSUTCDATETIME()
+SELECT t.tournament_id, e.RaceName, e.RaceDate, 1000, e.Location, 4, 'Published', SYSUTCDATETIME()
 FROM @Events e
 JOIN dbo.tournaments t ON t.tournament_name = e.TournamentName
 WHERE NOT EXISTS
@@ -191,7 +190,7 @@ WHERE NOT EXISTS
 
 DECLARE @Finishes table
 (
-    EventNo int NOT NULL,
+EventNo int NOT NULL,
     ParticipantNo int NOT NULL,
     FinishPosition int NOT NULL,
     FinishTimeSeconds decimal(10, 3) NOT NULL,
@@ -250,7 +249,7 @@ WHERE NOT EXISTS
 
 INSERT INTO dbo.prize_awards (race_id, registration_id, owner_id, jockey_id, rank_position, prize_amount, status, paid_at, created_at)
 SELECT result.race_id, result.registration_id, registration.owner_id, registration.jockey_id, result.finish_position, ruleRow.prize_amount,
-       CASE WHEN result.finish_position = 1 THEN 'Paid' ELSE 'ReadyToClaim' END,
+       CASE WHEN result.finish_position = 1 THEN 'Paid' ELSE 'Pending' END,
        CASE WHEN result.finish_position = 1 THEN DATEADD(hour, 4, result.published_at) ELSE NULL END,
        SYSUTCDATETIME()
 FROM dbo.race_results result
@@ -263,7 +262,7 @@ WHERE result.finish_position <= 3
   (
       SELECT 1
       FROM dbo.prize_awards existing
-      WHERE existing.race_id = result.race_id
+WHERE existing.race_id = result.race_id
         AND existing.rank_position = result.finish_position
   );
 

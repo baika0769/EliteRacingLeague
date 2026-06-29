@@ -1,7 +1,7 @@
-using System.Security.Claims;
-using Eliteracingleague.API.Constants;
+﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Referee;
+using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Notifications;
@@ -45,9 +45,9 @@ public class RefereeRacesController : ControllerBase
         _notificationService = notificationService;
     }
 
-    private int GetRefereeId()
+    private bool TryGetRefereeId(out int refereeId)
     {
-        return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        return User.TryGetUserId(out refereeId);
     }
 
     private async Task<bool> IsAssignedToActiveRaceAsync(int raceId, int refereeId)
@@ -70,7 +70,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAssignedRaces()
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var races = await _context.RefereeAssignments
             .AsNoTracking()
@@ -126,7 +129,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet("{raceId}/lifecycle")]
     public async Task<IActionResult> GetLifecycle(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -140,7 +146,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet("{raceId}/registrations")]
     public async Task<IActionResult> GetRaceRegistrations(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -177,7 +186,10 @@ public class RefereeRacesController : ControllerBase
     [HttpPut("{raceId}/mark-ready")]
     public async Task<IActionResult> MarkReady(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -217,7 +229,10 @@ public class RefereeRacesController : ControllerBase
     [HttpPut("{raceId}/start")]
     public async Task<IActionResult> StartRace(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -264,7 +279,10 @@ public class RefereeRacesController : ControllerBase
     [HttpPut("{raceId}/finish")]
     public async Task<IActionResult> FinishRace(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -291,7 +309,10 @@ public class RefereeRacesController : ControllerBase
         int raceId,
         CreateInspectionRequest request)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         if (!PreRaceInspectionStatuses.IsValid(request.Status))
         {
@@ -376,7 +397,10 @@ public class RefereeRacesController : ControllerBase
         int raceId,
         CreateRaceResultRequest request)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -529,7 +553,10 @@ public class RefereeRacesController : ControllerBase
     [HttpPut("{raceId}/results/{resultId:int}/confirm")]
     public async Task<IActionResult> ConfirmResult(int raceId, int resultId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -586,7 +613,10 @@ public class RefereeRacesController : ControllerBase
     [HttpPut("{raceId}/results/confirm-all")]
     public async Task<IActionResult> ConfirmAllResults(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -705,7 +735,10 @@ public class RefereeRacesController : ControllerBase
         int raceId,
         CreateViolationRequest request)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         if (!RaceViolationActions.IsValid(request.Action))
         {
@@ -775,7 +808,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet("{raceId}/inspection-report")]
     public async Task<IActionResult> GetInspectionReport(int raceId, string? filter = "all")
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -969,7 +1005,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet("{raceId}/violations")]
     public async Task<IActionResult> GetViolations(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -1005,7 +1044,10 @@ public class RefereeRacesController : ControllerBase
     [HttpGet("{raceId}/results")]
     public async Task<IActionResult> GetResults(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -1040,12 +1082,90 @@ public class RefereeRacesController : ControllerBase
         return Ok(results);
     }
 
-    
+    [HttpPost("{raceId}/reports")]
+    public async Task<IActionResult> CreateReport(
+        int raceId,
+        CreateRefereeReportRequest request)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        if (!RefereeReportTypes.IsValid(request.ReportType))
+        {
+            return BadRequest("Invalid report type.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReportContent))
+        {
+            return BadRequest("Report content is required.");
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var race = await _context.Races
+            .Include(r => r.Tournament)
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        if (request.ReportType == RefereeReportTypes.PreRace)
+        {
+            if (race.Status != RaceStatuses.AssignedReferee &&
+                race.Status != RaceStatuses.RefereeReady)
+            {
+                return BadRequest("Pre-race report can only be submitted when race status is AssignedReferee or RefereeReady.");
+            }
+        }
+
+        if (request.ReportType == RefereeReportTypes.PostRace)
+        {
+            if (race.Status != RaceStatuses.Finished &&
+                race.Status != RaceStatuses.ResultPending)
+            {
+                return BadRequest("Post-race report can only be submitted when race status is Finished or ResultPending.");
+            }
+        }
+
+        var report = new RefereeReport
+        {
+            RaceId = raceId,
+            RefereeId = refereeId,
+            ReportContent = request.ReportContent.Trim(),
+            ReportType = request.ReportType,
+            SubmittedAt = DateTime.UtcNow
+        };
+
+        _context.RefereeReports.Add(report);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Referee report submitted successfully",
+            reportId = report.ReportId,
+            reportType = report.ReportType
+        });
+    }
 
     [HttpGet("{raceId}/reports")]
     public async Task<IActionResult> GetReports(int raceId)
     {
-        var refereeId = GetRefereeId();
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
@@ -1075,3 +1195,4 @@ public class RefereeRacesController : ControllerBase
         return Ok(reports);
     }
 }
+

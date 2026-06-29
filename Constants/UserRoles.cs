@@ -17,12 +17,11 @@ public static class UserRoles
         Spectator
     };
 
-    // Không cho người dùng tự đăng ký Admin.
+    // Không cho người dùng tự đăng ký Admin hoặc RaceReferee.
     public static readonly string[] RegisterableRoles =
     {
         HorseOwner,
         Jockey,
-        RaceReferee,
         Spectator
     };
 

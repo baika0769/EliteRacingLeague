@@ -6,6 +6,7 @@ using Eliteracingleague.API.DTOs.Auth;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -381,6 +382,7 @@ public class AuthController : ControllerBase
 
     // POST: /api/auth/login
     [HttpPost("login")]
+    [EnableRateLimiting("LoginRateLimit")]
     public async Task<IActionResult> Login(LoginRequest request)
     {
         var email = request.Email.Trim().ToLower();
