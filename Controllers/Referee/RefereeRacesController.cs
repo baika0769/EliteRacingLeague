@@ -899,6 +899,38 @@ public class RefereeRacesController : ControllerBase
         });
     }
 
+    [HttpPost("{raceId}/reports")]
+    public async Task<IActionResult> CreateReport(
+        int raceId,
+        CreateRefereeReportRequest request)
+    {
+        var refereeId = GetRefereeId();
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var report = new RefereeReport
+        {
+            RaceId = raceId,
+            RefereeId = refereeId,
+            ReportContent = request.ReportContent,
+            SubmittedAt = DateTime.UtcNow
+        };
+
+        _context.RefereeReports.Add(report);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Referee report submitted successfully",
+            reportId = report.ReportId
+        });
+    }
+
     [HttpGet("{raceId}/violations")]
     public async Task<IActionResult> GetViolations(int raceId)
     {

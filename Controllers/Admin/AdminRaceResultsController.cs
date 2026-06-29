@@ -5,8 +5,9 @@ using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
-using Eliteracingleague.API.Services;
 using System.Security.Claims;
+using Eliteracingleague.API.Services;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -17,10 +18,12 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly EliteRacingLeagueContext _context;
         private readonly PredictionEvaluationService _predictionEvaluationService;
 
+        private readonly EliteRacingLeagueContext _context;
+        private readonly PredictionEvaluationService _predictionEvaluationService;
 
         public AdminRaceResultsController(
-        EliteRacingLeagueContext context,
-        PredictionEvaluationService predictionEvaluationService)
+            EliteRacingLeagueContext context,
+            PredictionEvaluationService predictionEvaluationService)
         {
             _context = context;
             _predictionEvaluationService = predictionEvaluationService;
@@ -202,6 +205,39 @@ namespace Eliteracingleague.API.Controllers.Admin
                             prizeAward.Status = PrizeAwardStatuses.ReadyToClaim;
                         }
                     }
+                }
+            }
+
+            var totalValidRegistrations = await _context.RaceRegistrations
+                .CountAsync(r =>
+                    r.RaceId == result.RaceId &&
+                    r.Status != RaceRegistrationStatuses.Cancelled &&
+                    r.Status != RaceRegistrationStatuses.Rejected);
+
+            var approvedResultsAfterThisApprove = await _context.RaceResults
+                .CountAsync(r =>
+                    r.RaceId == result.RaceId &&
+                    r.Registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    r.Registration.Status != RaceRegistrationStatuses.Rejected &&
+                    (
+                        r.Status == RaceResultStatuses.AdminApproved ||
+                        r.ResultId == result.ResultId
+                    ));
+
+            if (totalValidRegistrations > 0 &&
+                approvedResultsAfterThisApprove >= totalValidRegistrations)
+            {
+                var race = await _context.Races
+                    .Include(r => r.Tournament)
+                    .FirstOrDefaultAsync(r => r.RaceId == result.RaceId);
+
+                if (race != null && race.Tournament.Status != TournamentStatuses.Cancelled)
+                {
+                    race.Status = RaceStatuses.Published;
+                    race.UpdatedAt = now;
+
+                    race.Tournament.Status = TournamentStatuses.Completed;
+                    race.Tournament.UpdatedAt = now;
                 }
             }
 
