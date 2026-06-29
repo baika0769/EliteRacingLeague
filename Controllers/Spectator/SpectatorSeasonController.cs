@@ -1,10 +1,11 @@
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/season")]
 public class SpectatorSeasonController : ControllerBase
