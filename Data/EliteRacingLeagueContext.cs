@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Eliteracingleague.API.Models;
 using Microsoft.EntityFrameworkCore;
@@ -892,6 +892,10 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.RaceId).HasColumnName("race_id");
             entity.Property(e => e.RefereeId).HasColumnName("referee_id");
             entity.Property(e => e.ReportContent).HasColumnName("report_content");
+            entity.Property(e => e.ReportType)
+                .HasMaxLength(30)
+                .IsUnicode(false)
+                .HasColumnName("report_type");
             entity.Property(e => e.SubmittedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("submitted_at");
