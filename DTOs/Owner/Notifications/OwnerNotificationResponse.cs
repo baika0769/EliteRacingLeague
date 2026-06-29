@@ -21,4 +21,8 @@ public class OwnerNotificationResponse
     public string? RelatedType { get; set; }
 
     public int? RelatedId { get; set; }
+
+    public string? ActionType { get; set; }
+
+    public string? ActionUrl { get; set; }
 }

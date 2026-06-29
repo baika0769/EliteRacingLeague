@@ -17,5 +17,13 @@ public partial class Notification
 
     public DateTime CreatedAt { get; set; }
 
+    public string? RelatedType { get; set; }
+
+    public int? RelatedId { get; set; }
+
+    public string? ActionType { get; set; }
+
+    public string? ActionUrl { get; set; }
+
     public virtual User User { get; set; } = null!;
 }

@@ -290,7 +290,11 @@ public class JockeyInvitationsController : ControllerBase
                     ? $"{jockeyName} accepted invitation for {horseName}."
                     : "A jockey accepted your invitation.",
             IsRead = false,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            ActionType = "JockeyAssignment",
+            ActionUrl = $"/owner/jockey-assignment/{invitation.RegistrationId}",
+            RelatedType = "RaceRegistration",
+            RelatedId = invitation.RegistrationId
         });
 
         await _context.SaveChangesAsync();
@@ -350,7 +354,11 @@ public class JockeyInvitationsController : ControllerBase
                     ? $"{jockeyName} rejected invitation for {horseName}."
                     : "A jockey rejected your invitation.",
             IsRead = false,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            ActionType = "JockeyAssignment",
+            ActionUrl = $"/owner/jockey-assignment/{invitation.RegistrationId}",
+            RelatedType = "RaceRegistration",
+            RelatedId = invitation.RegistrationId
         });
 
         await _context.SaveChangesAsync();
@@ -480,18 +488,4 @@ public class JockeyInvitationsController : ControllerBase
                 i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
     }
 
-    private static Notification CreateOwnerNotification(
-        int ownerId,
-        string title,
-        string message)
-    {
-        return new Notification
-        {
-            UserId = ownerId,
-            Title = title,
-            Message = message,
-            IsRead = false,
-            CreatedAt = DateTime.UtcNow
-        };
-    }
 }

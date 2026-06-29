@@ -332,8 +332,10 @@ public class OwnerNotificationsController : OwnerBaseController
             IsRead = notification.IsRead,
             CreatedAt = notification.CreatedAt,
             DisplayTime = BuildDisplayTime(notification.CreatedAt),
-            RelatedType = null,
-            RelatedId = null
+            RelatedType = notification.RelatedType,
+            RelatedId = notification.RelatedId,
+            ActionType = notification.ActionType,
+            ActionUrl = notification.ActionUrl
         };
     }
 
@@ -349,8 +351,10 @@ public class OwnerNotificationsController : OwnerBaseController
             IsRead = notification.IsRead,
             CreatedAt = notification.CreatedAt,
             DisplayTime = BuildDisplayTime(notification.CreatedAt),
-            RelatedType = null,
-            RelatedId = null
+            RelatedType = notification.RelatedType,
+            RelatedId = notification.RelatedId,
+            ActionType = notification.ActionType,
+            ActionUrl = notification.ActionUrl
         };
     }
 

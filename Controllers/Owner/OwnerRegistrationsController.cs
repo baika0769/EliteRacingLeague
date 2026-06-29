@@ -2,6 +2,7 @@
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner.Registrations;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,8 @@ namespace Eliteracingleague.API.Controllers.Owner;
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerRegistrationsController : OwnerBaseController
 {
+    private readonly INotificationService _notificationService;
+
     private static readonly string[] ActiveRegistrationStatuses =
     {
         RaceRegistrationStatuses.Pending,
@@ -28,8 +31,11 @@ public class OwnerRegistrationsController : OwnerBaseController
         RaceRegistrationStatuses.ReadyToRace
     };
 
-    public OwnerRegistrationsController(EliteRacingLeagueContext context) : base(context)
+    public OwnerRegistrationsController(
+        EliteRacingLeagueContext context,
+        INotificationService notificationService) : base(context)
     {
+        _notificationService = notificationService;
     }
 
     // API 1: Open Tournaments
@@ -358,6 +364,12 @@ public class OwnerRegistrationsController : OwnerBaseController
             return BadRequest(new { message = ineligibleReason });
         }
 
+        var ownerName = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == ownerId.Value)
+            .Select(u => u.FullName)
+            .FirstOrDefaultAsync();
+
         var registration = new RaceRegistration
         {
             RaceId = request.RaceId,
@@ -368,9 +380,23 @@ public class OwnerRegistrationsController : OwnerBaseController
             SubmittedAt = DateTime.UtcNow
         };
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
         _context.RaceRegistrations.Add(registration);
 
         await _context.SaveChangesAsync();
+
+        var displayOwnerName = string.IsNullOrWhiteSpace(ownerName) ? "An owner" : ownerName;
+
+        await _notificationService.CreateForAdminsAsync(
+            "New Race Registration",
+            $"Owner {displayOwnerName} registered horse {horse.HorseName} for tournament {race.Tournament.TournamentName}.",
+            "RaceRegistration",
+            "/admin/registrations",
+            "RaceRegistration",
+            registration.RegistrationId);
+
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {

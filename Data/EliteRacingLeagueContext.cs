@@ -450,6 +450,17 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.Message)
                 .HasMaxLength(1000)
                 .HasColumnName("message");
+            entity.Property(e => e.RelatedType)
+                .HasMaxLength(50)
+                .HasColumnName("related_type");
+            entity.Property(e => e.RelatedId)
+                .HasColumnName("related_id");
+            entity.Property(e => e.ActionType)
+                .HasMaxLength(50)
+                .HasColumnName("action_type");
+            entity.Property(e => e.ActionUrl)
+                .HasMaxLength(300)
+                .HasColumnName("action_url");
             entity.Property(e => e.Title)
                 .HasMaxLength(200)
                 .HasColumnName("title");

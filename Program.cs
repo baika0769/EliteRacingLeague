@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Email;
 using Eliteracingleague.API.Services.JockeyMatching;
+using Eliteracingleague.API.Services.Notifications;
 using Eliteracingleague.API.Services.SystemTime;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -47,6 +48,7 @@ builder.Services.AddScoped<SpectatorLeaderboardService>();
 builder.Services.AddScoped<PredictionEvaluationService>();
 builder.Services.AddScoped<TournamentStatusService>();
 builder.Services.AddScoped<RefereeRaceLifecycleService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
 {

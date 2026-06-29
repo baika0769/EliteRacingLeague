@@ -80,7 +80,11 @@ public class PredictionEvaluationService
                     Title = "Prediction Correct",
                     Message = "You predicted the winner correctly.",
                     IsRead = false,
-                    CreatedAt = now
+                    CreatedAt = now,
+                    ActionType = "SpectatorRewards",
+                    ActionUrl = "/spectator/rewards",
+                    RelatedType = "RacePrediction",
+                    RelatedId = prediction.PredictionId
                 });
             }
         }

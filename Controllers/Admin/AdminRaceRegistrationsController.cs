@@ -4,7 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
-using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Notifications;
 using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -15,10 +15,14 @@ namespace Eliteracingleague.API.Controllers.Admin
     public class AdminRaceRegistrationsController : ControllerBase
     {
         private readonly EliteRacingLeagueContext _context;
+        private readonly INotificationService _notificationService;
 
-        public AdminRaceRegistrationsController(EliteRacingLeagueContext context)
+        public AdminRaceRegistrationsController(
+            EliteRacingLeagueContext context,
+            INotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         private IQueryable<AdminRegistrationResponse> BuildRegistrationQuery()
@@ -142,24 +146,16 @@ namespace Eliteracingleague.API.Controllers.Admin
                 var hasNames = !string.IsNullOrWhiteSpace(registration.Horse.HorseName) &&
                     !string.IsNullOrWhiteSpace(registration.Race.Tournament.TournamentName);
 
-                _context.Notifications.Add(new Notification
-                {
-                    UserId = registration.OwnerId,
-                    Title = "Registration Approved",
-                    Message = hasNames
-                        ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."
-                        : "Your registration has been approved.",
-                    IsRead = false,
-                    CreatedAt = DateTime.UtcNow
-                });
-            }
-
-            if (statusChanged)
-            {
-                _context.Notifications.Add(CreateOwnerNotification(
+                await _notificationService.CreateForUserAsync(
                     registration.OwnerId,
                     "Registration Approved",
-                    $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."));
+                    hasNames
+                        ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."
+                        : "Your registration has been approved.",
+                    "JockeyAssignment",
+                    $"/owner/jockey-assignment/{registration.RegistrationId}",
+                    "RaceRegistration",
+                    registration.RegistrationId);
             }
 
             await _context.SaveChangesAsync();
@@ -179,6 +175,9 @@ namespace Eliteracingleague.API.Controllers.Admin
     [FromBody] AdminRejectRegistrationRequest? request)
         {
             var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
+                .Include(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
 
             if (registration == null)
@@ -218,6 +217,20 @@ namespace Eliteracingleague.API.Controllers.Admin
                 ? "Rejected by admin"
                 : request.AdminNote.Trim();
 
+            var hasNames = !string.IsNullOrWhiteSpace(registration.Horse.HorseName) &&
+                !string.IsNullOrWhiteSpace(registration.Race.Tournament.TournamentName);
+
+            await _notificationService.CreateForUserAsync(
+                registration.OwnerId,
+                "Registration Rejected",
+                hasNames
+                    ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been rejected."
+                    : "Your registration has been rejected.",
+                "RegistrationDetail",
+                $"/owner/registrations/{registration.RegistrationId}",
+                "RaceRegistration",
+                registration.RegistrationId);
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse
@@ -229,19 +242,5 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
 
-        private static Notification CreateOwnerNotification(
-            int ownerId,
-            string title,
-            string message)
-        {
-            return new Notification
-            {
-                UserId = ownerId,
-                Title = title,
-                Message = message,
-                IsRead = false,
-                CreatedAt = DateTime.UtcNow
-            };
-        }
     }
 }

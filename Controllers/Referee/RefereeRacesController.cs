@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Referee;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ public class RefereeRacesController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly RefereeRaceLifecycleService _lifecycleService;
+    private readonly INotificationService _notificationService;
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
@@ -35,10 +37,12 @@ public class RefereeRacesController : ControllerBase
 
     public RefereeRacesController(
         EliteRacingLeagueContext context,
-        RefereeRaceLifecycleService lifecycleService)
+        RefereeRaceLifecycleService lifecycleService,
+        INotificationService notificationService)
     {
         _context = context;
         _lifecycleService = lifecycleService;
+        _notificationService = notificationService;
     }
 
     private int GetRefereeId()
@@ -682,6 +686,14 @@ public class RefereeRacesController : ControllerBase
 
         race.Status = RaceStatuses.ResultPending;
         race.UpdatedAt = DateTime.UtcNow;
+
+        await _notificationService.CreateForAdminsAsync(
+            "Race Result Submitted",
+            $"Referee submitted results for {race.RaceName}. Please validate.",
+            "RaceResultValidation",
+            "/admin/validate-results",
+            "Race",
+            raceId);
 
         await _context.SaveChangesAsync();
 
