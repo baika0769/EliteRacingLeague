@@ -32,6 +32,33 @@ namespace Eliteracingleague.API.Controllers.Admin
             return userId;
         }
 
+        private static string GetNotificationType(string? actionType, string? relatedType)
+        {
+            if (!string.IsNullOrWhiteSpace(actionType))
+            {
+                return actionType;
+            }
+
+            if (!string.IsNullOrWhiteSpace(relatedType))
+            {
+                return relatedType;
+            }
+
+            return "General";
+        }
+
+        private static string GetPriority(string type)
+        {
+            return type switch
+            {
+                "RaceRegistration" => "High",
+                "RaceResultValidation" => "High",
+                "RefereeReport" => "Normal",
+                "PostRaceReport" => "High",
+                _ => "Normal"
+            };
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetNotifications()
         {
@@ -48,49 +75,48 @@ namespace Eliteracingleague.API.Controllers.Admin
             var notifications = await _context.Notifications
                 .AsNoTracking()
                 .Where(n => n.UserId == adminId.Value)
-                .OrderByDescending(n => n.CreatedAt)
-                .Select(n => new AdminNotificationResponse
+                .OrderBy(n => n.IsRead)
+                .ThenByDescending(n => n.CreatedAt)
+                .Select(n => new
                 {
-                    NotificationId = n.NotificationId,
-                    Title = n.Title,
-                    Message = n.Message,
-                    IsRead = n.IsRead,
-                    CreatedAt = n.CreatedAt,
-                    RelatedType = n.RelatedType,
-                    RelatedId = n.RelatedId,
-                    ActionType = n.ActionType,
-                    ActionUrl = n.ActionUrl
+                    n.NotificationId,
+                    n.Title,
+                    n.Message,
+                    n.IsRead,
+                    n.CreatedAt,
+                    n.ActionType,
+                    n.ActionUrl,
+                    n.RelatedType,
+                    n.RelatedId
                 })
                 .ToListAsync();
 
-            return Ok(notifications);
-        }
-
-        [HttpGet("unread-count")]
-        public async Task<IActionResult> GetUnreadCount()
-        {
-            var adminId = GetCurrentAdminId();
-
-            if (adminId == null)
-            {
-                return Unauthorized(new
+            var response = notifications
+                .Select(n =>
                 {
-                    message = "Invalid admin token."
-                });
-            }
+                    var type = GetNotificationType(n.ActionType, n.RelatedType);
 
-            var unreadCount = await _context.Notifications
-                .AsNoTracking()
-                .CountAsync(n => n.UserId == adminId.Value && !n.IsRead);
+                    return new AdminNotificationResponse
+                    {
+                        Id = n.NotificationId,
+                        NotificationId = n.NotificationId,
+                        Title = n.Title,
+                        Message = n.Message,
+                        Type = type,
+                        IsRead = n.IsRead,
+                        CreatedAt = n.CreatedAt,
+                        Priority = GetPriority(type),
+                        ActionUrl = n.ActionUrl,
+                        RelatedType = n.RelatedType,
+                        RelatedId = n.RelatedId
+                    };
+                })
+                .ToList();
 
-            return Ok(new AdminNotificationCountResponse
-            {
-                UnreadCount = unreadCount
-            });
+            return Ok(response);
         }
 
         [HttpPut("{id:int}/read")]
-        [HttpPatch("{id:int}/read")]
         public async Task<IActionResult> MarkAsRead(int id)
         {
             var adminId = GetCurrentAdminId();
@@ -129,6 +155,29 @@ namespace Eliteracingleague.API.Controllers.Admin
             });
         }
 
+        [HttpGet("unread-count")]
+        public async Task<IActionResult> GetUnreadCount()
+        {
+            var adminId = GetCurrentAdminId();
+
+            if (adminId == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid admin token."
+                });
+            }
+
+            var unreadCount = await _context.Notifications
+                .AsNoTracking()
+                .CountAsync(n => n.UserId == adminId.Value && !n.IsRead);
+
+            return Ok(new
+            {
+                unreadCount
+            });
+        }
+
         [HttpPut("read-all")]
         public async Task<IActionResult> MarkAllAsRead()
         {
@@ -157,44 +206,6 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 Message = "All admin notifications marked as read.",
                 UpdatedCount = notifications.Count
-            });
-        }
-
-        [HttpDelete("{id:int}")]
-        public async Task<IActionResult> DeleteNotification(int id)
-        {
-            var adminId = GetCurrentAdminId();
-
-            if (adminId == null)
-            {
-                return Unauthorized(new
-                {
-                    message = "Invalid admin token."
-                });
-            }
-
-            var notification = await _context.Notifications
-                .FirstOrDefaultAsync(n =>
-                    n.NotificationId == id &&
-                    n.UserId == adminId.Value);
-
-            if (notification == null)
-            {
-                return NotFound(new AdminNotificationActionResponse
-                {
-                    Message = "Notification not found.",
-                    NotificationId = id
-                });
-            }
-
-            _context.Notifications.Remove(notification);
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new AdminNotificationActionResponse
-            {
-                Message = "Notification deleted successfully.",
-                NotificationId = id
             });
         }
     }
