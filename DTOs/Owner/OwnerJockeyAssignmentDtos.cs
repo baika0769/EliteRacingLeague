@@ -4,6 +4,7 @@ public class OwnerJockeyAssignmentRegistrationResponse
 {
     public int RegistrationId { get; set; }
     public string TournamentName { get; set; } = null!;
+    public string TournamentStatus { get; set; } = null!;
     public string RaceName { get; set; } = null!;
     public DateTime RaceDate { get; set; }
     public string? Location { get; set; }
@@ -24,6 +25,7 @@ public class OwnerJockeyAssignmentContextResponse
     public string RegistrationStatus { get; set; } = null!;
     public int TournamentId { get; set; }
     public string TournamentName { get; set; } = null!;
+    public string TournamentStatus { get; set; } = null!;
     public int RaceId { get; set; }
     public string RaceName { get; set; } = null!;
     public DateTime RaceDate { get; set; }
