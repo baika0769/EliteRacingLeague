@@ -10,6 +10,7 @@ dotnet user-secrets set "Jwt:Key" "<at-least-32-characters-secret>"
 dotnet user-secrets set "Jwt:Issuer" "EliteRacingLeague"
 dotnet user-secrets set "Jwt:Audience" "EliteRacingLeagueUser"
 dotnet user-secrets set "Jwt:ExpireMinutes" "30"
+dotnet user-secrets set "Database:AutoMigrateOnStartup" "true"
 dotnet user-secrets set "Smtp:Host" "<smtp-host>"
 dotnet user-secrets set "Smtp:UserName" "<smtp-username>"
 dotnet user-secrets set "Smtp:Password" "<smtp-password>"
@@ -24,6 +25,7 @@ Jwt__Key
 Jwt__Issuer
 Jwt__Audience
 Jwt__ExpireMinutes
+Database__AutoMigrateOnStartup
 Smtp__Host
 Smtp__UserName
 Smtp__Password
