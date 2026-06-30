@@ -55,9 +55,6 @@ builder.Services.AddScoped<TournamentStatusService>();
 builder.Services.AddScoped<RefereeRaceLifecycleService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILeaderboardService, LeaderboardService>();
-builder.Services.AddScoped<SpectatorLeaderboardService>();
-builder.Services.AddScoped<PredictionEvaluationService>();
-builder.Services.AddScoped<INotificationService, NotificationService>();
 
 if (builder.Configuration.GetValue("SystemTime:EnableBackgroundSync", false))
 {
@@ -198,8 +195,16 @@ builder.Services.AddSwaggerGen(options =>
 
 var app = builder.Build();
 
-if (app.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup"))
+var autoMigrate = app.Configuration.GetValue<bool>("Database:AutoMigrateOnStartup");
+if (autoMigrate)
 {
+    var connectionString = app.Configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        throw new InvalidOperationException(
+            "Database:AutoMigrateOnStartup is enabled but ConnectionStrings:DefaultConnection is missing.");
+    }
+
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<EliteRacingLeagueContext>();
     await db.Database.MigrateAsync();
