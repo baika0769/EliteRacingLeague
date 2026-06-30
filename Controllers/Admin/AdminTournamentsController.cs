@@ -52,6 +52,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
+                    RaceId = t.Race == null ? null : t.Race.RaceId,
+                    RaceDateTime = t.Race == null ? null : t.Race.RaceDate,
+                    RaceStartTime = t.Race == null ? null : t.Race.RaceDate.ToString("HH:mm"),
+                    DistanceMeters = t.Race == null ? null : t.Race.DistanceMeters,
+                    RaceStatus = t.Race == null ? null : t.Race.Status,
 
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),
@@ -97,6 +102,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Rules = t.Rules,
                     CreatedBy = t.CreatedBy,
                     CreatedAt = t.CreatedAt,
+                    RaceId = t.Race == null ? null : t.Race.RaceId,
+                    RaceDateTime = t.Race == null ? null : t.Race.RaceDate,
+                    RaceStartTime = t.Race == null ? null : t.Race.RaceDate.ToString("HH:mm"),
+                    DistanceMeters = t.Race == null ? null : t.Race.DistanceMeters,
+                    RaceStatus = t.Race == null ? null : t.Race.Status,
 
                     EntriesCount = _context.RaceRegistrations
                         .Count(r => r.Race.TournamentId == t.TournamentId),

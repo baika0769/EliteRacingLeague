@@ -18,5 +18,10 @@
         public int EntriesCount { get; set; }
         public string EntriesText { get; set; } = string.Empty;
         public string? Referee { get; set; }
+        public int? RaceId { get; set; }
+        public DateTime? RaceDateTime { get; set; }
+        public string? RaceStartTime { get; set; }
+        public int? DistanceMeters { get; set; }
+        public string? RaceStatus { get; set; }
     }
 }
