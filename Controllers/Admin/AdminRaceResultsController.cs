@@ -7,6 +7,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+
 namespace Eliteracingleague.API.Controllers.Admin
 {
     [Authorize(Roles = UserRoles.Admin)]
@@ -214,38 +215,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 }
             }
 
-            var totalValidRegistrations = await _context.RaceRegistrations
-                .CountAsync(r =>
-                    r.RaceId == result.RaceId &&
-                    r.Status != RaceRegistrationStatuses.Cancelled &&
-                    r.Status != RaceRegistrationStatuses.Rejected);
-
-            var approvedResultsAfterThisApprove = await _context.RaceResults
-                .CountAsync(r =>
-                    r.RaceId == result.RaceId &&
-                    r.Registration.Status != RaceRegistrationStatuses.Cancelled &&
-                    r.Registration.Status != RaceRegistrationStatuses.Rejected &&
-                    (
-                        r.Status == RaceResultStatuses.AdminApproved ||
-                        r.ResultId == result.ResultId
-                    ));
-
-            if (totalValidRegistrations > 0 &&
-                approvedResultsAfterThisApprove >= totalValidRegistrations)
-            {
-                var race = await _context.Races
-                    .Include(r => r.Tournament)
-                    .FirstOrDefaultAsync(r => r.RaceId == result.RaceId);
-
-                if (race != null && race.Tournament.Status != TournamentStatuses.Cancelled)
-                {
-                    race.Status = RaceStatuses.Published;
-                    race.UpdatedAt = now;
-
-                    race.Tournament.Status = TournamentStatuses.Completed;
-                    race.Tournament.UpdatedAt = now;
-                }
-            }
+            var tournamentCompleted = await CompleteTournamentIfAllResultsApprovedAsync(
+                result.RaceId,
+                result.ResultId,
+                now
+            );
 
             await _context.SaveChangesAsync();
 
@@ -253,10 +227,53 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             return Ok(new AdminActionResponse
             {
-                Message = "Race result approved successfully",
+                Message = tournamentCompleted
+                    ? "Race result approved successfully. Tournament completed."
+                    : "Race result approved successfully",
                 Id = result.ResultId,
                 Status = result.Status
             });
+        }
+
+        private async Task<bool> CompleteTournamentIfAllResultsApprovedAsync(
+            int raceId,
+            int approvedResultId,
+            DateTime now)
+        {
+            var hasOtherUnapprovedResults = await _context.RaceResults
+                .AnyAsync(r =>
+                    r.RaceId == raceId &&
+                    r.ResultId != approvedResultId &&
+                    r.Registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    r.Registration.Status != RaceRegistrationStatuses.Rejected &&
+                    r.Status != RaceResultStatuses.AdminApproved);
+
+            if (hasOtherUnapprovedResults)
+            {
+                return false;
+            }
+
+            var race = await _context.Races
+                .Include(r => r.Tournament)
+                .FirstOrDefaultAsync(r => r.RaceId == raceId);
+
+            if (race == null || race.Tournament == null)
+            {
+                return false;
+            }
+
+            if (race.Tournament.Status == TournamentStatuses.Cancelled)
+            {
+                return false;
+            }
+
+            race.Status = RaceStatuses.Published;
+            race.UpdatedAt = now;
+
+            race.Tournament.Status = TournamentStatuses.Completed;
+            race.Tournament.UpdatedAt = now;
+
+            return true;
         }
 
         [HttpDelete("{id:int}")]
