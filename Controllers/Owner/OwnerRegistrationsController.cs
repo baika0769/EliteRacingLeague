@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner.Registrations;
 using Eliteracingleague.API.Models;
@@ -28,7 +28,8 @@ public class OwnerRegistrationsController : OwnerBaseController
     {
         RaceRegistrationStatuses.Approved,
         RaceRegistrationStatuses.JockeyInvited,
-        RaceRegistrationStatuses.ReadyToRace
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
     };
 
     public OwnerRegistrationsController(

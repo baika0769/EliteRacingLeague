@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
 using Microsoft.AspNetCore.Authorization;
@@ -16,7 +16,8 @@ public class OwnerDashboardController : OwnerBaseController
     {
         RaceRegistrationStatuses.Approved,
         RaceRegistrationStatuses.JockeyInvited,
-        RaceRegistrationStatuses.ReadyToRace
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
     };
 
     public OwnerDashboardController(EliteRacingLeagueContext context) : base(context)
