@@ -41,7 +41,7 @@ public class SpectatorRewardsController : ControllerBase
             .Where(p =>
                 p.SpectatorId == userId &&
                 p.Status != RacePredictionStatuses.Cancelled &&
-                p.PointsAwarded > 0)
+                (p.StakePoints > 0 || p.PointsAwarded > 0))
             .OrderByDescending(p => p.EvaluatedAt ?? p.UpdatedAt ?? p.CreatedAt)
             .Select(p => new
             {
@@ -49,7 +49,18 @@ public class SpectatorRewardsController : ControllerBase
                 tournamentId = p.Race.TournamentId,
                 tournamentName = p.Race.Tournament.TournamentName,
                 raceName = p.Race.RaceName,
+                predictedHorseName = p.PredictedRegistration.Horse.HorseName,
+                actualWinnerHorseName = p.ActualWinnerRegistration != null
+                    ? p.ActualWinnerRegistration.Horse.HorseName
+                    : null,
+                status = p.Status,
+                isCorrect = p.IsCorrect,
+                stakePoints = p.StakePoints,
+                payoutPoints = p.PointsAwarded,
                 points = p.PointsAwarded,
+                netPoints = p.Status == RacePredictionStatuses.Evaluated
+                    ? p.PointsAwarded - p.StakePoints
+                    : -p.StakePoints,
                 rewardAmount = p.RewardAmount,
                 rewardStatus = p.RewardStatus,
                 evaluatedAt = p.EvaluatedAt,
@@ -60,6 +71,10 @@ public class SpectatorRewardsController : ControllerBase
         return Ok(new
         {
             rewardPoints = rewardSummary.RewardPoints,
+            bettingPoints = rewardSummary.BettingPoints,
+            totalStakePoints = rewardSummary.TotalStakePoints,
+            totalPayoutPoints = rewardSummary.TotalPayoutPoints,
+            netPoints = rewardSummary.NetPoints,
             correctPredictions = rewardSummary.CorrectPredictions,
             predictionAccuracy = rewardSummary.PredictionAccuracy,
             myRank,

@@ -69,7 +69,12 @@ public class SpectatorTournamentsController : ControllerBase
                         predictedHorseId = p.PredictedRegistration.HorseId,
                         predictedHorseName = p.PredictedRegistration.Horse.HorseName,
                         isCorrect = p.IsCorrect,
-                        pointsAwarded = p.PointsAwarded
+                        stakePoints = p.StakePoints,
+                        payoutPoints = p.PointsAwarded,
+                        pointsAwarded = p.PointsAwarded,
+                        netPoints = p.Status == RacePredictionStatuses.Evaluated
+                            ? p.PointsAwarded - p.StakePoints
+                            : -p.StakePoints
                     })
                     .FirstOrDefault(),
                 race = _context.Races

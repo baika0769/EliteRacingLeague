@@ -21,6 +21,8 @@ public partial class RacePrediction
 
     public int PointsAwarded { get; set; }
 
+    public int StakePoints { get; set; }
+
     public decimal? RewardAmount { get; set; }
 
     public string? RewardStatus { get; set; }

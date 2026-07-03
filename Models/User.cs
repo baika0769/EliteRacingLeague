@@ -21,6 +21,8 @@ public partial class User
 
     public bool EmailVerified { get; set; }
 
+    public int BettingPoints { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }
