@@ -18,5 +18,6 @@ public class LoginUserResponse
     public string Role { get; set; } = null!;
     public string Status { get; set; } = null!;
     public bool EmailVerified { get; set; }
-    
+    public int BettingPoints { get; set; }
+
 }

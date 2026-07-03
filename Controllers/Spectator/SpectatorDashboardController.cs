@@ -54,6 +54,12 @@ public class SpectatorDashboardController : ControllerBase
         var rewardSummary = await _leaderboardService.GetRewardSummaryAsync(userId);
         var myRank = await _leaderboardService.GetMyRankAsync(userId);
 
+        var bettingPoints = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == userId)
+            .Select(u => u.BettingPoints)
+            .FirstOrDefaultAsync();
+
         var featuredTournament = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
@@ -92,7 +98,11 @@ public class SpectatorDashboardController : ControllerBase
         {
             upcomingTournaments,
             predictionsSubmitted,
+            bettingPoints,
             rewardPoints = rewardSummary.RewardPoints,
+            netPoints = rewardSummary.NetPoints,
+            totalStakePoints = rewardSummary.TotalStakePoints,
+            totalPayoutPoints = rewardSummary.TotalPayoutPoints,
             myRank,
             featuredTournament
         });

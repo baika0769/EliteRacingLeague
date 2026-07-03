@@ -638,6 +638,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.IsCorrect).HasColumnName("is_correct");
             entity.Property(e => e.LockedAt).HasColumnName("locked_at");
             entity.Property(e => e.PointsAwarded).HasColumnName("points_awarded");
+            entity.Property(e => e.StakePoints).HasColumnName("stake_points");
             entity.Property(e => e.PredictedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("predicted_at");
@@ -1055,6 +1056,7 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasMaxLength(30)
                 .IsUnicode(false)
                 .HasColumnName("role");
+            entity.Property(e => e.BettingPoints).HasColumnName("betting_points");
             entity.Property(e => e.Status)
                 .HasMaxLength(30)
                 .IsUnicode(false)

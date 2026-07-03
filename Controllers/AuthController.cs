@@ -96,6 +96,7 @@ public class AuthController : ControllerBase
                 Role = role,
                 Status = UserStatuses.Pending,
                 EmailVerified = false,
+                BettingPoints = role == UserRoles.Spectator ? SpectatorBettingRules.InitialBettingPoints : 0,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -156,8 +157,8 @@ public class AuthController : ControllerBase
                 expiresInMinutes = OtpExpireMinutes
             });
         }
-        catch(Exception ex)
-{
+        catch (Exception ex)
+        {
             await transaction.RollbackAsync();
 
             if (_environment.IsDevelopment())
@@ -177,7 +178,7 @@ public class AuthController : ControllerBase
         }
     }
 
-    
+
     // POST: /api/auth/verify-email
     [HttpPost("verify-email")]
     public async Task<IActionResult> VerifyEmail(VerifyEmailRequest request)
@@ -470,7 +471,8 @@ public class AuthController : ControllerBase
                 Phone = user.Phone,
                 Role = user.Role,
                 Status = user.Status,
-                EmailVerified = user.EmailVerified
+                EmailVerified = user.EmailVerified,
+                BettingPoints = user.BettingPoints
             }
         };
 
@@ -516,6 +518,7 @@ public class AuthController : ControllerBase
             role = user.Role,
             status = user.Status,
             emailVerified = user.EmailVerified,
+            bettingPoints = user.BettingPoints,
             nextStep
         });
     }

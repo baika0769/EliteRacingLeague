@@ -111,6 +111,7 @@ public class SpectatorLeaderboardService
             .Select(p => new
             {
                 p.PointsAwarded,
+                p.StakePoints,
                 p.IsCorrect
             })
             .ToListAsync();
@@ -118,9 +119,23 @@ public class SpectatorLeaderboardService
         var totalPredictions = rows.Count;
         var correctPredictions = rows.Count(p => p.IsCorrect == true);
 
+        var userBalance = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == spectatorId)
+            .Select(u => (int?)u.BettingPoints)
+            .FirstOrDefaultAsync() ?? 0;
+
+        var totalStakePoints = rows.Sum(p => p.StakePoints);
+        var totalPayoutPoints = rows.Sum(p => p.PointsAwarded);
+        var netPoints = totalPayoutPoints - totalStakePoints;
+
         return new SpectatorRewardSummary
         {
-            RewardPoints = rows.Sum(p => p.PointsAwarded),
+            RewardPoints = netPoints,
+            BettingPoints = userBalance,
+            TotalStakePoints = totalStakePoints,
+            TotalPayoutPoints = totalPayoutPoints,
+            NetPoints = netPoints,
             CorrectPredictions = correctPredictions,
             TotalPredictions = totalPredictions,
             PredictionAccuracy = totalPredictions == 0
@@ -221,7 +236,7 @@ public class SpectatorLeaderboardService
             {
                 g.Key.SpectatorId,
                 g.Key.SpectatorName,
-                Points = g.Sum(p => p.PointsAwarded),
+                Points = g.Sum(p => p.PointsAwarded - p.StakePoints),
                 CorrectPredictions = g.Count(p => p.IsCorrect == true),
                 TotalPredictions = g.Count()
             })

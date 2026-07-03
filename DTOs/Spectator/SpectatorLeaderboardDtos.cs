@@ -53,6 +53,10 @@ public class TournamentHorseItem
 public class SpectatorRewardSummary
 {
     public int RewardPoints { get; set; }
+    public int BettingPoints { get; set; }
+    public int TotalStakePoints { get; set; }
+    public int TotalPayoutPoints { get; set; }
+    public int NetPoints { get; set; }
     public int CorrectPredictions { get; set; }
     public decimal PredictionAccuracy { get; set; }
     public int TotalPredictions { get; set; }

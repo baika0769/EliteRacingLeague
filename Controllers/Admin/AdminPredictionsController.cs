@@ -41,7 +41,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                         : p.IsCorrect == false
                             ? "Low Accuracy"
                             : RacePredictionStatuses.Pending,
+                    stakePoints = p.StakePoints,
+                    payoutPoints = p.PointsAwarded,
                     pointsAwarded = p.PointsAwarded,
+                    netPoints = p.Status == RacePredictionStatuses.Evaluated
+                        ? p.PointsAwarded - p.StakePoints
+                        : -p.StakePoints,
                     rewardAmount = p.RewardAmount,
                     rewardStatus = p.RewardStatus,
                     predictedAt = p.PredictedAt
