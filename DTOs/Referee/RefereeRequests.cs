@@ -25,6 +25,14 @@ public class CreateViolationRequest
     public string Action { get; set; } = null!;
     public decimal? PenaltyPoints { get; set; }
 }
+public class UpdateViolationRequest
+{
+    public int RegistrationId { get; set; }
+    public string ViolationType { get; set; } = null!;
+    public string? Description { get; set; }
+    public string Action { get; set; } = null!;
+    public decimal? PenaltyPoints { get; set; }
+}
 
 public class CreateRefereeReportRequest
 {

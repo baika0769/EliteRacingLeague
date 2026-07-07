@@ -29,12 +29,13 @@ public class RefereeRacesController : ControllerBase
     };
 
     private static readonly string[] ViolationAllowedRaceStatuses =
-    {
-        RaceStatuses.AssignedReferee,
-        RaceStatuses.RefereeReady,
-        RaceStatuses.Ongoing,
-        RaceStatuses.Finished
-    };
+{
+    RaceStatuses.AssignedReferee,
+    RaceStatuses.RefereeReady,
+    RaceStatuses.Ongoing,
+    RaceStatuses.Finished,
+    RaceStatuses.ResultPending
+};
 
     public RefereeRacesController(
         EliteRacingLeagueContext context,
@@ -801,6 +802,104 @@ public class RefereeRacesController : ControllerBase
         return Ok(new
         {
             message = "Violation recorded successfully",
+            violationId = violation.ViolationId,
+            action = violation.Action
+        });
+    }
+
+    [HttpPut("{raceId}/violations/{violationId:int}")]
+    public async Task<IActionResult> UpdateViolation(
+    int raceId,
+    int violationId,
+    UpdateViolationRequest request)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        if (!RaceViolationActions.IsValid(request.Action))
+        {
+            return BadRequest("Invalid violation action.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ViolationType))
+        {
+            return BadRequest("Violation type is required.");
+        }
+
+        if (request.PenaltyPoints < 0)
+        {
+            return BadRequest("Penalty points must be greater than or equal to 0.");
+        }
+
+        if (request.Action == RaceViolationActions.PointDeduction &&
+            (!request.PenaltyPoints.HasValue || request.PenaltyPoints.Value <= 0))
+        {
+            return BadRequest("Point deduction requires penalty points greater than 0.");
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var race = await _context.Races
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        if (!ViolationAllowedRaceStatuses.Contains(race.Status))
+        {
+            return BadRequest("Violations can only be updated before publishing or cancellation.");
+        }
+
+        var registrationExists = await _context.RaceRegistrations
+            .AnyAsync(r =>
+                r.RaceId == raceId &&
+                r.RegistrationId == request.RegistrationId &&
+                ActiveRegistrationStatuses.Contains(r.Status) &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (!registrationExists)
+        {
+            return NotFound("Registration not found or has been cancelled.");
+        }
+
+        var violation = await _context.RaceViolations
+            .FirstOrDefaultAsync(v =>
+                v.ViolationId == violationId &&
+                v.RaceId == raceId &&
+                v.RefereeId == refereeId);
+
+        if (violation == null)
+        {
+            return NotFound("Violation not found.");
+        }
+
+        violation.RegistrationId = request.RegistrationId;
+        violation.ViolationType = request.ViolationType.Trim();
+        violation.Description = string.IsNullOrWhiteSpace(request.Description)
+            ? null
+            : request.Description.Trim();
+        violation.Action = request.Action;
+        violation.PenaltyPoints = request.PenaltyPoints;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Violation updated successfully",
             violationId = violation.ViolationId,
             action = violation.Action
         });
