@@ -22,4 +22,7 @@ public partial class Season
     public DateTime? UpdatedAt { get; set; }
 
     public virtual ICollection<Tournament> Tournaments { get; set; } = new List<Tournament>();
+    public virtual ICollection<SeasonRewardRule> SeasonRewardRules { get; set; } = new List<SeasonRewardRule>();
+
+    public virtual ICollection<SeasonReward> SeasonRewards { get; set; } = new List<SeasonReward>();
 }

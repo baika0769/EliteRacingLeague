@@ -59,6 +59,9 @@ public partial class EliteRacingLeagueContext : DbContext
     public virtual DbSet<RefereeReport> RefereeReports { get; set; }
 
     public virtual DbSet<Season> Seasons { get; set; }
+    public virtual DbSet<SeasonRewardRule> SeasonRewardRules { get; set; }
+
+    public virtual DbSet<SeasonReward> SeasonRewards { get; set; }
 
     public virtual DbSet<Tournament> Tournaments { get; set; }
 
@@ -955,6 +958,66 @@ public partial class EliteRacingLeagueContext : DbContext
 
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
         });
+
+        modelBuilder.Entity<SeasonRewardRule>(entity =>
+        {
+            entity.HasKey(e => e.SeasonRewardRuleId);
+
+            entity.ToTable("season_reward_rules");
+
+            entity.Property(e => e.SeasonRewardRuleId).HasColumnName("season_reward_rule_id");
+            entity.Property(e => e.SeasonId).HasColumnName("season_id");
+            entity.Property(e => e.RankPosition).HasColumnName("rank_position");
+            entity.Property(e => e.RewardName).HasMaxLength(200).HasColumnName("reward_name");
+            entity.Property(e => e.RewardDescription).HasColumnName("reward_description");
+            entity.Property(e => e.BonusPoints).HasColumnName("bonus_points");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(e => new { e.SeasonId, e.RankPosition }).IsUnique();
+
+            entity.HasOne(e => e.Season)
+                .WithMany(s => s.SeasonRewardRules)
+                .HasForeignKey(e => e.SeasonId);
+        });
+
+        modelBuilder.Entity<SeasonReward>(entity =>
+        {
+            entity.HasKey(e => e.SeasonRewardId);
+
+            entity.ToTable("season_rewards");
+
+            entity.Property(e => e.SeasonRewardId).HasColumnName("season_reward_id");
+            entity.Property(e => e.SeasonId).HasColumnName("season_id");
+            entity.Property(e => e.SpectatorId).HasColumnName("spectator_id");
+            entity.Property(e => e.RankPosition).HasColumnName("rank_position");
+            entity.Property(e => e.FinalPoints).HasColumnName("final_points");
+            entity.Property(e => e.RewardName).HasMaxLength(200).HasColumnName("reward_name");
+            entity.Property(e => e.RewardDescription).HasColumnName("reward_description");
+            entity.Property(e => e.BonusPoints).HasColumnName("bonus_points");
+            entity.Property(e => e.IsBonusApplied).HasColumnName("is_bonus_applied");
+            entity.Property(e => e.AppliedToSeasonId).HasColumnName("applied_to_season_id");
+            entity.Property(e => e.AppliedAt).HasColumnName("applied_at");
+            entity.Property(e => e.Status)
+                .HasMaxLength(30)
+                .IsUnicode(false)
+                .HasColumnName("status");
+            entity.Property(e => e.AwardedAt).HasColumnName("awarded_at");
+
+            entity.HasIndex(e => new { e.SeasonId, e.SpectatorId }).IsUnique();
+
+            entity.HasOne(e => e.Season)
+                .WithMany(s => s.SeasonRewards)
+                .HasForeignKey(e => e.SeasonId);
+
+            entity.HasOne(e => e.Spectator)
+                .WithMany(u => u.SeasonRewards)
+                .HasForeignKey(e => e.SpectatorId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
+        });
+
 
         modelBuilder.Entity<Tournament>(entity =>
         {

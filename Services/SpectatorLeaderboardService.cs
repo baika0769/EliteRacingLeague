@@ -103,11 +103,35 @@ public class SpectatorLeaderboardService
 
     public async Task<SpectatorRewardSummary> GetRewardSummaryAsync(int spectatorId)
     {
+        var season = await GetActiveSeasonAsync();
+
+        var userBalance = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.UserId == spectatorId)
+            .Select(u => (int?)u.BettingPoints)
+            .FirstOrDefaultAsync() ?? 0;
+
+        if (season == null)
+        {
+            return new SpectatorRewardSummary
+            {
+                RewardPoints = 0,
+                BettingPoints = userBalance,
+                TotalStakePoints = 0,
+                TotalPayoutPoints = 0,
+                NetPoints = 0,
+                CorrectPredictions = 0,
+                TotalPredictions = 0,
+                PredictionAccuracy = 0
+            };
+        }
+
         var rows = await _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
                 p.SpectatorId == spectatorId &&
-                p.Status != RacePredictionStatuses.Cancelled)
+                p.Status != RacePredictionStatuses.Cancelled &&
+                p.Race.Tournament.SeasonId == season.SeasonId)
             .Select(p => new
             {
                 p.PointsAwarded,
@@ -118,12 +142,6 @@ public class SpectatorLeaderboardService
 
         var totalPredictions = rows.Count;
         var correctPredictions = rows.Count(p => p.IsCorrect == true);
-
-        var userBalance = await _context.Users
-            .AsNoTracking()
-            .Where(u => u.UserId == spectatorId)
-            .Select(u => (int?)u.BettingPoints)
-            .FirstOrDefaultAsync() ?? 0;
 
         var totalStakePoints = rows.Sum(p => p.StakePoints);
         var totalPayoutPoints = rows.Sum(p => p.PointsAwarded);
@@ -220,7 +238,7 @@ public class SpectatorLeaderboardService
         return ranked;
     }
 
-    private async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit, int seasonId)
+    public async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit, int seasonId)
     {
         var rows = await _context.RacePredictions
             .AsNoTracking()
