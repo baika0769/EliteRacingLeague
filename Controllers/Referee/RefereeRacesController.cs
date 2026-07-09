@@ -905,6 +905,60 @@ public class RefereeRacesController : ControllerBase
         });
     }
 
+    [HttpDelete("{raceId}/violations/{violationId:int}")]
+    public async Task<IActionResult> DeleteViolation(int raceId, int violationId)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var race = await _context.Races
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        if (!ViolationAllowedRaceStatuses.Contains(race.Status))
+        {
+            return BadRequest("Violations can only be deleted before publishing or cancellation.");
+        }
+
+        var violation = await _context.RaceViolations
+            .FirstOrDefaultAsync(v =>
+                v.ViolationId == violationId &&
+                v.RaceId == raceId &&
+                v.RefereeId == refereeId);
+
+        if (violation == null)
+        {
+            return NotFound("Violation not found.");
+        }
+
+        _context.RaceViolations.Remove(violation);
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Violation deleted successfully",
+            violationId = violationId,
+            raceId = raceId
+        });
+    }
+
     [HttpGet("{raceId}/inspection-report")]
     public async Task<IActionResult> GetInspectionReport(int raceId, string? filter = "all")
     {
