@@ -71,7 +71,7 @@ public class SpectatorRaceReplayController : ControllerBase
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                (r.Status == RaceResultStatuses.AdminApproved || r.Status == RaceResultStatuses.Published))
+                r.Status == RaceResultStatuses.Published)
             .Select(r => new
             {
                 r.ResultId,

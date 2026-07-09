@@ -20,8 +20,6 @@ public class SpectatorPredictionsController : ControllerBase
 
     private static readonly string[] PredictableRegistrationStatuses =
     {
-        RaceRegistrationStatuses.Approved,
-        RaceRegistrationStatuses.JockeyInvited,
         RaceRegistrationStatuses.ReadyToRace
     };
 
@@ -156,7 +154,7 @@ public class SpectatorPredictionsController : ControllerBase
             return BadRequest("Prediction is not allowed for this race status.");
         }
 
-        if (race.PredictionDeadline.HasValue && now > race.PredictionDeadline.Value)
+        if (race.PredictionDeadline.HasValue && now >= race.PredictionDeadline.Value)
         {
             return BadRequest("Prediction deadline has passed.");
         }

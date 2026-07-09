@@ -15,8 +15,6 @@ public class SpectatorTournamentsController : ControllerBase
 
     private static readonly string[] VisibleRegistrationStatuses =
     {
-        RaceRegistrationStatuses.Approved,
-        RaceRegistrationStatuses.JockeyInvited,
         RaceRegistrationStatuses.ReadyToRace
     };
 

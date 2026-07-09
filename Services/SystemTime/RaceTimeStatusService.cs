@@ -8,19 +8,6 @@ namespace Eliteracingleague.API.Services.SystemTime;
 
 public class RaceTimeStatusService : IRaceTimeStatusService
 {
-    private static readonly string[] RaceStatusesBeforeStart =
-    {
-        RaceStatuses.Scheduled,
-        RaceStatuses.AssignedReferee,
-        RaceStatuses.RefereeReady
-    };
-
-    private static readonly string[] TournamentStatusesBeforeStart =
-    {
-        TournamentStatuses.OpenRegistration,
-        TournamentStatuses.ClosedRegistration
-    };
-
     private static readonly string[] RecalculatableTournamentStatuses =
     {
         TournamentStatuses.OpenRegistration,
@@ -60,29 +47,20 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             invitation.RespondedAt = now;
         }
 
-        var racesToStart = await _context.Races
-            .Where(r =>
-                RaceStatusesBeforeStart.Contains(r.Status) &&
-                r.RaceDate <= now)
+        var predictionsToLock = await _context.RacePredictions
+            .Where(p =>
+                p.Status == RacePredictionStatuses.Pending &&
+                p.Race.PredictionDeadline.HasValue &&
+                p.Race.PredictionDeadline.Value <= now &&
+                p.Race.Status != RaceStatuses.Cancelled &&
+                p.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .ToListAsync(cancellationToken);
 
-        foreach (var race in racesToStart)
+        foreach (var prediction in predictionsToLock)
         {
-            race.Status = RaceStatuses.Ongoing;
-            race.UpdatedAt = now;
-        }
-
-        var tournamentsToStart = await _context.Tournaments
-            .Where(t =>
-                TournamentStatusesBeforeStart.Contains(t.Status) &&
-                t.Race != null &&
-                t.Race.RaceDate <= now)
-            .ToListAsync(cancellationToken);
-
-        foreach (var tournament in tournamentsToStart)
-        {
-            tournament.Status = TournamentStatuses.Ongoing;
-            tournament.UpdatedAt = now;
+            prediction.Status = RacePredictionStatuses.Locked;
+            prediction.LockedAt = now;
+            prediction.UpdatedAt = now;
         }
 
         var tournamentsToCloseRegistration = await _context.Tournaments
@@ -99,8 +77,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         }
 
         if (expiredInvitations.Count > 0 ||
-            racesToStart.Count > 0 ||
-            tournamentsToStart.Count > 0 ||
+            predictionsToLock.Count > 0 ||
             tournamentsToCloseRegistration.Count > 0)
         {
             await _context.SaveChangesAsync(cancellationToken);
@@ -111,8 +88,8 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             Message = "Time statuses synchronized.",
             EffectiveUtcNow = effectiveUtcNow,
             ExpiredInvitations = expiredInvitations.Count,
-            UpdatedRaces = racesToStart.Count,
-            UpdatedTournaments = tournamentsToStart.Count + tournamentsToCloseRegistration.Count
+            UpdatedRaces = 0,
+            UpdatedTournaments = tournamentsToCloseRegistration.Count
         };
     }
 
@@ -163,10 +140,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         DateTime now,
         DateOnly localToday)
     {
-        if (tournament.Race != null && tournament.Race.RaceDate <= now)
-        {
-            return TournamentStatuses.Ongoing;
-        }
+        // Không tự chuyển sang Ongoing theo giờ đua; Referee phải bấm Start.
 
         if (tournament.StartDate <= localToday)
         {

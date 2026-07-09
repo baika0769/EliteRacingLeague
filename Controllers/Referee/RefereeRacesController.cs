@@ -23,8 +23,6 @@ public class RefereeRacesController : ControllerBase
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
-        RaceRegistrationStatuses.Approved,
-        RaceRegistrationStatuses.JockeyInvited,
         RaceRegistrationStatuses.ReadyToRace
     };
 
@@ -1137,6 +1135,33 @@ public class RefereeRacesController : ControllerBase
             return NotFound("Race not found or has been cancelled.");
         }
 
+        var reportStageError = ValidateReportStage(request.ReportType, race.Status);
+        if (reportStageError != null)
+        {
+            return BadRequest(new
+            {
+                message = reportStageError,
+                reportType = request.ReportType,
+                raceStatus = race.Status
+            });
+        }
+
+        var duplicateReportExists = await _context.RefereeReports
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.ReportType == request.ReportType);
+
+        if (duplicateReportExists)
+        {
+            return Conflict(new
+            {
+                message = "This referee already submitted this report type for the race. Update the existing report instead of creating a duplicate.",
+                reportType = request.ReportType
+            });
+        }
+
         var report = new RefereeReport
         {
             RaceId = raceId,
@@ -1164,6 +1189,90 @@ public class RefereeRacesController : ControllerBase
         return Ok(new
         {
             message = "Referee report submitted successfully",
+            reportId = report.ReportId,
+            reportType = report.ReportType
+        });
+    }
+
+    [HttpPut("{raceId}/reports/{reportId:int}")]
+    public async Task<IActionResult> UpdateReport(
+        int raceId,
+        int reportId,
+        CreateRefereeReportRequest request)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        if (!RefereeReportTypes.IsValid(request.ReportType))
+        {
+            return BadRequest("Invalid report type.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReportContent))
+        {
+            return BadRequest("Report content is required.");
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var report = await _context.RefereeReports
+            .FirstOrDefaultAsync(r =>
+                r.ReportId == reportId &&
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId);
+
+        if (report == null)
+        {
+            return NotFound(new { message = "Report not found or you do not have permission to update it." });
+        }
+
+        if (report.ReportType != request.ReportType)
+        {
+            return BadRequest(new
+            {
+                message = "Report type cannot be changed. Create/update the correct report type instead.",
+                currentReportType = report.ReportType,
+                requestedReportType = request.ReportType
+            });
+        }
+
+        var race = await _context.Races
+            .FirstOrDefaultAsync(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled);
+
+        if (race == null)
+        {
+            return NotFound("Race not found or has been cancelled.");
+        }
+
+        var reportStageError = ValidateReportStage(report.ReportType, race.Status);
+        if (reportStageError != null)
+        {
+            return BadRequest(new
+            {
+                message = reportStageError,
+                reportType = report.ReportType,
+                raceStatus = race.Status
+            });
+        }
+
+        report.ReportContent = request.ReportContent.Trim();
+        report.SubmittedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Referee report updated successfully",
             reportId = report.ReportId,
             reportType = report.ReportType
         });
@@ -1249,7 +1358,7 @@ public class RefereeRacesController : ControllerBase
         return Ok(results);
     }
 
-    
+
 
     [HttpGet("{raceId}/reports")]
     public async Task<IActionResult> GetReports(int raceId)
@@ -1286,5 +1395,29 @@ public class RefereeRacesController : ControllerBase
 
         return Ok(reports);
     }
+
+    private static string? ValidateReportStage(string reportType, string raceStatus)
+    {
+        if (reportType == RefereeReportTypes.PreRace)
+        {
+            return raceStatus is RaceStatuses.Ongoing
+                or RaceStatuses.Finished
+                or RaceStatuses.ResultPending
+                or RaceStatuses.Published
+                    ? "Pre-race report can only be submitted before the race starts."
+                    : null;
+        }
+
+        if (reportType == RefereeReportTypes.PostRace)
+        {
+            return raceStatus is RaceStatuses.Finished
+                or RaceStatuses.ResultPending
+                    ? null
+                    : "Post-race report can only be submitted after the race is finished and before it is published.";
+        }
+
+        return null;
+    }
+
 }
 

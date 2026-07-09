@@ -49,18 +49,9 @@ namespace Eliteracingleague.API.Services
                     tournament.UpdatedAt = now;
                 }
 
-                // OpenRegistration / ClosedRegistration + tới giờ đua => Ongoing
-                // EndDate là RaceDate, còn giờ đua nằm trong race.RaceDate
-                if ((tournament.Status == TournamentStatuses.OpenRegistration ||
-                     tournament.Status == TournamentStatuses.ClosedRegistration) &&
-                    race.RaceDate <= now)
-                {
-                    tournament.Status = TournamentStatuses.Ongoing;
-                    tournament.UpdatedAt = now;
-
-                    race.Status = RaceStatuses.Ongoing;
-                    race.UpdatedAt = now;
-                }
+                // Không auto chuyển race/tournament sang Ongoing.
+                // Race start phải do Referee bấm Start sau inspection + Mark Ready.
+                // Service này chỉ tự đóng đăng ký theo deadline.
             }
 
             await _context.SaveChangesAsync();

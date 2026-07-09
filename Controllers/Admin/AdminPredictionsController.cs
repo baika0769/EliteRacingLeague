@@ -61,7 +61,11 @@ namespace Eliteracingleague.API.Controllers.Admin
             int id,
             [FromBody] UpdatePredictionStatusRequest request)
         {
-            var prediction = await _context.RacePredictions.FindAsync(id);
+            var prediction = await _context.RacePredictions
+                .Include(p => p.Race)
+                    .ThenInclude(r => r.Tournament)
+                .Include(p => p.Spectator)
+                .FirstOrDefaultAsync(p => p.PredictionId == id);
 
             if (prediction == null)
             {
@@ -80,17 +84,60 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            prediction.Status = request.Status;
-            prediction.UpdatedAt = DateTime.UtcNow;
-
-            if (request.Status == RacePredictionStatuses.Locked)
+            if (prediction.Status == RacePredictionStatuses.Evaluated)
             {
-                prediction.LockedAt = DateTime.UtcNow;
+                return BadRequest(new
+                {
+                    message = "Evaluated predictions cannot be changed manually.",
+                    id,
+                    status = prediction.Status
+                });
+            }
+
+            if (prediction.Status == RacePredictionStatuses.Cancelled)
+            {
+                return BadRequest(new
+                {
+                    message = "Cancelled predictions cannot be changed manually.",
+                    id,
+                    status = prediction.Status
+                });
             }
 
             if (request.Status == RacePredictionStatuses.Evaluated)
             {
-                prediction.EvaluatedAt = DateTime.UtcNow;
+                return BadRequest(new
+                {
+                    message = "Predictions must be evaluated by the official result publish flow, not manually from admin status update.",
+                    id,
+                    raceStatus = prediction.Race.Status,
+                    tournamentStatus = prediction.Race.Tournament.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+
+            if (request.Status == RacePredictionStatuses.Cancelled &&
+                prediction.Status != RacePredictionStatuses.Cancelled &&
+                prediction.Status != RacePredictionStatuses.Evaluated)
+            {
+                if (prediction.StakePoints > 0)
+                {
+                    prediction.Spectator.BettingPoints += prediction.StakePoints;
+                    prediction.Spectator.UpdatedAt = now;
+                }
+
+                prediction.RewardStatus = PredictionRewardStatuses.None;
+                prediction.PointsAwarded = 0;
+                prediction.IsCorrect = null;
+            }
+
+            prediction.Status = request.Status;
+            prediction.UpdatedAt = now;
+
+            if (request.Status == RacePredictionStatuses.Locked)
+            {
+                prediction.LockedAt = now;
             }
 
             await _context.SaveChangesAsync();
@@ -99,7 +146,8 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 message = "Prediction status updated successfully",
                 id = prediction.PredictionId,
-                status = prediction.Status
+                status = prediction.Status,
+                bettingPoints = prediction.Spectator.BettingPoints
             });
         }
     }

@@ -120,6 +120,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var registration = await _context.RaceRegistrations
                 .Include(r => r.Horse)
+                .Include(r => r.Owner)
+                    .ThenInclude(o => o.Owner)
                 .Include(r => r.Race)
                     .ThenInclude(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
@@ -141,11 +143,105 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Id = id
                 });
             }
+
+            if (registration.Status != RaceRegistrationStatuses.Pending)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only pending registrations can be approved",
+                    Id = id,
+                    Status = registration.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+            var today = DateOnly.FromDateTime(now);
+            var race = registration.Race;
+            var tournament = race.Tournament;
+
+            if (tournament.Status == TournamentStatuses.Cancelled || race.Status == RaceStatuses.Cancelled)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cancelled race or tournament cannot accept registrations",
+                    Id = id,
+                    Status = registration.Status
+                });
+            }
+
+            if (tournament.Status != TournamentStatuses.OpenRegistration)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Registration can only be approved while tournament is OpenRegistration",
+                    Id = id,
+                    Status = tournament.Status
+                });
+            }
+
+            if (!RaceStatuses.CanRegister(race.Status))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Registration can no longer be approved for this race status",
+                    Id = id,
+                    Status = race.Status
+                });
+            }
+
+            if (tournament.StartDate < today)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Registration deadline has passed",
+                    Id = id,
+                    Status = tournament.Status
+                });
+            }
+
+            if (!registration.Horse.IsActive || !HorseHealthStatuses.CanRace(registration.Horse.HealthStatus))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Horse is not active or not healthy enough to race",
+                    Id = id,
+                    Status = registration.Horse.HealthStatus
+                });
+            }
+
+            if (!registration.Owner.IsActive || registration.Owner.Owner.Status != UserStatuses.Active)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Owner account is not active",
+                    Id = id,
+                    Status = registration.Owner.Owner.Status
+                });
+            }
+
+            var currentApprovedCount = await _context.RaceRegistrations
+                .CountAsync(r =>
+                    r.RaceId == race.RaceId &&
+                    r.RegistrationId != registration.RegistrationId &&
+                    (r.Status == RaceRegistrationStatuses.Approved ||
+                     r.Status == RaceRegistrationStatuses.JockeyInvited ||
+                     r.Status == RaceRegistrationStatuses.ReadyToRace));
+
+            if (currentApprovedCount >= race.MaxHorses)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Race is already full",
+                    Id = id,
+                    Status = race.Status
+                });
+            }
+
             var statusChanged = registration.Status != RaceRegistrationStatuses.Approved;
 
             registration.Status = RaceRegistrationStatuses.Approved;
             registration.ReviewedBy = adminId;
-            registration.ReviewedAt = DateTime.UtcNow;
+            registration.ReviewedAt = now;
             registration.AdminNote = "Approved by admin";
 
             if (statusChanged)
@@ -183,6 +279,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var registration = await _context.RaceRegistrations
                 .Include(r => r.Horse)
+                .Include(r => r.Owner)
+                    .ThenInclude(o => o.Owner)
                 .Include(r => r.Race)
                     .ThenInclude(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.RegistrationId == id);
@@ -215,9 +313,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var now = DateTime.UtcNow;
+
             registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedBy = adminId;
-            registration.ReviewedAt = DateTime.UtcNow;
+            registration.ReviewedAt = now;
             registration.AdminNote = string.IsNullOrWhiteSpace(request?.AdminNote)
                 ? "Rejected by admin"
                 : request.AdminNote.Trim();
