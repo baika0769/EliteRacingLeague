@@ -14,7 +14,6 @@ public class SpectatorLeaderboardService
 
     private static readonly string[] CountedResultStatuses =
     {
-        RaceResultStatuses.AdminApproved,
         RaceResultStatuses.Published
     };
 
@@ -187,6 +186,8 @@ public class SpectatorLeaderboardService
             .AsNoTracking()
             .Where(r =>
                 r.Race.Tournament.SeasonId == season.SeasonId &&
+                r.Race.Status == RaceStatuses.Published &&
+                r.Race.Tournament.Status == TournamentStatuses.Completed &&
                 r.RaceResult != null &&
                 CountedResultStatuses.Contains(r.RaceResult.Status))
             .GroupBy(r => new
@@ -243,7 +244,9 @@ public class SpectatorLeaderboardService
         var rows = await _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
-                p.Status != RacePredictionStatuses.Cancelled &&
+                p.Status == RacePredictionStatuses.Evaluated &&
+                p.Race.Status == RaceStatuses.Published &&
+                p.Race.Tournament.Status == TournamentStatuses.Completed &&
                 p.Race.Tournament.SeasonId == seasonId)
             .GroupBy(p => new
             {

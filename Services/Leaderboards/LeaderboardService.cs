@@ -13,7 +13,6 @@ public class LeaderboardService : ILeaderboardService
 
     private static readonly string[] CountedResultStatuses =
     {
-        RaceResultStatuses.AdminApproved,
         RaceResultStatuses.Published
     };
 
@@ -175,6 +174,8 @@ public class LeaderboardService : ILeaderboardService
         var query = _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
+                r.Race.Status == RaceStatuses.Published &&
+                r.Race.Tournament.Status == TournamentStatuses.Completed &&
                 r.RaceResult != null &&
                 CountedResultStatuses.Contains(r.RaceResult.Status));
 
@@ -197,6 +198,8 @@ public class LeaderboardService : ILeaderboardService
             .AsNoTracking()
             .Where(p =>
                 CountedPrizeAwardStatuses.Contains(p.Status) &&
+                p.Race.Status == RaceStatuses.Published &&
+                p.Race.Tournament.Status == TournamentStatuses.Completed &&
                 p.Registration.RaceResult != null &&
                 CountedResultStatuses.Contains(p.Registration.RaceResult.Status));
 

@@ -13,7 +13,6 @@ public class PredictionEvaluationService
 
     private static readonly string[] WinnerResultStatuses =
     {
-        RaceResultStatuses.AdminApproved,
         RaceResultStatuses.Published
     };
 
@@ -27,6 +26,24 @@ public class PredictionEvaluationService
 
     public async Task EvaluateRacePredictionsAsync(int raceId)
     {
+        var raceInfo = await _context.Races
+            .AsNoTracking()
+            .Where(r => r.RaceId == raceId)
+            .Select(r => new
+            {
+                r.Status,
+                TournamentStatus = r.Tournament.Status,
+                PointsPerCorrectPrediction = (int?)r.Tournament.Season.PointsPerCorrectPrediction
+            })
+            .FirstOrDefaultAsync();
+
+        if (raceInfo == null ||
+            raceInfo.Status != RaceStatuses.Published ||
+            raceInfo.TournamentStatus != TournamentStatuses.Completed)
+        {
+            return;
+        }
+
         var winner = await _context.RaceResults
             .AsNoTracking()
             .Where(r =>
@@ -45,11 +62,7 @@ public class PredictionEvaluationService
             return;
         }
 
-        var pointsPerCorrectPrediction = await _context.Races
-            .AsNoTracking()
-            .Where(r => r.RaceId == raceId)
-            .Select(r => (int?)r.Tournament.Season.PointsPerCorrectPrediction)
-            .FirstOrDefaultAsync() ?? 100;
+        var pointsPerCorrectPrediction = raceInfo.PointsPerCorrectPrediction ?? 100;
 
         var predictions = await _context.RacePredictions
             .Include(p => p.Spectator)
@@ -66,16 +79,34 @@ public class PredictionEvaluationService
         }
 
         var now = _dateTimeProvider.UtcNow;
-        var correctPredictions = predictions
+
+        foreach (var pendingPrediction in predictions.Where(p => p.Status == RacePredictionStatuses.Pending))
+        {
+            pendingPrediction.Status = RacePredictionStatuses.Locked;
+            pendingPrediction.LockedAt = now;
+            pendingPrediction.UpdatedAt = now;
+        }
+
+        var evaluablePredictions = predictions
+            .Where(p => p.Status == RacePredictionStatuses.Locked)
+            .ToList();
+
+        if (evaluablePredictions.Count == 0)
+        {
+            await _context.SaveChangesAsync();
+            return;
+        }
+
+        var correctPredictions = evaluablePredictions
             .Where(p => p.PredictedRegistrationId == winner.RegistrationId)
             .ToList();
 
         var payouts = CalculatePariMutuelPayouts(
-            predictions,
+            evaluablePredictions,
             correctPredictions,
             pointsPerCorrectPrediction);
 
-        foreach (var prediction in predictions)
+        foreach (var prediction in evaluablePredictions)
         {
             var isCorrect = prediction.PredictedRegistrationId == winner.RegistrationId;
             var payoutPoints = payouts.GetValueOrDefault(prediction.PredictionId, 0);

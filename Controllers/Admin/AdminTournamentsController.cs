@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
+using Eliteracingleague.API.Services.Notifications;
 using System.Globalization;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -19,15 +20,18 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly EliteRacingLeagueContext _context;
         private readonly IWebHostEnvironment _env;
         private readonly TournamentStatusService _tournamentStatusService;
+        private readonly INotificationService _notificationService;
 
         public AdminTournamentsController(
     EliteRacingLeagueContext context,
     IWebHostEnvironment env,
-    TournamentStatusService tournamentStatusService)
+    TournamentStatusService tournamentStatusService,
+    INotificationService notificationService)
         {
             _context = context;
             _env = env;
             _tournamentStatusService = tournamentStatusService;
+            _notificationService = notificationService;
         }
 
         [HttpGet]
@@ -278,6 +282,64 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var race = await _context.Races
+                .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
+
+            var raceDateTime = BuildRaceDateTime(request);
+            var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
+
+            if (race != null &&
+                race.Status is RaceStatuses.Ongoing or RaceStatuses.Finished or RaceStatuses.ResultPending or RaceStatuses.Published)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Tournament cannot be edited after the race has started, finished, is pending result approval, or has been published.",
+                    Id = id,
+                    Status = race.Status
+                });
+            }
+
+            if (tournament.Status is TournamentStatuses.Completed or TournamentStatuses.Cancelled)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Completed or cancelled tournament cannot be edited from this endpoint.",
+                    Id = id,
+                    Status = tournament.Status
+                });
+            }
+
+            if (race != null)
+            {
+                var hasRegistrations = await _context.RaceRegistrations
+                    .AnyAsync(r => r.RaceId == race.RaceId);
+
+                if (hasRegistrations)
+                {
+                    var sensitiveFieldChanged =
+                        tournament.StartDate != request.RegistrationDeadline ||
+                        tournament.EndDate != request.RaceDate ||
+                        tournament.MaxHorses != request.MaxHorses ||
+                        tournament.PrizePool != request.PrizePool ||
+                        race.RaceDate != raceDateTime ||
+                        race.DistanceMeters != request.DistanceMeters ||
+                        race.MaxHorses != request.MaxHorses ||
+                        (race.JockeySelectionDeadline.HasValue && race.JockeySelectionDeadline.Value != registrationDeadline) ||
+                        race.PredictionDeadline != raceDateTime.AddHours(-1) ||
+                        (!string.IsNullOrWhiteSpace(request.Status) && request.Status != tournament.Status);
+
+                    if (sensitiveFieldChanged)
+                    {
+                        return BadRequest(new AdminActionResponse
+                        {
+                            Message = "Tournament already has registrations. Sensitive race fields such as dates, deadlines, distance, max horses, prize pool, and status cannot be changed.",
+                            Id = id,
+                            Status = tournament.Status
+                        });
+                    }
+                }
+            }
+
             var now = DateTime.UtcNow;
 
             if (request.TournamentImage != null && request.TournamentImage.Length > 0)
@@ -311,12 +373,6 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             tournament.UpdatedAt = now;
-
-            var race = await _context.Races
-                .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
-
-            var raceDateTime = BuildRaceDateTime(request);
-            var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
 
             if (race == null)
             {
@@ -520,6 +576,17 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (tournament.Status == TournamentStatuses.Completed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Completed tournament cannot be moved to trash without a correction flow",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
@@ -581,6 +648,31 @@ namespace Eliteracingleague.API.Controllers.Admin
                 return BadRequest(new AdminActionResponse
                 {
                     Message = "Only cancelled tournament can be restored",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            var raceIds = await _context.Races
+                .Where(r => r.TournamentId == id)
+                .Select(r => r.RaceId)
+                .ToListAsync();
+
+            var hasChildWorkflowData = await _context.RaceRegistrations
+                .AnyAsync(r => raceIds.Contains(r.RaceId)) ||
+                await _context.RacePredictions
+                    .AnyAsync(p => raceIds.Contains(p.RaceId)) ||
+                await _context.JockeyInvitations
+                    .AnyAsync(i => raceIds.Contains(i.Registration.RaceId)) ||
+                await _context.RefereeAssignments
+                    .AnyAsync(a => raceIds.Contains(a.RaceId));
+
+            if (hasChildWorkflowData)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cannot restore a cancelled tournament that already has registrations, predictions, invitations, or referee assignments. Create a new tournament or implement a dedicated restore workflow.",
                     Id = tournament.TournamentId,
                     Name = tournament.TournamentName,
                     Status = tournament.Status
@@ -700,7 +792,14 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             race.UpdatedAt = DateTime.UtcNow;
-
+            await _notificationService.CreateForUserAsync(
+    request.RefereeId,
+    "Race Assigned",
+    $"You have been assigned to referee {race.RaceName} in tournament {race.Tournament.TournamentName}.",
+    "RefereeRaceAssignment",
+    "/referee/races",
+    "Race",
+    race.RaceId);
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -735,34 +834,56 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var now = DateTime.UtcNow;
-
-            tournament.Status = TournamentStatuses.Cancelled;
-            tournament.UpdatedAt = now;
-
-            var races = await _context.Races
-                .Where(r => r.TournamentId == id)
-                .ToListAsync();
-
-            foreach (var race in races)
+            if (tournament.Status == TournamentStatuses.Completed)
             {
-                race.Status = RaceStatuses.Cancelled;
-                race.UpdatedAt = now;
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Completed tournament cannot be cancelled without a correction flow",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
             }
 
-            var raceIds = races.Select(r => r.RaceId).ToList();
+            await using var transaction = await _context.Database.BeginTransactionAsync();
 
-            await CancelTournamentRelatedDataAsync(raceIds, now);
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new AdminActionResponse
+            try
             {
-                Message = "Tournament cancelled successfully",
-                Id = tournament.TournamentId,
-                Name = tournament.TournamentName,
-                Status = tournament.Status
-            });
+                var now = DateTime.UtcNow;
+
+                tournament.Status = TournamentStatuses.Cancelled;
+                tournament.UpdatedAt = now;
+
+                var races = await _context.Races
+                    .Where(r => r.TournamentId == id)
+                    .ToListAsync();
+
+                foreach (var race in races)
+                {
+                    race.Status = RaceStatuses.Cancelled;
+                    race.UpdatedAt = now;
+                }
+
+                var raceIds = races.Select(r => r.RaceId).ToList();
+
+                await CancelTournamentRelatedDataAsync(raceIds, now);
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new AdminActionResponse
+                {
+                    Message = "Tournament cancelled successfully",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
 
         private static readonly string[] RaceStartTimeFormats =
@@ -927,7 +1048,8 @@ namespace Eliteracingleague.API.Controllers.Admin
             var registrations = await _context.RaceRegistrations
                 .Where(r => raceIds.Contains(r.RaceId)
                     && r.Status != RaceRegistrationStatuses.Cancelled
-                    && r.Status != RaceRegistrationStatuses.Rejected)
+                    && r.Status != RaceRegistrationStatuses.Rejected
+                    && r.Status != RaceRegistrationStatuses.Completed)
                 .ToListAsync();
 
             foreach (var registration in registrations)
@@ -939,7 +1061,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var invitations = await _context.JockeyInvitations
                 .Where(i => raceIds.Contains(i.Registration.RaceId)
-                    && i.Status == InvitationStatuses.Pending)
+                    && (i.Status == InvitationStatuses.Pending || i.Status == InvitationStatuses.Accepted))
                 .ToListAsync();
 
             foreach (var invitation in invitations)
@@ -957,6 +1079,49 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 assignment.Status = RefereeAssignmentStatuses.Cancelled;
             }
+
+            var refundablePredictions = await _context.RacePredictions
+                .Include(p => p.Spectator)
+                .Where(p => raceIds.Contains(p.RaceId)
+                    && (p.Status == RacePredictionStatuses.Pending || p.Status == RacePredictionStatuses.Locked))
+                .ToListAsync();
+
+            foreach (var prediction in refundablePredictions)
+            {
+                if (prediction.StakePoints > 0)
+                {
+                    prediction.Spectator.BettingPoints += prediction.StakePoints;
+                    prediction.Spectator.UpdatedAt = now;
+                }
+
+                prediction.Status = RacePredictionStatuses.Cancelled;
+                prediction.RewardStatus = PredictionRewardStatuses.None;
+                prediction.PointsAwarded = 0;
+                prediction.IsCorrect = null;
+                prediction.UpdatedAt = now;
+
+                _context.Notifications.Add(new Notification
+                {
+                    UserId = prediction.SpectatorId,
+                    Title = "Prediction Refunded",
+                    Message = $"Race was cancelled. Your {prediction.StakePoints} stake points have been returned.",
+                    IsRead = false,
+                    CreatedAt = now,
+                    ActionType = "SpectatorPredictions",
+                    ActionUrl = "/spectator/predictions",
+                    RelatedType = "RacePrediction",
+                    RelatedId = prediction.PredictionId
+                });
+            }
+
+            var prizeAwards = await _context.PrizeAwards
+                .Where(a => raceIds.Contains(a.RaceId) && a.Status != PrizeAwardStatuses.Paid)
+                .ToListAsync();
+
+            foreach (var prizeAward in prizeAwards)
+            {
+                prizeAward.Status = PrizeAwardStatuses.Rejected;
+            }
         }
 
         private static string MapTournamentStatusToRaceStatus(
@@ -965,8 +1130,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             return tournamentStatus switch
             {
-                TournamentStatuses.Ongoing => RaceStatuses.Ongoing,
-                TournamentStatuses.Completed => RaceStatuses.Finished,
+                TournamentStatuses.Ongoing => currentRaceStatus,
+                TournamentStatuses.Completed => currentRaceStatus,
                 TournamentStatuses.Cancelled => RaceStatuses.Cancelled,
                 TournamentStatuses.Draft => RaceStatuses.Scheduled,
                 TournamentStatuses.OpenRegistration => currentRaceStatus == RaceStatuses.Cancelled

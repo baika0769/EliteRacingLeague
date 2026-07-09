@@ -9,8 +9,6 @@ public class RefereeRaceLifecycleService
 {
     private static readonly string[] ActiveRegistrationStatuses =
     {
-        RaceRegistrationStatuses.Approved,
-        RaceRegistrationStatuses.JockeyInvited,
         RaceRegistrationStatuses.ReadyToRace
     };
 
