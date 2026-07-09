@@ -119,12 +119,18 @@ public class SpectatorPredictionsController : ControllerBase
         }
 
         var tournament = await _context.Tournaments
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.TournamentId == request.TournamentId);
+    .AsNoTracking()
+    .Include(t => t.Season)
+    .FirstOrDefaultAsync(t => t.TournamentId == request.TournamentId);
 
         if (tournament == null)
         {
             return NotFound("Tournament not found.");
+        }
+
+        if (tournament.Season.Status != SeasonStatuses.Active)
+        {
+            return BadRequest("Prediction is only allowed in an active season.");
         }
 
         if (tournament.Status is TournamentStatuses.Cancelled or TournamentStatuses.Completed)

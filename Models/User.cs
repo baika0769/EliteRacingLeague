@@ -46,4 +46,5 @@ public partial class User
     public virtual ICollection<RefereeAssignment> RefereeAssignments { get; set; } = new List<RefereeAssignment>();
 
     public virtual ICollection<Tournament> Tournaments { get; set; } = new List<Tournament>();
+    public virtual ICollection<SeasonReward> SeasonRewards { get; set; } = new List<SeasonReward>();
 }
