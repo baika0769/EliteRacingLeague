@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
+using Eliteracingleague.API.Services.Notifications;
 using System.Globalization;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -19,15 +20,18 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly EliteRacingLeagueContext _context;
         private readonly IWebHostEnvironment _env;
         private readonly TournamentStatusService _tournamentStatusService;
+        private readonly INotificationService _notificationService;
 
         public AdminTournamentsController(
     EliteRacingLeagueContext context,
     IWebHostEnvironment env,
-    TournamentStatusService tournamentStatusService)
+    TournamentStatusService tournamentStatusService,
+    INotificationService notificationService)
         {
             _context = context;
             _env = env;
             _tournamentStatusService = tournamentStatusService;
+            _notificationService = notificationService;
         }
 
         [HttpGet]
@@ -700,7 +704,14 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             race.UpdatedAt = DateTime.UtcNow;
-
+            await _notificationService.CreateForUserAsync(
+    request.RefereeId,
+    "Race Assigned",
+    $"You have been assigned to referee {race.RaceName} in tournament {race.Tournament.TournamentName}.",
+    "RefereeRaceAssignment",
+    "/referee/races",
+    "Race",
+    race.RaceId);
             await _context.SaveChangesAsync();
 
             return Ok(new

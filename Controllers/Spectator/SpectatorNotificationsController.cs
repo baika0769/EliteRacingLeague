@@ -83,4 +83,29 @@ public class SpectatorNotificationsController : ControllerBase
             notificationId = notification.NotificationId
         });
     }
+    [HttpPut("read-all")]
+    public async Task<IActionResult> MarkAllAsRead()
+    {
+        if (!TryGetUserId(out var userId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        var notifications = await _context.Notifications
+            .Where(n => n.UserId == userId && !n.IsRead)
+            .ToListAsync();
+
+        foreach (var notification in notifications)
+        {
+            notification.IsRead = true;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "All notifications marked as read",
+            updatedCount = notifications.Count
+        });
+    }
 }

@@ -799,6 +799,16 @@ public class RefereeRacesController : ControllerBase
         _context.RaceViolations.Add(violation);
         await _context.SaveChangesAsync();
 
+        await _notificationService.CreateForAdminsAsync(
+            "Race Violation Reported",
+            $"Referee reported a violation in race {race.RaceName}.",
+            "RaceViolation",
+            "/admin/validate-results",
+            "RaceViolation",
+            violation.ViolationId);
+
+        await _context.SaveChangesAsync();
+
         return Ok(new
         {
             message = "Violation recorded successfully",
