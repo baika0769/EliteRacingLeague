@@ -48,8 +48,22 @@ public class PredictionEvaluationService
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                r.FinishPosition == 1 &&
-                WinnerResultStatuses.Contains(r.Status))
+                var winner = await _context.RaceResults
+    .AsNoTracking()
+    .Where(r =>
+        r.RaceId == raceId &&
+        WinnerResultStatuses.Contains(r.Status) &&
+        !_context.RaceViolations.Any(v =>
+            v.RaceId == r.RaceId &&
+            v.RegistrationId == r.RegistrationId &&
+            v.Action == RaceViolationActions.Disqualified))
+    .OrderBy(r => r.FinishPosition)
+    .Select(r => new
+    {
+        r.RegistrationId,
+        HorseName = r.Registration.Horse.HorseName
+    })
+    .FirstOrDefaultAsync();
             .Select(r => new
             {
                 r.RegistrationId,

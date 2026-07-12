@@ -771,7 +771,7 @@ public partial class EliteRacingLeagueContext : DbContext
 
             entity.HasIndex(e => e.RegistrationId, "UQ__race_res__22A298F7BC9E1690").IsUnique();
 
-            entity.HasIndex(e => new { e.RaceId, e.FinishPosition }, "UQ_race_results_race_position").IsUnique();
+            entity.HasIndex(e => new { e.RaceId, e.FinishPosition },"UQ_race_results_race_position").IsUnique().HasFilter("[finish_position] IS NOT NULL");
 
             entity.Property(e => e.ResultId).HasColumnName("result_id");
             entity.Property(e => e.AdminConfirmedBy).HasColumnName("admin_confirmed_by");
