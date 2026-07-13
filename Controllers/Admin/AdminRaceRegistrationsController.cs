@@ -256,7 +256,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                         ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been approved."
                         : "Your registration has been approved.",
                     "JockeyAssignment",
-                    $"/owner/jockey-assignment/{registration.RegistrationId}",
+                    "/owner/jockey",
                     "RaceRegistration",
                     registration.RegistrationId);
             }

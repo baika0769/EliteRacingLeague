@@ -63,11 +63,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                     RaceStatus = t.Race == null ? null : t.Race.Status,
 
                     EntriesCount = _context.RaceRegistrations
-                        .Count(r => r.Race.TournamentId == t.TournamentId),
+                        .Count(r => r.Race.TournamentId == t.TournamentId
+                            && r.Status != RaceRegistrationStatuses.Rejected
+                            && r.Status != RaceRegistrationStatuses.Cancelled),
 
                     EntriesText =
                         _context.RaceRegistrations
-                            .Count(r => r.Race.TournamentId == t.TournamentId)
+                            .Count(r => r.Race.TournamentId == t.TournamentId
+                                && r.Status != RaceRegistrationStatuses.Rejected
+                                && r.Status != RaceRegistrationStatuses.Cancelled)
                         + "/" + t.MaxHorses,
 
                     Referee = t.Race == null
@@ -113,11 +117,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                     RaceStatus = t.Race == null ? null : t.Race.Status,
 
                     EntriesCount = _context.RaceRegistrations
-                        .Count(r => r.Race.TournamentId == t.TournamentId),
+                        .Count(r => r.Race.TournamentId == t.TournamentId
+                            && r.Status != RaceRegistrationStatuses.Rejected
+                            && r.Status != RaceRegistrationStatuses.Cancelled),
 
                     EntriesText =
                         _context.RaceRegistrations
-                            .Count(r => r.Race.TournamentId == t.TournamentId)
+                            .Count(r => r.Race.TournamentId == t.TournamentId
+                                && r.Status != RaceRegistrationStatuses.Rejected
+                                && r.Status != RaceRegistrationStatuses.Cancelled)
                         + "/" + t.MaxHorses,
 
                     Referee = t.Race == null

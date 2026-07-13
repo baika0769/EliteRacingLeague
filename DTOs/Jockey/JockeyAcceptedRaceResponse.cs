@@ -5,6 +5,7 @@ public class JockeyAcceptedRaceResponse
     public int RaceRegistrationId { get; set; }
     public int RaceId { get; set; }
     public string RaceName { get; set; } = null!;
+    public string? TournamentName { get; set; }
     public DateTime RaceDate { get; set; }
     public string? Location { get; set; }
     public int HorseId { get; set; }

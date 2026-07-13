@@ -55,6 +55,7 @@ public class JockeyRacesController : ControllerBase
                 RaceRegistrationId = r.RegistrationId,
                 RaceId = r.RaceId,
                 RaceName = r.Race.RaceName,
+                TournamentName = r.Race.Tournament.TournamentName,
                 RaceDate = r.Race.RaceDate,
                 Location = r.Race.Location,
                 HorseId = r.HorseId,

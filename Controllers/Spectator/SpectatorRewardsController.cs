@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
-[Authorize]
+[Authorize(Roles = UserRoles.Spectator)]
 [ApiController]
 [Route("api/spectator/rewards")]
 public class SpectatorRewardsController : ControllerBase

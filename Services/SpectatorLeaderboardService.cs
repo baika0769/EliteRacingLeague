@@ -141,6 +141,7 @@ public class SpectatorLeaderboardService
 
         var totalPredictions = rows.Count;
         var correctPredictions = rows.Count(p => p.IsCorrect == true);
+        var evaluatedPredictions = rows.Count(p => p.IsCorrect.HasValue);
 
         var totalStakePoints = rows.Sum(p => p.StakePoints);
         var totalPayoutPoints = rows.Sum(p => p.PointsAwarded);
@@ -155,9 +156,9 @@ public class SpectatorLeaderboardService
             NetPoints = netPoints,
             CorrectPredictions = correctPredictions,
             TotalPredictions = totalPredictions,
-            PredictionAccuracy = totalPredictions == 0
+            PredictionAccuracy = evaluatedPredictions == 0
                 ? 0
-                : Math.Round((decimal)correctPredictions / totalPredictions * 100, 2)
+                : Math.Round((decimal)correctPredictions / evaluatedPredictions * 100, 2)
         };
     }
 

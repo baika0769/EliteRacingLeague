@@ -17,7 +17,8 @@ public class RefereeRaceLifecycleService
         RaceStatuses.AssignedReferee,
         RaceStatuses.RefereeReady,
         RaceStatuses.Ongoing,
-        RaceStatuses.Finished
+        RaceStatuses.Finished,
+        RaceStatuses.ResultPending
     };
 
     private readonly EliteRacingLeagueContext _context;

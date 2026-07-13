@@ -292,7 +292,7 @@ public class JockeyInvitationsController : ControllerBase
             IsRead = false,
             CreatedAt = DateTime.UtcNow,
             ActionType = "JockeyAssignment",
-            ActionUrl = $"/owner/jockey-assignment/{invitation.RegistrationId}",
+            ActionUrl = "/owner/jockey",
             RelatedType = "RaceRegistration",
             RelatedId = invitation.RegistrationId
         });
@@ -356,7 +356,7 @@ public class JockeyInvitationsController : ControllerBase
             IsRead = false,
             CreatedAt = DateTime.UtcNow,
             ActionType = "JockeyAssignment",
-            ActionUrl = $"/owner/jockey-assignment/{invitation.RegistrationId}",
+            ActionUrl = "/owner/jockey",
             RelatedType = "RaceRegistration",
             RelatedId = invitation.RegistrationId
         });
