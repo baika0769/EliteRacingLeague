@@ -1,6 +1,7 @@
 ﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,8 +13,13 @@ namespace Eliteracingleague.API.Controllers.Owner;
 [Authorize(Roles = UserRoles.HorseOwner)]
 public class OwnerTournamentsController : OwnerBaseController
 {
-    public OwnerTournamentsController(EliteRacingLeagueContext context) : base(context)
+    private readonly IDateTimeProvider _dateTimeProvider;
+
+    public OwnerTournamentsController(
+        EliteRacingLeagueContext context,
+        IDateTimeProvider dateTimeProvider) : base(context)
     {
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet("new")]
@@ -33,16 +39,24 @@ public class OwnerTournamentsController : OwnerBaseController
             return ownerProfileError;
         }
 
-        var today = DateTime.UtcNow.Date;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
 
         var data = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
-                t.Race != null &&
-                t.Race.RaceDate >= today &&
+                t.Season.Status == SeasonStatuses.Active &&
                 t.Status == TournamentStatuses.OpenRegistration &&
-                t.Race.RaceRegistrations.Count < t.Race.MaxHorses &&
-                !t.Race.RaceRegistrations.Any(r => r.OwnerId == ownerId.Value))
+                t.StartDate >= localToday &&
+                t.Race != null &&
+                t.Race.RaceDate >= localNow &&
+                t.Race.RaceRegistrations.Count(r =>
+                    r.Status != RaceRegistrationStatuses.Rejected &&
+                    r.Status != RaceRegistrationStatuses.Cancelled) < t.Race.MaxHorses &&
+                !t.Race.RaceRegistrations.Any(r =>
+                    r.OwnerId == ownerId.Value &&
+                    r.Status != RaceRegistrationStatuses.Rejected &&
+                    r.Status != RaceRegistrationStatuses.Cancelled))
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
             {

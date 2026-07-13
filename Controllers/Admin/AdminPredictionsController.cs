@@ -1,86 +1,162 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
+﻿using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
-namespace Eliteracingleague.API.Controllers.Admin
+namespace Eliteracingleague.API.Controllers.Admin;
+
+[Authorize(Roles = UserRoles.Admin)]
+[ApiController]
+[Route("api/admin/predictions")]
+public class AdminPredictionsController : ControllerBase
 {
-    [Authorize(Roles = UserRoles.Admin)]
-    [ApiController]
-    [Route("api/admin/predictions")]
-    public class AdminPredictionsController : ControllerBase
+    private readonly EliteRacingLeagueContext _context;
+    private readonly PredictionEvaluationService _predictionEvaluationService;
+
+    public AdminPredictionsController(
+        EliteRacingLeagueContext context,
+        PredictionEvaluationService predictionEvaluationService)
     {
-        private readonly EliteRacingLeagueContext _context;
+        _context = context;
+        _predictionEvaluationService = predictionEvaluationService;
+    }
 
-        public AdminPredictionsController(EliteRacingLeagueContext context)
+    [HttpGet]
+    public async Task<IActionResult> GetPredictions(
+        [FromQuery] int? raceId,
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(status) &&
+            !RacePredictionStatuses.IsValid(status))
         {
-            _context = context;
+            return BadRequest(new
+            {
+                message = "Invalid prediction status."
+            });
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetPredictions()
-        {
-            var predictions = await _context.RacePredictions
-                .Include(p => p.Race)
-                    .ThenInclude(r => r.Tournament)
-                .Include(p => p.Spectator)
-                .Include(p => p.PredictedRegistration)
-                    .ThenInclude(r => r.Horse)
-                .OrderByDescending(p => p.PredictedAt)
-                .Select(p => new
-                {
-                    id = p.PredictionId,
-                    tournament = p.Race.Tournament.TournamentName,
-                    spectator = p.Spectator.FullName,
-                    horse = p.PredictedRegistration.Horse.HorseName,
-                    count = 1,
-                    status = p.Status,
-                    accuracy = p.IsCorrect == true
-                        ? "High Accuracy"
-                        : p.IsCorrect == false
-                            ? "Low Accuracy"
-                            : RacePredictionStatuses.Pending,
-                    stakePoints = p.StakePoints,
-                    payoutPoints = p.PointsAwarded,
-                    pointsAwarded = p.PointsAwarded,
-                    netPoints = p.Status == RacePredictionStatuses.Evaluated
-                        ? p.PointsAwarded - p.StakePoints
-                        : -p.StakePoints,
-                    rewardAmount = p.RewardAmount,
-                    rewardStatus = p.RewardStatus,
-                    predictedAt = p.PredictedAt
-                })
-                .ToListAsync();
+        var query = _context.RacePredictions
+            .AsNoTracking()
+            .AsQueryable();
 
-            return Ok(predictions);
+        if (raceId.HasValue)
+        {
+            query = query.Where(prediction =>
+                prediction.RaceId == raceId.Value);
         }
 
-        [HttpPut("{id}/status")]
-        public async Task<IActionResult> UpdatePredictionStatus(
-            int id,
-            [FromBody] UpdatePredictionStatusRequest request)
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(prediction =>
+                prediction.Status == status);
+        }
+
+        var predictions = await query
+            .OrderByDescending(prediction => prediction.PredictedAt)
+            .Select(prediction => new
+            {
+                id = prediction.PredictionId,
+                raceId = prediction.RaceId,
+                tournamentId = prediction.Race.TournamentId,
+                tournament = prediction.Race.Tournament.TournamentName,
+                spectatorId = prediction.SpectatorId,
+                spectator = prediction.Spectator.FullName,
+                horseId = prediction.PredictedRegistration.HorseId,
+                horse = prediction.PredictedRegistration.Horse.HorseName,
+                status = prediction.Status,
+                isCorrect = prediction.IsCorrect,
+                accuracy = prediction.IsCorrect == true
+                    ? "Correct"
+                    : prediction.IsCorrect == false
+                        ? "Incorrect"
+                        : "Pending",
+                stakePoints = prediction.StakePoints,
+                payoutPoints = prediction.PointsAwarded,
+                netPoints = prediction.Status == RacePredictionStatuses.Evaluated
+                    ? prediction.PointsAwarded - prediction.StakePoints
+                    : -prediction.StakePoints,
+                rewardAmount = prediction.RewardAmount,
+                rewardStatus = prediction.RewardStatus,
+                predictedAt = prediction.PredictedAt,
+                lockedAt = prediction.LockedAt,
+                evaluatedAt = prediction.EvaluatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(predictions);
+    }
+
+    [HttpPost("races/{raceId:int}/evaluate")]
+    public async Task<IActionResult> EvaluateRacePredictions(
+        int raceId,
+        CancellationToken cancellationToken)
+    {
+        var evaluation = await _predictionEvaluationService
+            .EvaluateRacePredictionsAsync(raceId, cancellationToken);
+
+        if (!evaluation.Success)
+        {
+            return BadRequest(evaluation);
+        }
+
+        return Ok(evaluation);
+    }
+
+    [HttpPut("{id:int}/status")]
+    public async Task<IActionResult> UpdatePredictionStatus(
+        int id,
+        [FromBody] UpdatePredictionStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Status) ||
+            !RacePredictionStatuses.IsValid(request.Status))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid prediction status."
+            });
+        }
+
+        if (request.Status == RacePredictionStatuses.Evaluated)
+        {
+            return BadRequest(new
+            {
+                message = "Predictions must be evaluated by the official result flow or the race evaluation endpoint."
+            });
+        }
+
+        if (request.Status == RacePredictionStatuses.Pending)
+        {
+            return BadRequest(new
+            {
+                message = "A locked or cancelled prediction cannot be moved back to Pending."
+            });
+        }
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
+
+        try
         {
             var prediction = await _context.RacePredictions
-                .Include(p => p.Race)
-                    .ThenInclude(r => r.Tournament)
-                .Include(p => p.Spectator)
-                .FirstOrDefaultAsync(p => p.PredictionId == id);
+                .Include(item => item.Race)
+                    .ThenInclude(race => race.Tournament)
+                .Include(item => item.Spectator)
+                .FirstOrDefaultAsync(
+                    item => item.PredictionId == id,
+                    cancellationToken);
 
             if (prediction == null)
             {
                 return NotFound(new
                 {
-                    message = "Prediction not found",
+                    message = "Prediction not found.",
                     id
-                });
-            }
-
-            if (!RacePredictionStatuses.All.Contains(request.Status))
-            {
-                return BadRequest(new
-                {
-                    message = "Invalid prediction status"
                 });
             }
 
@@ -104,22 +180,31 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.Status == RacePredictionStatuses.Evaluated)
+            if (request.Status == RacePredictionStatuses.Locked &&
+                prediction.Status != RacePredictionStatuses.Pending)
             {
                 return BadRequest(new
                 {
-                    message = "Predictions must be evaluated by the official result publish flow, not manually from admin status update.",
+                    message = "Only a Pending prediction can be locked.",
                     id,
-                    raceStatus = prediction.Race.Status,
-                    tournamentStatus = prediction.Race.Tournament.Status
+                    currentStatus = prediction.Status
+                });
+            }
+
+            if (request.Status == RacePredictionStatuses.Cancelled &&
+                prediction.Race.Status == RaceStatuses.Published)
+            {
+                return BadRequest(new
+                {
+                    message = "A prediction cannot be cancelled after the race has been published.",
+                    id,
+                    raceStatus = prediction.Race.Status
                 });
             }
 
             var now = DateTime.UtcNow;
 
-            if (request.Status == RacePredictionStatuses.Cancelled &&
-                prediction.Status != RacePredictionStatuses.Cancelled &&
-                prediction.Status != RacePredictionStatuses.Evaluated)
+            if (request.Status == RacePredictionStatuses.Cancelled)
             {
                 if (prediction.StakePoints > 0)
                 {
@@ -127,33 +212,42 @@ namespace Eliteracingleague.API.Controllers.Admin
                     prediction.Spectator.UpdatedAt = now;
                 }
 
-                prediction.RewardStatus = PredictionRewardStatuses.None;
-                prediction.PointsAwarded = 0;
+                prediction.Status = RacePredictionStatuses.Cancelled;
+                prediction.ActualWinnerRegistrationId = null;
                 prediction.IsCorrect = null;
+                prediction.PointsAwarded = 0;
+                prediction.RewardAmount = null;
+                prediction.RewardStatus = PredictionRewardStatuses.None;
+                prediction.EvaluatedAt = null;
+                prediction.UpdatedAt = now;
             }
-
-            prediction.Status = request.Status;
-            prediction.UpdatedAt = now;
-
-            if (request.Status == RacePredictionStatuses.Locked)
+            else
             {
+                prediction.Status = RacePredictionStatuses.Locked;
                 prediction.LockedAt = now;
+                prediction.UpdatedAt = now;
             }
 
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             return Ok(new
             {
-                message = "Prediction status updated successfully",
+                message = "Prediction status updated successfully.",
                 id = prediction.PredictionId,
                 status = prediction.Status,
                 bettingPoints = prediction.Spectator.BettingPoints
             });
         }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
+}
 
-    public class UpdatePredictionStatusRequest
-    {
-        public string Status { get; set; } = string.Empty;
-    }
+public class UpdatePredictionStatusRequest
+{
+    public string Status { get; set; } = string.Empty;
 }

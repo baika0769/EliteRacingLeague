@@ -449,29 +449,42 @@ namespace Eliteracingleague.API.Controllers.Admin
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                var predictionEvaluationSucceeded = true;
+                PredictionEvaluationResult? predictionEvaluation = null;
+                string? predictionEvaluationError = null;
 
                 try
                 {
-                    await _predictionEvaluationService
+                    predictionEvaluation = await _predictionEvaluationService
                         .EvaluateRacePredictionsAsync(raceId);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    predictionEvaluationSucceeded = false;
+                    predictionEvaluationError = ex.Message;
                 }
+
+                var predictionEvaluationSucceeded =
+                    predictionEvaluation?.Success == true;
+
+                var predictionNote = predictionEvaluationSucceeded
+                    ? $"Predictions evaluated: {predictionEvaluation!.NewlyEvaluated}; " +
+                      $"correct: {predictionEvaluation.CorrectPredictions}; " +
+                      $"payout points: {predictionEvaluation.TotalPayoutPoints}."
+                    : predictionEvaluation != null
+                        ? $"Prediction evaluation pending retry: {predictionEvaluation.Message}"
+                        : $"Prediction evaluation pending retry: {predictionEvaluationError ?? "unknown error"}.";
 
                 return Ok(new AdminActionResponse
                 {
                     Message = predictionEvaluationSucceeded
-                        ? "All results were approved, official ranks were recalculated, race published and tournament completed."
-                        : "Results and official ranks were published, but prediction evaluation failed.",
+                        ? "All results were approved, official ranks were recalculated, race published, tournament completed, and predictions evaluated."
+                        : "Results and official ranks were published, but prediction evaluation must be retried.",
                     Id = raceId,
                     Status = race.Status,
                     Note =
                         $"Published: {results.Count}; " +
                         $"disqualified: {disqualifiedIds.Count}; " +
-                        $"promoted: {promotedCount}"
+                        $"promoted: {promotedCount}. " +
+                        predictionNote
                 });
             }
             catch

@@ -771,7 +771,7 @@ public partial class EliteRacingLeagueContext : DbContext
 
             entity.HasIndex(e => e.RegistrationId, "UQ__race_res__22A298F7BC9E1690").IsUnique();
 
-            entity.HasIndex(e => new { e.RaceId, e.FinishPosition },"UQ_race_results_race_position").IsUnique().HasFilter("[finish_position] IS NOT NULL");
+            entity.HasIndex(e => new { e.RaceId, e.FinishPosition }, "UQ_race_results_race_position").IsUnique().HasFilter("[finish_position] IS NOT NULL");
 
             entity.Property(e => e.ResultId).HasColumnName("result_id");
             entity.Property(e => e.AdminConfirmedBy).HasColumnName("admin_confirmed_by");
@@ -931,7 +931,29 @@ public partial class EliteRacingLeagueContext : DbContext
         {
             entity.HasKey(e => e.SeasonId).HasName("PK_seasons");
 
-            entity.ToTable("seasons");
+            entity.ToTable("seasons", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_seasons_date_range",
+                    "[end_date] >= [start_date]");
+
+                table.HasCheckConstraint(
+                    "CK_seasons_points_positive",
+                    "[points_per_correct_prediction] > 0");
+
+                table.HasCheckConstraint(
+                    "CK_seasons_status",
+                    "[status] IN ('Draft', 'Active', 'Closed', 'Cancelled')");
+            });
+
+            entity.HasIndex(
+                e => new { e.StartDate, e.EndDate },
+                "IX_seasons_date_range");
+
+            // Database-level protection: only one Season may be Active.
+            entity.HasIndex(e => e.Status, "UX_seasons_single_active")
+                .IsUnique()
+                .HasFilter("[status] = 'Active'");
 
             entity.Property(e => e.SeasonId).HasColumnName("season_id");
 

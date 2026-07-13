@@ -17,7 +17,5 @@ public class AdminTournamentRequest
     public decimal PrizePool { get; set; }
 
     public IFormFile? TournamentImage { get; set; }
-
     public string? Rules { get; set; }
-    public string? Status { get; set; }
 }

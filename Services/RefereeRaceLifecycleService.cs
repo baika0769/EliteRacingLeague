@@ -1,6 +1,7 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Referee;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Services;
@@ -22,10 +23,14 @@ public class RefereeRaceLifecycleService
     };
 
     private readonly EliteRacingLeagueContext _context;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
-    public RefereeRaceLifecycleService(EliteRacingLeagueContext context)
+    public RefereeRaceLifecycleService(
+        EliteRacingLeagueContext context,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     public Task<bool> RaceExistsAsync(int raceId)
@@ -35,7 +40,9 @@ public class RefereeRaceLifecycleService
             .AnyAsync(r => r.RaceId == raceId);
     }
 
-    public async Task<RefereeRaceLifecycleResponse?> GetLifecycleAsync(int raceId, int refereeId)
+    public async Task<RefereeRaceLifecycleResponse?> GetLifecycleAsync(
+        int raceId,
+        int refereeId)
     {
         var race = await _context.Races
             .AsNoTracking()
@@ -44,9 +51,11 @@ public class RefereeRaceLifecycleService
             {
                 r.RaceId,
                 r.TournamentId,
+                r.RaceDate,
                 r.Status,
                 TournamentName = r.Tournament.TournamentName,
-                TournamentStatus = r.Tournament.Status
+                TournamentStatus = r.Tournament.Status,
+                SeasonStatus = r.Tournament.Season.Status
             })
             .FirstOrDefaultAsync();
 
@@ -82,9 +91,13 @@ public class RefereeRaceLifecycleService
                 .Select(i => i.Status)
                 .ToListAsync();
 
-        var passedInspections = inspections.Count(s => s == PreRaceInspectionStatuses.Passed);
-        var failedInspections = inspections.Count(s => s == PreRaceInspectionStatuses.Failed);
-        var pendingInspections = Math.Max(0, totalRegistrations - passedInspections - failedInspections);
+        var passedInspections = inspections.Count(s =>
+            s == PreRaceInspectionStatuses.Passed);
+        var failedInspections = inspections.Count(s =>
+            s == PreRaceInspectionStatuses.Failed);
+        var pendingInspections = Math.Max(
+            0,
+            totalRegistrations - passedInspections - failedInspections);
 
         var resultStatuses = await _context.RaceResults
             .AsNoTracking()
@@ -100,15 +113,29 @@ public class RefereeRaceLifecycleService
             PassedInspections = passedInspections,
             FailedInspections = failedInspections,
             PendingInspections = pendingInspections,
-            DraftResults = resultStatuses.Count(s => s == RaceResultStatuses.Draft),
-            RefereeConfirmedResults = resultStatuses.Count(s => s == RaceResultStatuses.RefereeConfirmed),
+            DraftResults = resultStatuses.Count(s =>
+                s == RaceResultStatuses.Draft),
+            RefereeConfirmedResults = resultStatuses.Count(s =>
+                s == RaceResultStatuses.RefereeConfirmed),
             AdminApprovedResults = resultStatuses.Count(s =>
                 s == RaceResultStatuses.AdminApproved ||
                 s == RaceResultStatuses.Published)
         };
 
-        var eligibleRegistrations = Math.Max(0, totalRegistrations - failedInspections);
-        var actions = BuildAllowedActions(race.Status, counts, eligibleRegistrations);
+        var eligibleRegistrations = Math.Max(
+            0,
+            totalRegistrations - failedInspections);
+        var localNow = _dateTimeProvider.GetLocalNow(
+            _dateTimeProvider.TimeZoneId);
+
+        var actions = BuildAllowedActions(
+            race.Status,
+            race.TournamentStatus,
+            race.SeasonStatus,
+            race.RaceDate,
+            localNow,
+            counts,
+            eligibleRegistrations);
 
         return new RefereeRaceLifecycleResponse
         {
@@ -121,7 +148,14 @@ public class RefereeRaceLifecycleService
             NextStage = GetNextStage(race.Status),
             AllowedActions = actions,
             Counts = counts,
-            BlockingReason = GetBlockingReason(race.Status, counts, eligibleRegistrations)
+            BlockingReason = GetBlockingReason(
+                race.Status,
+                race.TournamentStatus,
+                race.SeasonStatus,
+                race.RaceDate,
+                localNow,
+                counts,
+                eligibleRegistrations)
         };
     }
 
@@ -137,31 +171,64 @@ public class RefereeRaceLifecycleService
 
     private static RefereeAllowedActionsResponse BuildAllowedActions(
         string raceStatus,
+        string tournamentStatus,
+        string seasonStatus,
+        DateTime raceDate,
+        DateTime localNow,
         RefereeLifecycleCountsResponse counts,
         int eligibleRegistrations)
     {
         var hasRegistrations = counts.TotalRegistrations > 0;
-        var inspectionsComplete = hasRegistrations && counts.PendingInspections == 0;
+        var inspectionsComplete = hasRegistrations &&
+            counts.PendingInspections == 0;
         var hasEligibleRegistrations = eligibleRegistrations > 0;
+        var seasonIsActive = seasonStatus == SeasonStatuses.Active;
+        var tournamentIsOperational = tournamentStatus != TournamentStatuses.Cancelled &&
+            tournamentStatus != TournamentStatuses.Completed;
+        var registrationIsClosed = tournamentStatus == TournamentStatuses.ClosedRegistration ||
+            tournamentStatus == TournamentStatuses.Ongoing;
+        var scheduledTimeReached = localNow >= raceDate;
 
         return new RefereeAllowedActionsResponse
         {
-            CanInspect = raceStatus == RaceStatuses.AssignedReferee,
-            CanSubmitPreRaceReport = raceStatus == RaceStatuses.AssignedReferee &&
+            CanInspect = seasonIsActive &&
+                tournamentIsOperational &&
+                raceStatus == RaceStatuses.AssignedReferee,
+
+            CanSubmitPreRaceReport = seasonIsActive &&
+                tournamentIsOperational &&
+                raceStatus == RaceStatuses.AssignedReferee &&
                 inspectionsComplete,
-            CanMarkReady = raceStatus == RaceStatuses.AssignedReferee &&
+
+            CanMarkReady = seasonIsActive &&
+                tournamentIsOperational &&
+                registrationIsClosed &&
+                raceStatus == RaceStatuses.AssignedReferee &&
                 inspectionsComplete &&
                 hasEligibleRegistrations,
-            CanStartRace = raceStatus == RaceStatuses.RefereeReady &&
+
+            CanStartRace = seasonIsActive &&
+                tournamentIsOperational &&
+                registrationIsClosed &&
+                scheduledTimeReached &&
+                raceStatus == RaceStatuses.RefereeReady &&
                 inspectionsComplete &&
                 hasEligibleRegistrations,
+
+            // Once a race has started, the referee must still be able to finish it
+            // even if the surrounding season data later becomes inconsistent.
             CanFinishRace = raceStatus == RaceStatuses.Ongoing,
+
             CanEnterResults = raceStatus == RaceStatuses.Finished,
+
             CanConfirmResults = raceStatus == RaceStatuses.Finished &&
                 counts.DraftResults > 0 &&
                 counts.DraftResults + counts.RefereeConfirmedResults >= eligibleRegistrations &&
                 hasEligibleRegistrations,
-            CanSubmitPostRaceReport = raceStatus is RaceStatuses.Finished or RaceStatuses.ResultPending,
+
+            CanSubmitPostRaceReport = raceStatus is RaceStatuses.Finished or
+                RaceStatuses.ResultPending,
+
             CanReportViolation = ViolationAllowedRaceStatuses.Contains(raceStatus)
         };
     }
@@ -200,12 +267,17 @@ public class RefereeRaceLifecycleService
 
     private static string? GetBlockingReason(
         string raceStatus,
+        string tournamentStatus,
+        string seasonStatus,
+        DateTime raceDate,
+        DateTime localNow,
         RefereeLifecycleCountsResponse counts,
         int eligibleRegistrations)
     {
-        if (raceStatus == RaceStatuses.Cancelled)
+        if (raceStatus == RaceStatuses.Cancelled ||
+            tournamentStatus == TournamentStatuses.Cancelled)
         {
-            return "Race is cancelled.";
+            return "Race or tournament is cancelled.";
         }
 
         if (raceStatus == RaceStatuses.ResultPending)
@@ -213,25 +285,52 @@ public class RefereeRaceLifecycleService
             return "Race is waiting for admin approval.";
         }
 
-        if (raceStatus == RaceStatuses.Published)
+        if (raceStatus == RaceStatuses.Published ||
+            tournamentStatus == TournamentStatuses.Completed)
         {
             return "Race result has been published.";
         }
 
+        if (seasonStatus != SeasonStatuses.Active &&
+            raceStatus is RaceStatuses.Scheduled or
+                RaceStatuses.AssignedReferee or
+                RaceStatuses.RefereeReady)
+        {
+            return $"Season is {seasonStatus}. Pre-race actions are unavailable.";
+        }
+
+        if (raceStatus == RaceStatuses.RefereeReady &&
+            tournamentStatus != TournamentStatuses.ClosedRegistration &&
+            tournamentStatus != TournamentStatuses.Ongoing)
+        {
+            return "Registration must be closed before the race can start.";
+        }
+
+        if (raceStatus == RaceStatuses.RefereeReady &&
+            localNow < raceDate)
+        {
+            return $"Race cannot start before the scheduled time {raceDate:yyyy-MM-dd HH:mm}.";
+        }
+
         if (counts.TotalRegistrations == 0 &&
-            raceStatus is RaceStatuses.AssignedReferee or RaceStatuses.RefereeReady or RaceStatuses.Finished)
+            raceStatus is RaceStatuses.AssignedReferee or
+                RaceStatuses.RefereeReady or
+                RaceStatuses.Finished)
         {
             return "No eligible registrations found.";
         }
 
         if (counts.PendingInspections > 0 &&
-            raceStatus is RaceStatuses.AssignedReferee or RaceStatuses.RefereeReady)
+            raceStatus is RaceStatuses.AssignedReferee or
+                RaceStatuses.RefereeReady)
         {
             return "There are pending inspections.";
         }
 
         if (eligibleRegistrations == 0 &&
-            raceStatus is RaceStatuses.AssignedReferee or RaceStatuses.RefereeReady or RaceStatuses.Finished)
+            raceStatus is RaceStatuses.AssignedReferee or
+                RaceStatuses.RefereeReady or
+                RaceStatuses.Finished)
         {
             return "No eligible registrations found.";
         }

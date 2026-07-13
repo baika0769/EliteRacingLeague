@@ -8,6 +8,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
 using Eliteracingleague.API.Services.Notifications;
+using Eliteracingleague.API.Services.SystemTime;
 using System.Globalization;
 
 namespace Eliteracingleague.API.Controllers.Admin
@@ -21,17 +22,20 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly IWebHostEnvironment _env;
         private readonly TournamentStatusService _tournamentStatusService;
         private readonly INotificationService _notificationService;
+        private readonly IDateTimeProvider _dateTimeProvider;
 
         public AdminTournamentsController(
-    EliteRacingLeagueContext context,
-    IWebHostEnvironment env,
-    TournamentStatusService tournamentStatusService,
-    INotificationService notificationService)
+            EliteRacingLeagueContext context,
+            IWebHostEnvironment env,
+            TournamentStatusService tournamentStatusService,
+            INotificationService notificationService,
+            IDateTimeProvider dateTimeProvider)
         {
             _context = context;
             _env = env;
             _tournamentStatusService = tournamentStatusService;
             _notificationService = notificationService;
+            _dateTimeProvider = dateTimeProvider;
         }
 
         [HttpGet]
@@ -41,53 +45,65 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var tournaments = await _context.Tournaments
                 .AsNoTracking()
-                .Select(t => new AdminTournamentResponse
+                .Select(t => new
                 {
-                    TournamentId = t.TournamentId,
-                    TournamentName = t.TournamentName,
-                    Description = t.Description,
-                    Location = t.Location,
-                    StartDate = t.StartDate,
-                    EndDate = t.EndDate,
-                    MaxHorses = t.MaxHorses,
-                    PrizePool = t.PrizePool,
-                    ImageUrl = t.ImageUrl,
-                    Status = t.Status,
-                    Rules = t.Rules,
-                    CreatedBy = t.CreatedBy,
-                    CreatedAt = t.CreatedAt,
-                    RaceId = t.Race == null ? null : t.Race.RaceId,
-                    RaceDateTime = t.Race == null ? null : t.Race.RaceDate,
-                    RaceStartTime = t.Race == null ? null : t.Race.RaceDate.ToString("HH:mm"),
-                    DistanceMeters = t.Race == null ? null : t.Race.DistanceMeters,
-                    RaceStatus = t.Race == null ? null : t.Race.Status,
+                    tournamentId = t.TournamentId,
+                    tournamentName = t.TournamentName,
+                    description = t.Description,
+                    location = t.Location,
+                    startDate = t.StartDate,
+                    endDate = t.EndDate,
+                    maxHorses = t.MaxHorses,
+                    prizePool = t.PrizePool,
+                    imageUrl = t.ImageUrl,
+                    status = t.Status,
+                    rules = t.Rules,
+                    createdBy = t.CreatedBy,
+                    createdAt = t.CreatedAt,
 
-                    EntriesCount = _context.RaceRegistrations
-                        .Count(r => r.Race.TournamentId == t.TournamentId
-                            && r.Status != RaceRegistrationStatuses.Rejected
-                            && r.Status != RaceRegistrationStatuses.Cancelled),
+                    seasonId = t.SeasonId,
+                    seasonName = t.Season.SeasonName,
+                    seasonStatus = t.Season.Status,
 
-                    EntriesText =
+                    raceId = t.Race == null ? (int?)null : t.Race.RaceId,
+                    raceDateTime = t.Race == null ? (DateTime?)null : t.Race.RaceDate,
+                    raceStartTime = t.Race == null
+                        ? null
+                        : t.Race.RaceDate.ToString("HH:mm"),
+                    distanceMeters = t.Race == null ? (int?)null : t.Race.DistanceMeters,
+                    raceStatus = t.Race == null ? null : t.Race.Status,
+                    predictionDeadline = t.Race == null
+                        ? (DateTime?)null
+                        : t.Race.PredictionDeadline,
+
+                    entriesCount = _context.RaceRegistrations
+                        .Count(r =>
+                            r.Race.TournamentId == t.TournamentId &&
+                            r.Status != RaceRegistrationStatuses.Rejected &&
+                            r.Status != RaceRegistrationStatuses.Cancelled),
+
+                    entriesText =
                         _context.RaceRegistrations
-                            .Count(r => r.Race.TournamentId == t.TournamentId
-                                && r.Status != RaceRegistrationStatuses.Rejected
-                                && r.Status != RaceRegistrationStatuses.Cancelled)
+                            .Count(r =>
+                                r.Race.TournamentId == t.TournamentId &&
+                                r.Status != RaceRegistrationStatuses.Rejected &&
+                                r.Status != RaceRegistrationStatuses.Cancelled)
                         + "/" + t.MaxHorses,
 
-                    Referee = t.Race == null
+                    referee = t.Race == null
                         ? "Unassigned"
                         : t.Race.RefereeAssignments
                             .OrderByDescending(a => a.AssignedAt)
                             .Select(a => a.Referee.Referee.FullName)
                             .FirstOrDefault() ?? "Unassigned"
                 })
-                .OrderByDescending(t => t.TournamentId)
+                .OrderByDescending(t => t.tournamentId)
                 .ToListAsync();
 
             return Ok(tournaments);
         }
 
-        [HttpGet("{id}")]
+        [HttpGet("{id:int}")]
         public async Task<IActionResult> GetTournamentById(int id)
         {
             await _tournamentStatusService.SyncTournamentStatusesAsync();
@@ -95,40 +111,52 @@ namespace Eliteracingleague.API.Controllers.Admin
             var tournament = await _context.Tournaments
                 .AsNoTracking()
                 .Where(t => t.TournamentId == id)
-                .Select(t => new AdminTournamentResponse
+                .Select(t => new
                 {
-                    TournamentId = t.TournamentId,
-                    TournamentName = t.TournamentName,
-                    Description = t.Description,
-                    Location = t.Location,
-                    StartDate = t.StartDate,
-                    EndDate = t.EndDate,
-                    MaxHorses = t.MaxHorses,
-                    PrizePool = t.PrizePool,
-                    ImageUrl = t.ImageUrl,
-                    Status = t.Status,
-                    Rules = t.Rules,
-                    CreatedBy = t.CreatedBy,
-                    CreatedAt = t.CreatedAt,
-                    RaceId = t.Race == null ? null : t.Race.RaceId,
-                    RaceDateTime = t.Race == null ? null : t.Race.RaceDate,
-                    RaceStartTime = t.Race == null ? null : t.Race.RaceDate.ToString("HH:mm"),
-                    DistanceMeters = t.Race == null ? null : t.Race.DistanceMeters,
-                    RaceStatus = t.Race == null ? null : t.Race.Status,
+                    tournamentId = t.TournamentId,
+                    tournamentName = t.TournamentName,
+                    description = t.Description,
+                    location = t.Location,
+                    startDate = t.StartDate,
+                    endDate = t.EndDate,
+                    maxHorses = t.MaxHorses,
+                    prizePool = t.PrizePool,
+                    imageUrl = t.ImageUrl,
+                    status = t.Status,
+                    rules = t.Rules,
+                    createdBy = t.CreatedBy,
+                    createdAt = t.CreatedAt,
 
-                    EntriesCount = _context.RaceRegistrations
-                        .Count(r => r.Race.TournamentId == t.TournamentId
-                            && r.Status != RaceRegistrationStatuses.Rejected
-                            && r.Status != RaceRegistrationStatuses.Cancelled),
+                    seasonId = t.SeasonId,
+                    seasonName = t.Season.SeasonName,
+                    seasonStatus = t.Season.Status,
 
-                    EntriesText =
+                    raceId = t.Race == null ? (int?)null : t.Race.RaceId,
+                    raceDateTime = t.Race == null ? (DateTime?)null : t.Race.RaceDate,
+                    raceStartTime = t.Race == null
+                        ? null
+                        : t.Race.RaceDate.ToString("HH:mm"),
+                    distanceMeters = t.Race == null ? (int?)null : t.Race.DistanceMeters,
+                    raceStatus = t.Race == null ? null : t.Race.Status,
+                    predictionDeadline = t.Race == null
+                        ? (DateTime?)null
+                        : t.Race.PredictionDeadline,
+
+                    entriesCount = _context.RaceRegistrations
+                        .Count(r =>
+                            r.Race.TournamentId == t.TournamentId &&
+                            r.Status != RaceRegistrationStatuses.Rejected &&
+                            r.Status != RaceRegistrationStatuses.Cancelled),
+
+                    entriesText =
                         _context.RaceRegistrations
-                            .Count(r => r.Race.TournamentId == t.TournamentId
-                                && r.Status != RaceRegistrationStatuses.Rejected
-                                && r.Status != RaceRegistrationStatuses.Cancelled)
+                            .Count(r =>
+                                r.Race.TournamentId == t.TournamentId &&
+                                r.Status != RaceRegistrationStatuses.Rejected &&
+                                r.Status != RaceRegistrationStatuses.Cancelled)
                         + "/" + t.MaxHorses,
 
-                    Referee = t.Race == null
+                    referee = t.Race == null
                         ? "Unassigned"
                         : t.Race.RefereeAssignments
                             .OrderByDescending(a => a.AssignedAt)
@@ -150,7 +178,8 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpPost]
-        public async Task<IActionResult> CreateTournament([FromForm] AdminTournamentRequest request)
+        public async Task<IActionResult> CreateTournament(
+            [FromForm] AdminTournamentRequest request)
         {
             var validationResult = ValidateTournamentRequest(request, 0);
             if (validationResult != null)
@@ -173,9 +202,11 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             if (season == null)
             {
-                return BadRequest(new AdminActionResponse
+                return BadRequest(new
                 {
-                    Message = "No quarter season found for race date. Please create quarter seasons first."
+                    code = "ELIGIBLE_SEASON_NOT_FOUND",
+                    message = "No draft or active season contains the selected race date. Create or update a suitable season first.",
+                    raceDate = request.RaceDate
                 });
             }
 
@@ -183,7 +214,8 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             try
             {
-                imageUrl = await SaveTournamentImageAsync(request.TournamentImage);
+                imageUrl = await SaveTournamentImageAsync(
+                    request.TournamentImage);
             }
             catch (InvalidOperationException ex)
             {
@@ -193,11 +225,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            await using var transaction = await _context.Database.BeginTransactionAsync();
+            await using var transaction =
+                await _context.Database.BeginTransactionAsync();
 
             try
             {
-                var now = DateTime.UtcNow;
+                var now = _dateTimeProvider.UtcNow;
 
                 var tournament = new Tournament
                 {
@@ -220,7 +253,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 _context.Tournaments.Add(tournament);
                 await _context.SaveChangesAsync();
 
-                var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
+                var jockeySelectionDeadline =
+                    request.RegistrationDeadline.ToDateTime(TimeOnly.MaxValue);
 
                 var race = new Race
                 {
@@ -231,7 +265,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     Location = tournament.Location,
                     MaxHorses = request.MaxHorses,
                     Status = RaceStatuses.Scheduled,
-                    JockeySelectionDeadline = registrationDeadline,
+                    JockeySelectionDeadline = jockeySelectionDeadline,
                     PredictionDeadline = raceDateTime.AddHours(-1),
                     CreatedAt = now,
                     UpdatedAt = now
@@ -249,6 +283,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     raceId = race.RaceId,
                     name = tournament.TournamentName,
                     status = tournament.Status,
+                    seasonId = season.SeasonId,
+                    seasonName = season.SeasonName,
+                    seasonStatus = season.Status,
                     imageUrl = tournament.ImageUrl
                 });
             }
@@ -259,8 +296,10 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
         }
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateTournament(int id, [FromForm] AdminTournamentRequest request)
+        [HttpPut("{id:int}")]
+        public async Task<IActionResult> UpdateTournament(
+            int id,
+            [FromForm] AdminTournamentRequest request)
         {
             var validationResult = ValidateTournamentRequest(request, id);
             if (validationResult != null)
@@ -269,6 +308,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             var tournament = await _context.Tournaments
+                .Include(t => t.Race)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -280,60 +320,67 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (!string.IsNullOrWhiteSpace(request.Status) &&
-                !TournamentStatuses.IsValid(request.Status))
+            if (tournament.Status is
+                TournamentStatuses.Completed or
+                TournamentStatuses.Cancelled)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Invalid tournament status",
-                    Id = id
+                    Message = "Completed or cancelled tournament cannot be edited from this endpoint.",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
                 });
             }
 
-            var race = await _context.Races
-                .FirstOrDefaultAsync(r => r.TournamentId == tournament.TournamentId);
+            var race = tournament.Race;
 
-            var raceDateTime = BuildRaceDateTime(request);
-            var registrationDeadline = request.RegistrationDeadline.ToDateTime(TimeOnly.MinValue);
-            var matchingSeason = await FindSeasonForRaceDateAsync(raceDateTime);
-
-            if (matchingSeason == null)
+            if (race != null &&
+                race.Status is
+                    RaceStatuses.Ongoing or
+                    RaceStatuses.Finished or
+                    RaceStatuses.ResultPending or
+                    RaceStatuses.Published or
+                    RaceStatuses.Cancelled)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "No season found for the selected race date. Please create a suitable season first.",
-                    Id = id
+                    Message = "Tournament cannot be edited after its race has started, finished, entered result approval, been published, or been cancelled.",
+                    Id = id,
+                    Name = tournament.TournamentName,
+                    Status = race.Status
+                });
+            }
+
+            var raceDateTime = BuildRaceDateTime(request);
+            var jockeySelectionDeadline =
+                request.RegistrationDeadline.ToDateTime(TimeOnly.MaxValue);
+            var matchingSeason =
+                await FindSeasonForRaceDateAsync(raceDateTime);
+
+            if (matchingSeason == null)
+            {
+                return BadRequest(new
+                {
+                    code = "ELIGIBLE_SEASON_NOT_FOUND",
+                    message = "No draft or active season contains the selected race date.",
+                    tournamentId = id,
+                    raceDate = request.RaceDate
                 });
             }
 
             if (tournament.Status != TournamentStatuses.Draft &&
                 matchingSeason.Status != SeasonStatuses.Active)
             {
-                return BadRequest(new AdminActionResponse
+                return BadRequest(new
                 {
-                    Message = "The season containing this race date is not active.",
-                    Id = id,
-                    Status = matchingSeason.Status
-                });
-            }
-            if (race != null &&
-                race.Status is RaceStatuses.Ongoing or RaceStatuses.Finished or RaceStatuses.ResultPending or RaceStatuses.Published)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Tournament cannot be edited after the race has started, finished, is pending result approval, or has been published.",
-                    Id = id,
-                    Status = race.Status
-                });
-            }
-
-            if (tournament.Status is TournamentStatuses.Completed or TournamentStatuses.Cancelled)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Completed or cancelled tournament cannot be edited from this endpoint.",
-                    Id = id,
-                    Status = tournament.Status
+                    code = "SEASON_NOT_ACTIVE",
+                    message = "A non-draft tournament must remain in an active season.",
+                    tournamentId = tournament.TournamentId,
+                    tournamentStatus = tournament.Status,
+                    seasonId = matchingSeason.SeasonId,
+                    seasonName = matchingSeason.SeasonName,
+                    seasonStatus = matchingSeason.Status
                 });
             }
 
@@ -352,29 +399,30 @@ namespace Eliteracingleague.API.Controllers.Admin
                         race.RaceDate != raceDateTime ||
                         race.DistanceMeters != request.DistanceMeters ||
                         race.MaxHorses != request.MaxHorses ||
-                        (race.JockeySelectionDeadline.HasValue && race.JockeySelectionDeadline.Value != registrationDeadline) ||
+                        race.JockeySelectionDeadline != jockeySelectionDeadline ||
                         race.PredictionDeadline != raceDateTime.AddHours(-1) ||
-                        (!string.IsNullOrWhiteSpace(request.Status) && request.Status != tournament.Status);
+                        tournament.SeasonId != matchingSeason.SeasonId;
 
                     if (sensitiveFieldChanged)
                     {
                         return BadRequest(new AdminActionResponse
                         {
-                            Message = "Tournament already has registrations. Sensitive race fields such as dates, deadlines, distance, max horses, prize pool, and status cannot be changed.",
+                            Message = "Tournament already has registrations. Dates, deadlines, distance, max horses, prize pool, and season cannot be changed.",
                             Id = id,
+                            Name = tournament.TournamentName,
                             Status = tournament.Status
                         });
                     }
                 }
             }
 
-            var now = DateTime.UtcNow;
-
-            if (request.TournamentImage != null && request.TournamentImage.Length > 0)
+            if (request.TournamentImage != null &&
+                request.TournamentImage.Length > 0)
             {
                 try
                 {
-                    tournament.ImageUrl = await SaveTournamentImageAsync(request.TournamentImage);
+                    tournament.ImageUrl = await SaveTournamentImageAsync(
+                        request.TournamentImage);
                 }
                 catch (InvalidOperationException ex)
                 {
@@ -386,6 +434,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 }
             }
 
+            var now = _dateTimeProvider.UtcNow;
+
             tournament.TournamentName = request.TournamentName.Trim();
             tournament.Description = request.Description;
             tournament.Location = request.Location!.Trim();
@@ -395,14 +445,9 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.PrizePool = request.PrizePool;
             tournament.Rules = request.Rules;
             tournament.SeasonId = matchingSeason.SeasonId;
-
-            if (!string.IsNullOrWhiteSpace(request.Status))
-            {
-                tournament.Status = request.Status;
-            }
-
             tournament.UpdatedAt = now;
 
+          
             if (race == null)
             {
                 race = new Race
@@ -413,8 +458,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                     DistanceMeters = request.DistanceMeters,
                     Location = tournament.Location,
                     MaxHorses = request.MaxHorses,
-                    Status = MapTournamentStatusToRaceStatus(tournament.Status, RaceStatuses.Scheduled),
-                    JockeySelectionDeadline = registrationDeadline,
+                    Status = RaceStatuses.Scheduled,
+                    JockeySelectionDeadline = jockeySelectionDeadline,
                     PredictionDeadline = raceDateTime.AddHours(-1),
                     CreatedAt = now,
                     UpdatedAt = now
@@ -429,36 +474,32 @@ namespace Eliteracingleague.API.Controllers.Admin
                 race.DistanceMeters = request.DistanceMeters;
                 race.Location = tournament.Location;
                 race.MaxHorses = request.MaxHorses;
-                race.JockeySelectionDeadline = registrationDeadline;
+                race.JockeySelectionDeadline = jockeySelectionDeadline;
                 race.PredictionDeadline = raceDateTime.AddHours(-1);
-
-                if (!string.IsNullOrWhiteSpace(request.Status))
-                {
-                    race.Status = MapTournamentStatusToRaceStatus(tournament.Status, race.Status);
-                }
-
                 race.UpdatedAt = now;
             }
 
             await _context.SaveChangesAsync();
 
-            return Ok(new AdminActionResponse
+            return Ok(new
             {
-                Message = "Tournament updated successfully",
-                Id = tournament.TournamentId,
-                Name = tournament.TournamentName,
-                Status = tournament.Status
+                message = "Tournament updated successfully",
+                tournamentId = tournament.TournamentId,
+                tournamentName = tournament.TournamentName,
+                status = tournament.Status,
+                seasonId = matchingSeason.SeasonId,
+                seasonName = matchingSeason.SeasonName,
+                seasonStatus = matchingSeason.Status
             });
         }
 
-        [HttpPut("{id}/status")]
+        [HttpPut("{id:int}/status")]
         public async Task<IActionResult> UpdateTournamentStatus(
-     int id,
-     [FromBody] UpdateTournamentStatusRequest request)
+            int id,
+            [FromBody] UpdateTournamentStatusRequest request)
         {
             var tournament = await _context.Tournaments
                 .Include(t => t.Race)
-                .Include(t => t.Season)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -482,71 +523,41 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var now = DateTime.UtcNow;
-
-            if (tournament.Status == TournamentStatuses.Completed &&
-                request.Status != TournamentStatuses.Completed)
+            if (request.Status == tournament.Status)
             {
-                return BadRequest(new AdminActionResponse
+                return Ok(new AdminActionResponse
                 {
-                    Message = "Completed tournament cannot be changed to another status",
-                    Id = id,
+                    Message = "Tournament already has the requested status",
+                    Id = tournament.TournamentId,
                     Name = tournament.TournamentName,
                     Status = tournament.Status
                 });
             }
 
-            if (request.Status == TournamentStatuses.OpenRegistration)
+            var validManualTransition =
+                tournament.Status == TournamentStatuses.OpenRegistration &&
+                request.Status == TournamentStatuses.ClosedRegistration;
+
+            if (!validManualTransition)
             {
-                if (tournament.Season == null)
+                return BadRequest(new
                 {
-                    return BadRequest(new
-                    {
-                        code = "SEASON_NOT_ASSIGNED",
-                        message = "Tournament has not been assigned to a season.",
-                        tournamentId = tournament.TournamentId,
-                        tournamentName = tournament.TournamentName,
-                        currentStatus = tournament.Status
-                    });
-                }
-
-                if (tournament.Season.Status != SeasonStatuses.Active)
-                {
-                    return BadRequest(new
-                    {
-                        code = "SEASON_NOT_ACTIVE",
-                        message = "Cannot open registration because the tournament season is not active.",
-                        tournamentId = tournament.TournamentId,
-                        tournamentName = tournament.TournamentName,
-                        seasonId = tournament.Season.SeasonId,
-                        seasonName = tournament.Season.SeasonName,
-                        seasonStatus = tournament.Season.Status,
-                        currentStatus = tournament.Status
-                    });
-                }
-
-                if (tournament.StartDate < DateOnly.FromDateTime(now))
-                {
-                    return BadRequest(new AdminActionResponse
-                    {
-                        Message = "Cannot open registration because the registration deadline has passed. Please update the registration deadline first.",
-                        Id = id,
-                        Name = tournament.TournamentName,
-                        Status = tournament.Status
-                    });
-                }
+                    code = "INVALID_TOURNAMENT_STATUS_TRANSITION",
+                    message = "This endpoint only supports manually closing registration: OpenRegistration -> ClosedRegistration.",
+                    tournamentId = tournament.TournamentId,
+                    tournamentName = tournament.TournamentName,
+                    currentStatus = tournament.Status,
+                    requestedStatus = request.Status
+                });
             }
 
-            tournament.Status = request.Status;
+            var now = _dateTimeProvider.UtcNow;
+
+            tournament.Status = TournamentStatuses.ClosedRegistration;
             tournament.UpdatedAt = now;
 
             if (tournament.Race != null)
             {
-                tournament.Race.Status = MapTournamentStatusToRaceStatus(
-                    tournament.Status,
-                    tournament.Race.Status
-                );
-
                 tournament.Race.UpdatedAt = now;
             }
 
@@ -554,15 +565,14 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             return Ok(new AdminActionResponse
             {
-                Message = "Tournament status updated successfully",
+                Message = "Tournament registration closed successfully",
                 Id = tournament.TournamentId,
                 Name = tournament.TournamentName,
                 Status = tournament.Status
             });
         }
 
-
-        [HttpPut("{id}/approve")]
+        [HttpPut("{id:int}/approve")]
         public async Task<IActionResult> ApproveTournament(int id)
         {
             var tournament = await _context.Tournaments
@@ -579,25 +589,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (tournament.Status == TournamentStatuses.Cancelled)
+            if (tournament.Status != TournamentStatuses.Draft)
             {
-                return BadRequest(new AdminActionResponse
+                return BadRequest(new
                 {
-                    Message = "Cancelled tournament cannot be approved",
-                    Id = id,
-                    Name = tournament.TournamentName,
-                    Status = tournament.Status
-                });
-            }
-
-            if (tournament.Status == TournamentStatuses.Completed)
-            {
-                return BadRequest(new AdminActionResponse
-                {
-                    Message = "Completed tournament cannot be approved again",
-                    Id = id,
-                    Name = tournament.TournamentName,
-                    Status = tournament.Status
+                    code = "TOURNAMENT_NOT_DRAFT",
+                    message = "Only a draft tournament can be approved and opened for registration.",
+                    tournamentId = tournament.TournamentId,
+                    tournamentName = tournament.TournamentName,
+                    currentStatus = tournament.Status
                 });
             }
 
@@ -605,8 +605,10 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 return BadRequest(new
                 {
+                    code = "SEASON_NOT_ASSIGNED",
                     message = "Tournament has not been assigned to a season.",
-                    tournamentId = tournament.TournamentId
+                    tournamentId = tournament.TournamentId,
+                    tournamentName = tournament.TournamentName
                 });
             }
 
@@ -614,34 +616,86 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 return BadRequest(new
                 {
-                    message = "The tournament season must be active before opening registration.",
+                    code = "SEASON_NOT_ACTIVE",
+                    message = "The tournament season must be active before registration can be opened.",
                     tournamentId = tournament.TournamentId,
+                    tournamentName = tournament.TournamentName,
                     seasonId = tournament.Season.SeasonId,
                     seasonName = tournament.Season.SeasonName,
                     seasonStatus = tournament.Season.Status
                 });
             }
 
-            var now = DateTime.UtcNow;
+            if (tournament.Race == null)
+            {
+                return BadRequest(new
+                {
+                    code = "RACE_NOT_FOUND",
+                    message = "Tournament cannot be approved because its race does not exist.",
+                    tournamentId = tournament.TournamentId
+                });
+            }
+
+            if (!RaceStatuses.CanRegister(tournament.Race.Status))
+            {
+                return BadRequest(new
+                {
+                    code = "RACE_NOT_REGISTERABLE",
+                    message = "Tournament cannot be approved because the race is not in a registerable status.",
+                    tournamentId = tournament.TournamentId,
+                    raceId = tournament.Race.RaceId,
+                    raceStatus = tournament.Race.Status
+                });
+            }
+
+            var localNow = _dateTimeProvider.GetLocalNow(
+                _dateTimeProvider.TimeZoneId);
+            var localToday = DateOnly.FromDateTime(localNow);
+
+            if (tournament.StartDate < localToday)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cannot open registration because the registration deadline has passed. Update the registration deadline first.",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            var raceDate = DateOnly.FromDateTime(
+                tournament.Race.RaceDate);
+
+            if (raceDate < localToday)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Cannot open registration for a race date that has already passed.",
+                    Id = tournament.TournamentId,
+                    Name = tournament.TournamentName,
+                    Status = tournament.Status
+                });
+            }
+
+            var now = _dateTimeProvider.UtcNow;
 
             tournament.Status = TournamentStatuses.OpenRegistration;
             tournament.UpdatedAt = now;
-
-            if (tournament.Race != null &&
-                tournament.Race.Status == RaceStatuses.Cancelled)
-            {
-                tournament.Race.Status = RaceStatuses.Scheduled;
-                tournament.Race.UpdatedAt = now;
-            }
+            tournament.Race.UpdatedAt = now;
 
             await _context.SaveChangesAsync();
 
-            return Ok(new AdminActionResponse
+            return Ok(new
             {
-                Message = "Tournament approved successfully",
-                Id = tournament.TournamentId,
-                Name = tournament.TournamentName,
-                Status = tournament.Status
+                message = "Tournament approved and registration opened successfully",
+                tournamentId = tournament.TournamentId,
+                tournamentName = tournament.TournamentName,
+                status = tournament.Status,
+                seasonId = tournament.Season.SeasonId,
+                seasonName = tournament.Season.SeasonName,
+                seasonStatus = tournament.Season.Status,
+                raceId = tournament.Race.RaceId,
+                raceStatus = tournament.Race.Status
             });
         }
 
@@ -686,7 +740,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             try
             {
-                var now = DateTime.UtcNow;
+                var now = _dateTimeProvider.UtcNow;
 
                 tournament.Status = TournamentStatuses.Cancelled;
                 tournament.UpdatedAt = now;
@@ -723,10 +777,11 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
         }
 
-        [HttpPut("{id}/restore")]
+        [HttpPut("{id:int}/restore")]
         public async Task<IActionResult> RestoreTournament(int id)
         {
             var tournament = await _context.Tournaments
+                .Include(t => t.Season)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -749,17 +804,35 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (tournament.Season == null ||
+                tournament.Season.Status is
+                    SeasonStatuses.Closed or
+                    SeasonStatuses.Cancelled)
+            {
+                return BadRequest(new
+                {
+                    code = "SEASON_NOT_RESTORABLE",
+                    message = "Tournament cannot be restored into a closed, cancelled, or missing season.",
+                    tournamentId = tournament.TournamentId,
+                    seasonId = tournament.Season?.SeasonId,
+                    seasonName = tournament.Season?.SeasonName,
+                    seasonStatus = tournament.Season?.Status
+                });
+            }
+
             var raceIds = await _context.Races
                 .Where(r => r.TournamentId == id)
                 .Select(r => r.RaceId)
                 .ToListAsync();
 
-            var hasChildWorkflowData = await _context.RaceRegistrations
-                .AnyAsync(r => raceIds.Contains(r.RaceId)) ||
+            var hasChildWorkflowData =
+                await _context.RaceRegistrations
+                    .AnyAsync(r => raceIds.Contains(r.RaceId)) ||
                 await _context.RacePredictions
                     .AnyAsync(p => raceIds.Contains(p.RaceId)) ||
                 await _context.JockeyInvitations
-                    .AnyAsync(i => raceIds.Contains(i.Registration.RaceId)) ||
+                    .AnyAsync(i =>
+                        raceIds.Contains(i.Registration.RaceId)) ||
                 await _context.RefereeAssignments
                     .AnyAsync(a => raceIds.Contains(a.RaceId));
 
@@ -767,14 +840,14 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Cannot restore a cancelled tournament that already has registrations, predictions, invitations, or referee assignments. Create a new tournament or implement a dedicated restore workflow.",
+                    Message = "Cannot restore a cancelled tournament that already has registrations, predictions, invitations, or referee assignments. Create a new tournament instead.",
                     Id = tournament.TournamentId,
                     Name = tournament.TournamentName,
                     Status = tournament.Status
                 });
             }
 
-            var now = DateTime.UtcNow;
+            var now = _dateTimeProvider.UtcNow;
 
             tournament.Status = TournamentStatuses.Draft;
             tournament.UpdatedAt = now;
@@ -852,7 +925,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 existing.RefereeId = request.RefereeId;
                 existing.Status = RefereeAssignmentStatuses.Assigned;
-                existing.AssignedAt = DateTime.UtcNow;
+                existing.AssignedAt = _dateTimeProvider.UtcNow;
             }
             else
             {
@@ -873,7 +946,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                         RefereeId = request.RefereeId,
                         AssignedBy = adminId,
                         Status = RefereeAssignmentStatuses.Assigned,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = _dateTimeProvider.UtcNow
                     });
             }
 
@@ -886,7 +959,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 race.Status = RaceStatuses.AssignedReferee;
             }
 
-            race.UpdatedAt = DateTime.UtcNow;
+            race.UpdatedAt = _dateTimeProvider.UtcNow;
             await _notificationService.CreateForUserAsync(
     request.RefereeId,
     "Race Assigned",
@@ -944,7 +1017,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             try
             {
-                var now = DateTime.UtcNow;
+                var now = _dateTimeProvider.UtcNow;
 
                 tournament.Status = TournamentStatuses.Cancelled;
                 tournament.UpdatedAt = now;
@@ -1013,28 +1086,43 @@ namespace Eliteracingleague.API.Controllers.Admin
             return request.RaceDate.ToDateTime(raceStartTime);
         }
 
-        private async Task<Season?> FindSeasonForRaceDateAsync(DateTime raceDateTime)
+        private async Task<Season?> FindSeasonForRaceDateAsync(
+            DateTime raceDateTime)
         {
-            var matchingSeasons = await _context.Seasons
-                .Where(s =>
-                    s.Status != SeasonStatuses.Cancelled &&
-                    s.StartDate <= raceDateTime &&
-                    s.EndDate >= raceDateTime)
-                .ToListAsync();
+            var raceDate = raceDateTime.Date;
 
-            return matchingSeasons
-                .OrderBy(s => (s.EndDate.Date - s.StartDate.Date).Days)
-                .ThenByDescending(s => s.StartDate)
-                .FirstOrDefault();
+            return await _context.Seasons
+                .AsNoTracking()
+                .Where(s =>
+                    s.Status != SeasonStatuses.Closed &&
+                    s.Status != SeasonStatuses.Cancelled &&
+                    s.StartDate <= raceDate &&
+                    s.EndDate >= raceDate)
+                .OrderByDescending(s =>
+                    s.Status == SeasonStatuses.Active)
+                .ThenBy(s => s.StartDate)
+                .ThenBy(s => s.SeasonId)
+                .FirstOrDefaultAsync();
         }
 
-        private IActionResult? ValidateTournamentRequest(AdminTournamentRequest request, int id)
+        private IActionResult? ValidateTournamentRequest(
+            AdminTournamentRequest request,
+            int id)
         {
             if (string.IsNullOrWhiteSpace(request.TournamentName))
             {
                 return BadRequest(new AdminActionResponse
                 {
                     Message = "Tournament name is required",
+                    Id = id
+                });
+            }
+
+            if (request.TournamentName.Trim().Length > 200)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Tournament name cannot exceed 200 characters",
                     Id = id
                 });
             }
@@ -1048,6 +1136,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (request.RaceDate == default)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Race date is required",
+                    Id = id
+                });
+            }
+
+            if (request.RegistrationDeadline == default)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Registration deadline is required",
+                    Id = id
+                });
+            }
+
             if (request.RegistrationDeadline >= request.RaceDate)
             {
                 return BadRequest(new AdminActionResponse
@@ -1057,7 +1163,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (!TryParseRaceStartTime(request.RaceStartTime, out _))
+            if (!TryParseRaceStartTime(
+                    request.RaceStartTime,
+                    out _))
             {
                 return BadRequest(new AdminActionResponse
                 {
@@ -1066,7 +1174,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.MaxHorses < 1 || request.MaxHorses > 20)
+            if (request.MaxHorses < 1 ||
+                request.MaxHorses > 20)
             {
                 return BadRequest(new AdminActionResponse
                 {
@@ -1082,6 +1191,15 @@ namespace Eliteracingleague.API.Controllers.Admin
                 return BadRequest(new AdminActionResponse
                 {
                     Message = "Distance must be 1000, 1500, or 2400 meters",
+                    Id = id
+                });
+            }
+
+            if (request.PrizePool < 0)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Prize pool cannot be negative",
                     Id = id
                 });
             }
@@ -1241,6 +1359,4 @@ namespace Eliteracingleague.API.Controllers.Admin
             };
         }
     }
-
-
 }

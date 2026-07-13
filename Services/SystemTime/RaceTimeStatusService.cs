@@ -26,11 +26,13 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         _dateTimeProvider = dateTimeProvider;
     }
 
-    public async Task<SyncTimeStatusesResponse> SyncAsync(CancellationToken cancellationToken = default)
+    public async Task<SyncTimeStatusesResponse> SyncAsync(
+        CancellationToken cancellationToken = default)
     {
         var effectiveUtcNow = _dateTimeProvider.UtcNow;
-        var now = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
-        var localToday = DateOnly.FromDateTime(now);
+        var localNow = _dateTimeProvider.GetLocalNow(
+            _dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
 
         var expiredInvitations = await _context.JockeyInvitations
             .Include(i => i.Registration)
@@ -38,20 +40,20 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             .Where(i =>
                 i.Status == InvitationStatuses.Pending &&
                 i.Registration.Race.JockeySelectionDeadline.HasValue &&
-                i.Registration.Race.JockeySelectionDeadline.Value <= now)
+                i.Registration.Race.JockeySelectionDeadline.Value <= localNow)
             .ToListAsync(cancellationToken);
 
         foreach (var invitation in expiredInvitations)
         {
             invitation.Status = InvitationStatuses.Expired;
-            invitation.RespondedAt = now;
+            invitation.RespondedAt = localNow;
         }
 
         var predictionsToLock = await _context.RacePredictions
             .Where(p =>
                 p.Status == RacePredictionStatuses.Pending &&
                 p.Race.PredictionDeadline.HasValue &&
-                p.Race.PredictionDeadline.Value <= now &&
+                p.Race.PredictionDeadline.Value <= localNow &&
                 p.Race.Status != RaceStatuses.Cancelled &&
                 p.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .ToListAsync(cancellationToken);
@@ -59,21 +61,21 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         foreach (var prediction in predictionsToLock)
         {
             prediction.Status = RacePredictionStatuses.Locked;
-            prediction.LockedAt = now;
-            prediction.UpdatedAt = now;
+            prediction.LockedAt = localNow;
+            prediction.UpdatedAt = localNow;
         }
 
         var tournamentsToCloseRegistration = await _context.Tournaments
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
-                t.StartDate <= localToday &&
-                (t.Race == null || t.Race.RaceDate > now))
+                t.StartDate < localToday &&
+                (t.Race == null || t.Race.RaceDate > localNow))
             .ToListAsync(cancellationToken);
 
         foreach (var tournament in tournamentsToCloseRegistration)
         {
             tournament.Status = TournamentStatuses.ClosedRegistration;
-            tournament.UpdatedAt = now;
+            tournament.UpdatedAt = localNow;
         }
 
         if (expiredInvitations.Count > 0 ||
@@ -93,11 +95,13 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         };
     }
 
-    public async Task<SyncTimeStatusesResponse> RecalculateTournamentStatusesAsync(CancellationToken cancellationToken = default)
+    public async Task<SyncTimeStatusesResponse> RecalculateTournamentStatusesAsync(
+        CancellationToken cancellationToken = default)
     {
         var effectiveUtcNow = _dateTimeProvider.UtcNow;
-        var now = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
-        var localToday = DateOnly.FromDateTime(now);
+        var localNow = _dateTimeProvider.GetLocalNow(
+            _dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
 
         var tournaments = await _context.Tournaments
             .Include(t => t.Race)
@@ -108,7 +112,9 @@ public class RaceTimeStatusService : IRaceTimeStatusService
 
         foreach (var tournament in tournaments)
         {
-            var desiredStatus = GetDesiredTournamentStatus(tournament, now, localToday);
+            var desiredStatus = GetDesiredTournamentStatus(
+                tournament,
+                localToday);
 
             if (tournament.Status == desiredStatus)
             {
@@ -116,7 +122,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             }
 
             tournament.Status = desiredStatus;
-            tournament.UpdatedAt = now;
+            tournament.UpdatedAt = localNow;
             updatedTournaments++;
         }
 
@@ -137,12 +143,11 @@ public class RaceTimeStatusService : IRaceTimeStatusService
 
     private static string GetDesiredTournamentStatus(
         Tournament tournament,
-        DateTime now,
         DateOnly localToday)
     {
-        // Không tự chuyển sang Ongoing theo giờ đua; Referee phải bấm Start.
-
-        if (tournament.StartDate <= localToday)
+        // StartDate hiện đang được dùng làm RegistrationDeadline.
+        // Cho phép đăng ký hết ngày deadline và chỉ đóng từ ngày hôm sau.
+        if (tournament.StartDate < localToday)
         {
             return TournamentStatuses.ClosedRegistration;
         }

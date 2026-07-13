@@ -1,4 +1,5 @@
-﻿using Eliteracingleague.API.Constants;
+﻿using System.Data;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Eliteracingleague.API.Models;
@@ -42,11 +43,8 @@ public class AdminSeasonsController : ControllerBase
                 s.PointsPerCorrectPrediction,
                 s.CreatedAt,
                 s.UpdatedAt,
-
                 TournamentCount = s.Tournaments.Count,
-
                 RewardRuleCount = s.SeasonRewardRules.Count,
-
                 RewardCount = s.SeasonRewards.Count
             })
             .ToListAsync();
@@ -70,7 +68,16 @@ public class AdminSeasonsController : ControllerBase
                 s.PointsPerCorrectPrediction,
                 s.CreatedAt,
                 s.UpdatedAt,
-
+                Tournaments = s.Tournaments
+                    .OrderBy(t => t.StartDate)
+                    .Select(t => new
+                    {
+                        t.TournamentId,
+                        t.TournamentName,
+                        t.StartDate,
+                        t.EndDate,
+                        t.Status
+                    }),
                 RewardRules = s.SeasonRewardRules
                     .OrderBy(r => r.RankPosition)
                     .Select(r => new
@@ -81,7 +88,6 @@ public class AdminSeasonsController : ControllerBase
                         r.RewardDescription,
                         r.BonusPoints
                     }),
-
                 Rewards = s.SeasonRewards
                     .OrderBy(r => r.RankPosition)
                     .Select(r => new
@@ -124,32 +130,67 @@ public class AdminSeasonsController : ControllerBase
             return validationError;
         }
 
-        var season = new Season
-        {
-            SeasonName = request.SeasonName.Trim(),
-            StartDate = request.StartDate,
-            EndDate = request.EndDate,
-            Status = SeasonStatuses.Draft,
-            PointsPerCorrectPrediction = request.PointsPerCorrectPrediction <= 0
-                ? 100
-                : request.PointsPerCorrectPrediction,
-            CreatedAt = DateTime.UtcNow
-        };
+        var startDate = request.StartDate.Date;
+        var endDate = request.EndDate.Date;
 
-        _context.Seasons.Add(season);
-        await _context.SaveChangesAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
 
-        return Ok(new AdminActionResponse
+        try
         {
-            Message = "Season created successfully",
-            Id = season.SeasonId,
-            Name = season.SeasonName,
-            Status = season.Status
-        });
+            var overlappingSeason = await FindOverlappingSeasonAsync(
+                startDate,
+                endDate);
+
+            if (overlappingSeason != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Season date range overlaps an existing season.",
+                    conflictingSeasonId = overlappingSeason.SeasonId,
+                    conflictingSeasonName = overlappingSeason.SeasonName,
+                    conflictingStartDate = overlappingSeason.StartDate,
+                    conflictingEndDate = overlappingSeason.EndDate,
+                    conflictingStatus = overlappingSeason.Status
+                });
+            }
+
+            var now = DateTime.UtcNow;
+
+            var season = new Season
+            {
+                SeasonName = request.SeasonName.Trim(),
+                StartDate = startDate,
+                EndDate = endDate,
+                Status = SeasonStatuses.Draft,
+                PointsPerCorrectPrediction = request.PointsPerCorrectPrediction,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            _context.Seasons.Add(season);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Season created successfully",
+                Id = season.SeasonId,
+                Name = season.SeasonName,
+                Status = season.Status
+            });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> UpdateSeason(int id, [FromBody] AdminSeasonRequest request)
+    public async Task<IActionResult> UpdateSeason(
+        int id,
+        [FromBody] AdminSeasonRequest request)
     {
         var validationError = ValidateSeasonRequest(request);
         if (validationError != null)
@@ -157,49 +198,84 @@ public class AdminSeasonsController : ControllerBase
             return validationError;
         }
 
-        var season = await _context.Seasons
-            .FirstOrDefaultAsync(s => s.SeasonId == id);
+        var startDate = request.StartDate.Date;
+        var endDate = request.EndDate.Date;
 
-        if (season == null)
-        {
-            return NotFound(new AdminActionResponse
-            {
-                Message = "Season not found",
-                Id = id
-            });
-        }
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
 
-        if (season.Status == SeasonStatuses.Closed)
+        try
         {
-            return BadRequest(new AdminActionResponse
+            var season = await _context.Seasons
+                .FirstOrDefaultAsync(s => s.SeasonId == id);
+
+            if (season == null)
             {
-                Message = "Closed season cannot be edited",
-                Id = id,
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Season not found",
+                    Id = id
+                });
+            }
+
+            if (season.Status != SeasonStatuses.Draft)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only draft season can be edited",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
+
+            var overlappingSeason = await FindOverlappingSeasonAsync(
+                startDate,
+                endDate,
+                season.SeasonId);
+
+            if (overlappingSeason != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Season date range overlaps an existing season.",
+                    seasonId = season.SeasonId,
+                    conflictingSeasonId = overlappingSeason.SeasonId,
+                    conflictingSeasonName = overlappingSeason.SeasonName,
+                    conflictingStartDate = overlappingSeason.StartDate,
+                    conflictingEndDate = overlappingSeason.EndDate,
+                    conflictingStatus = overlappingSeason.Status
+                });
+            }
+
+            season.SeasonName = request.SeasonName.Trim();
+            season.StartDate = startDate;
+            season.EndDate = endDate;
+            season.PointsPerCorrectPrediction = request.PointsPerCorrectPrediction;
+            season.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new AdminActionResponse
+            {
+                Message = "Season updated successfully",
+                Id = season.SeasonId,
+                Name = season.SeasonName,
                 Status = season.Status
             });
         }
-
-        season.SeasonName = request.SeasonName.Trim();
-        season.StartDate = request.StartDate;
-        season.EndDate = request.EndDate;
-        season.PointsPerCorrectPrediction = request.PointsPerCorrectPrediction <= 0
-            ? season.PointsPerCorrectPrediction
-            : request.PointsPerCorrectPrediction;
-        season.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return Ok(new AdminActionResponse
+        catch
         {
-            Message = "Season updated successfully",
-            Id = season.SeasonId,
-            Name = season.SeasonName,
-            Status = season.Status
-        });
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     [HttpGet("{id:int}/leaderboard")]
-    public async Task<IActionResult> GetSeasonLeaderboard(int id, [FromQuery] int limit = 100)
+    public async Task<IActionResult> GetSeasonLeaderboard(
+        int id,
+        [FromQuery] int limit = 100)
     {
         var exists = await _context.Seasons
             .AsNoTracking()
@@ -280,12 +356,13 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (season.Status == SeasonStatuses.Closed)
+        if (season.Status != SeasonStatuses.Draft)
         {
             return BadRequest(new AdminActionResponse
             {
-                Message = "Cannot update reward rules for a closed season",
-                Id = id,
+                Message = "Reward rules can only be changed while the season is in Draft status",
+                Id = season.SeasonId,
+                Name = season.SeasonName,
                 Status = season.Status
             });
         }
@@ -328,6 +405,14 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
+            if (rule.RewardName.Trim().Length > 200)
+            {
+                return BadRequest(new
+                {
+                    message = $"Reward name for rank {rule.RankPosition} cannot exceed 200 characters"
+                });
+            }
+
             if (rule.BonusPoints < 0)
             {
                 return BadRequest(new
@@ -360,7 +445,9 @@ public class AdminSeasonsController : ControllerBase
                     SeasonId = season.SeasonId,
                     RankPosition = requestRule.RankPosition,
                     RewardName = requestRule.RewardName.Trim(),
-                    RewardDescription = requestRule.RewardDescription?.Trim(),
+                    RewardDescription = string.IsNullOrWhiteSpace(requestRule.RewardDescription)
+                        ? null
+                        : requestRule.RewardDescription.Trim(),
                     BonusPoints = requestRule.BonusPoints,
                     CreatedAt = now
                 });
@@ -368,7 +455,9 @@ public class AdminSeasonsController : ControllerBase
             else
             {
                 existingRule.RewardName = requestRule.RewardName.Trim();
-                existingRule.RewardDescription = requestRule.RewardDescription?.Trim();
+                existingRule.RewardDescription = string.IsNullOrWhiteSpace(requestRule.RewardDescription)
+                    ? null
+                    : requestRule.RewardDescription.Trim();
                 existingRule.BonusPoints = requestRule.BonusPoints;
                 existingRule.UpdatedAt = now;
             }
@@ -390,108 +479,300 @@ public class AdminSeasonsController : ControllerBase
     [HttpPut("{id:int}/activate")]
     public async Task<IActionResult> ActivateSeason(int id)
     {
-        var season = await _context.Seasons
-            .FirstOrDefaultAsync(s => s.SeasonId == id);
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
 
-        if (season == null)
+        try
         {
-            return NotFound(new AdminActionResponse
+            var season = await _context.Seasons
+                .FirstOrDefaultAsync(s => s.SeasonId == id);
+
+            if (season == null)
             {
-                Message = "Season not found",
-                Id = id
-            });
-        }
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Season not found",
+                    Id = id
+                });
+            }
 
-        if (season.Status == SeasonStatuses.Active)
-        {
-            return Ok(new AdminActionResponse
+            if (season.Status == SeasonStatuses.Active)
             {
-                Message = "Season is already active",
-                Id = season.SeasonId,
-                Name = season.SeasonName,
-                Status = season.Status
-            });
-        }
+                return Ok(new AdminActionResponse
+                {
+                    Message = "Season is already active",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
 
-        if (season.Status == SeasonStatuses.Closed)
-        {
-            return BadRequest(new AdminActionResponse
+            if (season.Status != SeasonStatuses.Draft)
             {
-                Message = "Closed season cannot be activated again",
-                Id = season.SeasonId,
-                Name = season.SeasonName,
-                Status = season.Status
-            });
-        }
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only draft season can be activated",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
 
-        var hasAnotherActiveSeason = await _context.Seasons
-            .AnyAsync(s =>
-                s.SeasonId != id &&
-                s.Status == SeasonStatuses.Active);
+            var activeSeason = await _context.Seasons
+                .AsNoTracking()
+                .Where(s =>
+                    s.SeasonId != season.SeasonId &&
+                    s.Status == SeasonStatuses.Active)
+                .Select(s => new
+                {
+                    s.SeasonId,
+                    s.SeasonName,
+                    s.StartDate,
+                    s.EndDate
+                })
+                .FirstOrDefaultAsync();
 
-        if (hasAnotherActiveSeason)
-        {
-            return BadRequest(new
+            if (activeSeason != null)
             {
-                message = "Another season is already active. Close it before activating a new season."
-            });
-        }
+                return BadRequest(new
+                {
+                    message = "Another season is already active. Close it before activating a new season.",
+                    activeSeasonId = activeSeason.SeasonId,
+                    activeSeasonName = activeSeason.SeasonName,
+                    activeSeasonStartDate = activeSeason.StartDate,
+                    activeSeasonEndDate = activeSeason.EndDate
+                });
+            }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+            var now = DateTime.UtcNow;
 
-        var now = DateTime.UtcNow;
+            var spectators = await _context.Users
+                .Where(u => u.Role == UserRoles.Spectator)
+                .ToListAsync();
 
-        var spectators = await _context.Users
-            .Where(u => u.Role == UserRoles.Spectator)
-            .ToListAsync();
-
-        foreach (var spectator in spectators)
-        {
-            spectator.BettingPoints = SpectatorBettingRules.InitialBettingPoints;
-            spectator.UpdatedAt = now;
-        }
-
-        var unappliedRewards = await _context.SeasonRewards
-            .Where(r =>
-                r.BonusPoints > 0 &&
-                !r.IsBonusApplied &&
-                r.AppliedToSeasonId == null &&
-                r.SeasonId != season.SeasonId)
-            .ToListAsync();
-
-        var spectatorById = spectators.ToDictionary(s => s.UserId);
-
-        foreach (var reward in unappliedRewards)
-        {
-            if (spectatorById.TryGetValue(reward.SpectatorId, out var spectator))
+            foreach (var spectator in spectators)
             {
+                spectator.BettingPoints = SpectatorBettingRules.InitialBettingPoints;
+                spectator.UpdatedAt = now;
+            }
+
+            var unappliedRewards = await _context.SeasonRewards
+                .Where(r =>
+                    r.BonusPoints > 0 &&
+                    !r.IsBonusApplied &&
+                    r.AppliedToSeasonId == null &&
+                    r.SeasonId != season.SeasonId)
+                .ToListAsync();
+
+            var spectatorById = spectators.ToDictionary(s => s.UserId);
+            var appliedBonusRewardCount = 0;
+
+            foreach (var reward in unappliedRewards)
+            {
+                if (!spectatorById.TryGetValue(reward.SpectatorId, out var spectator))
+                {
+                    continue;
+                }
+
                 spectator.BettingPoints += reward.BonusPoints;
+                spectator.UpdatedAt = now;
 
                 reward.IsBonusApplied = true;
                 reward.AppliedToSeasonId = season.SeasonId;
                 reward.AppliedAt = now;
+                appliedBonusRewardCount++;
             }
+
+            season.Status = SeasonStatuses.Active;
+            season.UpdatedAt = now;
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new
+            {
+                message = "Season activated successfully. Spectator betting points have been reset.",
+                seasonId = season.SeasonId,
+                seasonName = season.SeasonName,
+                status = season.Status,
+                resetSpectatorCount = spectators.Count,
+                appliedBonusRewardCount
+            });
         }
-
-        season.Status = SeasonStatuses.Active;
-        season.UpdatedAt = now;
-
-        await _context.SaveChangesAsync();
-        await transaction.CommitAsync();
-
-        return Ok(new
+        catch
         {
-            message = "Season activated successfully. Spectator betting points have been reset.",
-            seasonId = season.SeasonId,
-            seasonName = season.SeasonName,
-            status = season.Status,
-            resetSpectatorCount = spectators.Count,
-            appliedBonusRewardCount = unappliedRewards.Count
-        });
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     [HttpPut("{id:int}/close")]
     public async Task<IActionResult> CloseSeason(int id)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+
+        try
+        {
+            var season = await _context.Seasons
+                .FirstOrDefaultAsync(s => s.SeasonId == id);
+
+            if (season == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Season not found",
+                    Id = id
+                });
+            }
+
+            if (season.Status == SeasonStatuses.Closed)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Season is already closed",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
+
+            if (season.Status != SeasonStatuses.Active)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only active season can be closed",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
+
+            var blockingTournament = await _context.Tournaments
+                .AsNoTracking()
+                .Where(t =>
+                    t.SeasonId == season.SeasonId &&
+                    t.Status != TournamentStatuses.Completed &&
+                    t.Status != TournamentStatuses.Cancelled)
+                .OrderBy(t => t.TournamentId)
+                .Select(t => new
+                {
+                    t.TournamentId,
+                    t.TournamentName,
+                    t.Status
+                })
+                .FirstOrDefaultAsync();
+
+            if (blockingTournament != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot close the season because it still contains an unfinished tournament.",
+                    seasonId = season.SeasonId,
+                    tournamentId = blockingTournament.TournamentId,
+                    tournamentName = blockingTournament.TournamentName,
+                    tournamentStatus = blockingTournament.Status
+                });
+            }
+
+            var unresolvedPredictionCount = await _context.RacePredictions
+                .AsNoTracking()
+                .CountAsync(p =>
+                    p.Race.Tournament.SeasonId == season.SeasonId &&
+                    (p.Status == RacePredictionStatuses.Pending ||
+                     p.Status == RacePredictionStatuses.Locked));
+
+            if (unresolvedPredictionCount > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot close the season because some predictions have not been evaluated or cancelled.",
+                    seasonId = season.SeasonId,
+                    unresolvedPredictionCount
+                });
+            }
+
+            var rewardRules = await _context.SeasonRewardRules
+                .AsNoTracking()
+                .Where(r => r.SeasonId == season.SeasonId)
+                .OrderBy(r => r.RankPosition)
+                .ToListAsync();
+
+            IReadOnlyList<Eliteracingleague.API.DTOs.Spectator.PredictorLeaderboardItem> leaderboard =
+                Array.Empty<Eliteracingleague.API.DTOs.Spectator.PredictorLeaderboardItem>();
+
+            if (rewardRules.Count > 0)
+            {
+                var highestRewardRank = rewardRules.Max(r => r.RankPosition);
+                leaderboard = await _leaderboardService
+                    .GetPredictorLeaderboardAsync(highestRewardRank, season.SeasonId);
+            }
+
+            var existingRewards = await _context.SeasonRewards
+                .Where(r => r.SeasonId == season.SeasonId)
+                .ToListAsync();
+
+            if (existingRewards.Count > 0)
+            {
+                _context.SeasonRewards.RemoveRange(existingRewards);
+                await _context.SaveChangesAsync();
+            }
+
+            var now = DateTime.UtcNow;
+            var leaderboardByRank = leaderboard.ToDictionary(x => x.Rank);
+            var rewardCount = 0;
+
+            foreach (var rule in rewardRules)
+            {
+                if (!leaderboardByRank.TryGetValue(rule.RankPosition, out var item))
+                {
+                    continue;
+                }
+
+                _context.SeasonRewards.Add(new SeasonReward
+                {
+                    SeasonId = season.SeasonId,
+                    SpectatorId = item.SpectatorId,
+                    RankPosition = item.Rank,
+                    FinalPoints = item.Points,
+                    RewardName = rule.RewardName,
+                    RewardDescription = rule.RewardDescription,
+                    BonusPoints = rule.BonusPoints,
+                    IsBonusApplied = false,
+                    AppliedToSeasonId = null,
+                    AppliedAt = null,
+                    Status = "Awarded",
+                    AwardedAt = now
+                });
+
+                rewardCount++;
+            }
+
+            season.Status = SeasonStatuses.Closed;
+            season.UpdatedAt = now;
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new
+            {
+                message = "Season closed successfully.",
+                seasonId = season.SeasonId,
+                seasonName = season.SeasonName,
+                status = season.Status,
+                configuredRewardRuleCount = rewardRules.Count,
+                rewardCount
+            });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    [HttpPut("{id:int}/cancel")]
+    public async Task<IActionResult> CancelSeason(int id)
     {
         var season = await _context.Seasons
             .FirstOrDefaultAsync(s => s.SeasonId == id);
@@ -505,90 +786,54 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (season.Status == SeasonStatuses.Closed)
+        if (season.Status == SeasonStatuses.Cancelled)
         {
-            return BadRequest(new AdminActionResponse
+            return Ok(new AdminActionResponse
             {
-                Message = "Season is already closed",
+                Message = "Season is already cancelled",
                 Id = season.SeasonId,
                 Name = season.SeasonName,
                 Status = season.Status
             });
         }
 
-        if (season.Status != SeasonStatuses.Active)
+        if (season.Status != SeasonStatuses.Draft)
         {
             return BadRequest(new AdminActionResponse
             {
-                Message = "Only active season can be closed",
+                Message = "Only draft season can be cancelled",
                 Id = season.SeasonId,
                 Name = season.SeasonName,
                 Status = season.Status
             });
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
-
-        var now = DateTime.UtcNow;
-
-        var leaderboard = await _leaderboardService
-            .GetPredictorLeaderboardAsync(100, season.SeasonId);
-
-        var rewardRules = await _context.SeasonRewardRules
+        var hasTournaments = await _context.Tournaments
             .AsNoTracking()
-            .Where(r => r.SeasonId == season.SeasonId)
-            .ToDictionaryAsync(r => r.RankPosition);
+            .AnyAsync(t => t.SeasonId == season.SeasonId);
 
-        var existingRewards = await _context.SeasonRewards
-            .Where(r => r.SeasonId == season.SeasonId)
-            .ToListAsync();
-
-        if (existingRewards.Count > 0)
+        if (hasTournaments)
         {
-            _context.SeasonRewards.RemoveRange(existingRewards);
-        }
-
-        var topUsers = leaderboard
-            .Where(x => x.Rank <= 3)
-            .OrderBy(x => x.Rank)
-            .ToList();
-
-        foreach (var item in topUsers)
-        {
-            rewardRules.TryGetValue(item.Rank, out var rule);
-
-            var reward = new SeasonReward
+            return BadRequest(new AdminActionResponse
             {
-                SeasonId = season.SeasonId,
-                SpectatorId = item.SpectatorId,
-                RankPosition = item.Rank,
-                FinalPoints = item.Points,
-                RewardName = rule?.RewardName ?? $"Rank {item.Rank} Reward",
-                RewardDescription = rule?.RewardDescription,
-                BonusPoints = rule?.BonusPoints ?? 0,
-                IsBonusApplied = false,
-                AppliedToSeasonId = null,
-                AppliedAt = null,
-                Status = "Awarded",
-                AwardedAt = now
-            };
-
-            _context.SeasonRewards.Add(reward);
+                Message = "Cannot cancel a season that already contains tournaments",
+                Id = season.SeasonId,
+                Name = season.SeasonName,
+                Status = season.Status
+            });
         }
 
-        season.Status = SeasonStatuses.Closed;
-        season.UpdatedAt = now;
+        season.Status = SeasonStatuses.Cancelled;
+        season.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-        await transaction.CommitAsync();
 
-        return Ok(new
+        return Ok(new AdminActionResponse
         {
-            message = "Season closed successfully. Final rewards have been awarded.",
-            seasonId = season.SeasonId,
-            seasonName = season.SeasonName,
-            status = season.Status,
-            rewardCount = topUsers.Count
+            Message = "Season cancelled successfully",
+            Id = season.SeasonId,
+            Name = season.SeasonName,
+            Status = season.Status
         });
     }
 
@@ -639,6 +884,27 @@ public class AdminSeasonsController : ControllerBase
         });
     }
 
+    private async Task<Season?> FindOverlappingSeasonAsync(
+        DateTime startDate,
+        DateTime endDate,
+        int? excludedSeasonId = null)
+    {
+        var query = _context.Seasons
+            .AsNoTracking()
+            .Where(s => s.Status != SeasonStatuses.Cancelled);
+
+        if (excludedSeasonId.HasValue)
+        {
+            query = query.Where(s => s.SeasonId != excludedSeasonId.Value);
+        }
+
+        return await query
+            .Where(s => startDate <= s.EndDate && endDate >= s.StartDate)
+            .OrderBy(s => s.StartDate)
+            .ThenBy(s => s.SeasonId)
+            .FirstOrDefaultAsync();
+    }
+
     private IActionResult? ValidateSeasonRequest(AdminSeasonRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.SeasonName))
@@ -646,6 +912,14 @@ public class AdminSeasonsController : ControllerBase
             return BadRequest(new
             {
                 message = "Season name is required"
+            });
+        }
+
+        if (request.SeasonName.Trim().Length > 200)
+        {
+            return BadRequest(new
+            {
+                message = "Season name cannot exceed 200 characters"
             });
         }
 
@@ -665,11 +939,19 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (request.EndDate < request.StartDate)
+        if (request.EndDate.Date < request.StartDate.Date)
         {
             return BadRequest(new
             {
                 message = "End date must be greater than or equal to start date"
+            });
+        }
+
+        if (request.PointsPerCorrectPrediction <= 0)
+        {
+            return BadRequest(new
+            {
+                message = "Points per correct prediction must be greater than 0"
             });
         }
 

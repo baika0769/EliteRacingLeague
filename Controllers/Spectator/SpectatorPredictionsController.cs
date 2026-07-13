@@ -1,4 +1,5 @@
-﻿using System.Security.Claims;
+﻿using System.Data;
+using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Spectator;
@@ -83,7 +84,8 @@ public class SpectatorPredictionsController : ControllerBase
     public async Task<IActionResult> CreatePrediction(CreatePredictionRequest request)
     {
         var spectatorId = GetUserId();
-        var now = _dateTimeProvider.UtcNow;
+        var utcNow = _dateTimeProvider.UtcNow;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
 
         if (request.StakePoints < SpectatorBettingRules.MinimumStakePoints)
         {
@@ -95,7 +97,8 @@ public class SpectatorPredictionsController : ControllerBase
             });
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await using var transaction = await _context.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable);
 
         var spectator = await _context.Users
             .FirstOrDefaultAsync(u => u.UserId == spectatorId && u.Role == UserRoles.Spectator);
@@ -149,9 +152,16 @@ public class SpectatorPredictionsController : ControllerBase
             });
         }
 
-        if (tournament.Status is TournamentStatuses.Cancelled or TournamentStatuses.Completed)
+        if (tournament.Status is not TournamentStatuses.OpenRegistration
+            and not TournamentStatuses.ClosedRegistration)
         {
-            return BadRequest("Prediction is not allowed for this tournament status.");
+            return BadRequest(new
+            {
+                code = "TOURNAMENT_NOT_OPEN_FOR_PREDICTION",
+                message = "Prediction is only allowed while the tournament is open or closed for registration and before the race starts.",
+                tournamentId = tournament.TournamentId,
+                tournamentStatus = tournament.Status
+            });
         }
 
         var race = await _context.Races
@@ -172,9 +182,36 @@ public class SpectatorPredictionsController : ControllerBase
             return BadRequest("Prediction is not allowed for this race status.");
         }
 
-        if (race.PredictionDeadline.HasValue && now >= race.PredictionDeadline.Value)
+        if (!race.PredictionDeadline.HasValue)
         {
-            return BadRequest("Prediction deadline has passed.");
+            return BadRequest(new
+            {
+                code = "PREDICTION_DEADLINE_NOT_CONFIGURED",
+                message = "Prediction deadline has not been configured for this race.",
+                raceId = race.RaceId
+            });
+        }
+
+        if (localNow >= race.RaceDate)
+        {
+            return BadRequest(new
+            {
+                code = "RACE_ALREADY_STARTED",
+                message = "Prediction is not allowed after the race start time.",
+                raceId = race.RaceId,
+                raceDate = race.RaceDate
+            });
+        }
+
+        if (localNow >= race.PredictionDeadline.Value)
+        {
+            return BadRequest(new
+            {
+                code = "PREDICTION_DEADLINE_PASSED",
+                message = "Prediction deadline has passed.",
+                raceId = race.RaceId,
+                predictionDeadline = race.PredictionDeadline.Value
+            });
         }
 
         var existing = await _context.RacePredictions
@@ -210,7 +247,7 @@ public class SpectatorPredictionsController : ControllerBase
         }
 
         spectator.BettingPoints -= request.StakePoints;
-        spectator.UpdatedAt = now;
+        spectator.UpdatedAt = utcNow;
 
         var prediction = new RacePrediction
         {
@@ -222,8 +259,8 @@ public class SpectatorPredictionsController : ControllerBase
             PointsAwarded = 0,
             StakePoints = request.StakePoints,
             RewardStatus = PredictionRewardStatuses.None,
-            PredictedAt = now,
-            CreatedAt = now
+            PredictedAt = utcNow,
+            CreatedAt = utcNow
         };
 
         _context.RacePredictions.Add(prediction);

@@ -18,25 +18,67 @@ public class RaceTimeStatusBackgroundService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var intervalSeconds = Math.Max(5, _configuration.GetValue("SystemTime:SyncIntervalSeconds", 60));
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(intervalSeconds));
+        var configuredInterval = _configuration.GetValue(
+            "SystemTime:SyncIntervalSeconds",
+            60);
 
-        while (await timer.WaitForNextTickAsync(stoppingToken))
+        var intervalSeconds = Math.Clamp(configuredInterval, 5, 3600);
+
+        _logger.LogInformation(
+            "Race time status synchronization started with interval {IntervalSeconds}s.",
+            intervalSeconds);
+
+        // Run once immediately instead of waiting for the first timer tick.
+        await SynchronizeOnceAsync(stoppingToken);
+
+        using var timer = new PeriodicTimer(
+            TimeSpan.FromSeconds(intervalSeconds));
+
+        try
         {
-            try
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                using var scope = _scopeFactory.CreateScope();
-                var service = scope.ServiceProvider.GetRequiredService<IRaceTimeStatusService>();
-                await service.SyncAsync(stoppingToken);
+                await SynchronizeOnceAsync(stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Expected during application shutdown.
+        }
+    }
+
+    private async Task SynchronizeOnceAsync(
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+
+            var service = scope.ServiceProvider
+                .GetRequiredService<IRaceTimeStatusService>();
+
+            var result = await service.SyncAsync(cancellationToken);
+
+            if (result.ExpiredInvitations > 0 ||
+                result.UpdatedRaces > 0 ||
+                result.UpdatedTournaments > 0)
             {
-                break;
+                _logger.LogInformation(
+                    "Time status sync completed. Expired invitations: {ExpiredInvitations}; updated races: {UpdatedRaces}; updated tournaments: {UpdatedTournaments}.",
+                    result.ExpiredInvitations,
+                    result.UpdatedRaces,
+                    result.UpdatedTournaments);
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to synchronize race time statuses.");
-            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Race time status synchronization failed.");
         }
     }
 }

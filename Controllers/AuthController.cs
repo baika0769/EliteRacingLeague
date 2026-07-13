@@ -480,6 +480,75 @@ public class AuthController : ControllerBase
     }
 
 
+    // PUT: /api/auth/change-password
+    [HttpPut("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+    {
+        var userIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (!int.TryParse(userIdText, out var userId))
+        {
+            return Unauthorized(new
+            {
+                message = "Invalid or missing user token."
+            });
+        }
+
+        if (request.NewPassword != request.ConfirmPassword)
+        {
+            return BadRequest(new
+            {
+                message = "Confirm password does not match the new password."
+            });
+        }
+
+        if (request.CurrentPassword == request.NewPassword)
+        {
+            return BadRequest(new
+            {
+                message = "New password must be different from current password."
+            });
+        }
+
+        var user = await _context.Users
+            .FirstOrDefaultAsync(item => item.UserId == userId);
+
+        if (user == null)
+        {
+            return NotFound(new
+            {
+                message = "Account not found."
+            });
+        }
+
+        var verificationResult = _passwordHasher.VerifyHashedPassword(
+            user,
+            user.PasswordHash,
+            request.CurrentPassword);
+
+        if (verificationResult == PasswordVerificationResult.Failed)
+        {
+            return BadRequest(new
+            {
+                message = "Current password is incorrect."
+            });
+        }
+
+        user.PasswordHash = _passwordHasher.HashPassword(
+            user,
+            request.NewPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Password changed successfully."
+        });
+    }
+
+
     // GET: /api/auth/me
     [HttpGet("me")]
     [Authorize]

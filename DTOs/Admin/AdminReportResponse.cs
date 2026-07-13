@@ -6,13 +6,22 @@
         public int? ViolationId { get; set; }
 
         public string Type { get; set; } = string.Empty;
+        public string? ReportType { get; set; }
 
         public int RaceId { get; set; }
         public string? RaceName { get; set; }
 
+        public int? TournamentId { get; set; }
+        public string? TournamentName { get; set; }
+
         public int? RegistrationId { get; set; }
+        public string? RegistrationStatus { get; set; }
+
         public int? HorseId { get; set; }
         public string? HorseName { get; set; }
+
+        public int? JockeyId { get; set; }
+        public string? JockeyName { get; set; }
 
         public int RefereeId { get; set; }
         public string? RefereeName { get; set; }

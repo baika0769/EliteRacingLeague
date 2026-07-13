@@ -5,6 +5,7 @@ using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Notifications;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ public class RefereeRacesController : ControllerBase
     private readonly EliteRacingLeagueContext _context;
     private readonly RefereeRaceLifecycleService _lifecycleService;
     private readonly INotificationService _notificationService;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
@@ -38,11 +40,13 @@ public class RefereeRacesController : ControllerBase
     public RefereeRacesController(
         EliteRacingLeagueContext context,
         RefereeRaceLifecycleService lifecycleService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
         _lifecycleService = lifecycleService;
         _notificationService = notificationService;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     private bool TryGetRefereeId(out int refereeId)
@@ -190,6 +194,7 @@ public class RefereeRacesController : ControllerBase
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
         }
+
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -199,27 +204,67 @@ public class RefereeRacesController : ControllerBase
 
         if (lifecycle.RaceStatus != RaceStatuses.AssignedReferee)
         {
-            return BadRequest(new { message = "Race must be AssignedReferee before it can be marked ready." });
+            return BadRequest(new
+            {
+                message = "Race must be AssignedReferee before it can be marked ready."
+            });
+        }
+
+        var race = await _context.Races
+            .Include(r => r.Tournament)
+                .ThenInclude(t => t.Season)
+            .FirstOrDefaultAsync(r => r.RaceId == raceId);
+
+        if (race == null)
+        {
+            return NotFound(new { message = "Race not found." });
+        }
+
+        if (race.Tournament.Season.Status != SeasonStatuses.Active)
+        {
+            return BadRequest(new
+            {
+                message = "Race cannot be marked ready because the season is not active.",
+                seasonId = race.Tournament.SeasonId,
+                seasonStatus = race.Tournament.Season.Status
+            });
+        }
+
+        if (race.Tournament.Status != TournamentStatuses.ClosedRegistration)
+        {
+            return BadRequest(new
+            {
+                message = "Registration must be closed before the race can be marked ready.",
+                tournamentStatus = race.Tournament.Status
+            });
         }
 
         if (lifecycle.Counts.TotalRegistrations == 0)
         {
-            return BadRequest(new { message = "Race cannot be marked ready because no eligible registrations were found." });
+            return BadRequest(new
+            {
+                message = "Race cannot be marked ready because no eligible registrations were found."
+            });
         }
 
         if (lifecycle.Counts.PendingInspections > 0)
         {
-            return BadRequest(new { message = "Race cannot be marked ready because there are pending inspections." });
+            return BadRequest(new
+            {
+                message = "Race cannot be marked ready because there are pending inspections."
+            });
         }
 
         if (lifecycle.Counts.FailedInspections >= lifecycle.Counts.TotalRegistrations)
         {
-            return BadRequest(new { message = "Race cannot be marked ready because all inspections failed." });
+            return BadRequest(new
+            {
+                message = "Race cannot be marked ready because all inspections failed."
+            });
         }
 
-        var race = await _context.Races.FirstAsync(r => r.RaceId == raceId);
         race.Status = RaceStatuses.RefereeReady;
-        race.UpdatedAt = DateTime.UtcNow;
+        race.UpdatedAt = _dateTimeProvider.UtcNow;
 
         await _context.SaveChangesAsync();
 
@@ -233,6 +278,7 @@ public class RefereeRacesController : ControllerBase
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
         }
+
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -242,34 +288,76 @@ public class RefereeRacesController : ControllerBase
 
         if (lifecycle.RaceStatus != RaceStatuses.RefereeReady)
         {
-            return BadRequest(new { message = "Race must be RefereeReady before it can start." });
+            return BadRequest(new
+            {
+                message = "Race must be RefereeReady before it can start."
+            });
         }
 
         if (lifecycle.Counts.PendingInspections > 0)
         {
-            return BadRequest(new { message = "Race cannot start because there are pending inspections." });
+            return BadRequest(new
+            {
+                message = "Race cannot start because there are pending inspections."
+            });
         }
 
         if (lifecycle.Counts.TotalRegistrations == 0 ||
             lifecycle.Counts.FailedInspections >= lifecycle.Counts.TotalRegistrations)
         {
-            return BadRequest(new { message = "Race cannot start because no eligible registrations were found." });
+            return BadRequest(new
+            {
+                message = "Race cannot start because no eligible registrations were found."
+            });
         }
 
         var race = await _context.Races
             .Include(r => r.Tournament)
-            .FirstAsync(r => r.RaceId == raceId);
+                .ThenInclude(t => t.Season)
+            .FirstOrDefaultAsync(r => r.RaceId == raceId);
+
+        if (race == null)
+        {
+            return NotFound(new { message = "Race not found." });
+        }
+
+        if (race.Tournament.Season.Status != SeasonStatuses.Active)
+        {
+            return BadRequest(new
+            {
+                message = "Race cannot start because the season is not active.",
+                seasonId = race.Tournament.SeasonId,
+                seasonStatus = race.Tournament.Season.Status
+            });
+        }
+
+        if (race.Tournament.Status != TournamentStatuses.ClosedRegistration)
+        {
+            return BadRequest(new
+            {
+                message = "Registration must be closed before the race can start.",
+                tournamentStatus = race.Tournament.Status
+            });
+        }
+
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+
+        if (localNow < race.RaceDate)
+        {
+            return BadRequest(new
+            {
+                message = "Race cannot start before its scheduled time.",
+                raceDate = race.RaceDate,
+                serverLocalNow = localNow
+            });
+        }
+
+        var utcNow = _dateTimeProvider.UtcNow;
 
         race.Status = RaceStatuses.Ongoing;
-        race.UpdatedAt = DateTime.UtcNow;
-
-        if (race.Tournament.Status != TournamentStatuses.Ongoing &&
-            race.Tournament.Status != TournamentStatuses.Completed &&
-            race.Tournament.Status != TournamentStatuses.Cancelled)
-        {
-            race.Tournament.Status = TournamentStatuses.Ongoing;
-            race.Tournament.UpdatedAt = DateTime.UtcNow;
-        }
+        race.UpdatedAt = utcNow;
+        race.Tournament.Status = TournamentStatuses.Ongoing;
+        race.Tournament.UpdatedAt = utcNow;
 
         await _context.SaveChangesAsync();
 
@@ -283,6 +371,7 @@ public class RefereeRacesController : ControllerBase
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
         }
+
         var lifecycle = await _lifecycleService.GetLifecycleAsync(raceId, refereeId);
 
         if (lifecycle == null)
@@ -292,12 +381,22 @@ public class RefereeRacesController : ControllerBase
 
         if (lifecycle.RaceStatus != RaceStatuses.Ongoing)
         {
-            return BadRequest(new { message = "Race must be Ongoing before it can finish." });
+            return BadRequest(new
+            {
+                message = "Race must be Ongoing before it can finish."
+            });
         }
 
-        var race = await _context.Races.FirstAsync(r => r.RaceId == raceId);
+        var race = await _context.Races
+            .FirstOrDefaultAsync(r => r.RaceId == raceId);
+
+        if (race == null)
+        {
+            return NotFound(new { message = "Race not found." });
+        }
+
         race.Status = RaceStatuses.Finished;
-        race.UpdatedAt = DateTime.UtcNow;
+        race.UpdatedAt = _dateTimeProvider.UtcNow;
 
         await _context.SaveChangesAsync();
 
@@ -370,7 +469,7 @@ public class RefereeRacesController : ControllerBase
                 RefereeId = refereeId,
                 Status = request.Status,
                 Note = request.Note,
-                InspectedAt = DateTime.UtcNow
+                InspectedAt = _dateTimeProvider.UtcNow
             };
 
             _context.PreRaceInspections.Add(inspection);
@@ -379,7 +478,7 @@ public class RefereeRacesController : ControllerBase
         {
             inspection.Status = request.Status;
             inspection.Note = request.Note;
-            inspection.InspectedAt = DateTime.UtcNow;
+            inspection.InspectedAt = _dateTimeProvider.UtcNow;
         }
 
         await _context.SaveChangesAsync();
@@ -526,7 +625,7 @@ public class RefereeRacesController : ControllerBase
                 Status = RaceResultStatuses.Draft,
                 EnteredByRefereeId = refereeId,
                 Note = request.Note,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = _dateTimeProvider.UtcNow
             };
 
             _context.RaceResults.Add(result);
@@ -537,7 +636,7 @@ public class RefereeRacesController : ControllerBase
             result.FinishPosition = request.FinishPosition;
             result.Score = request.Score;
             result.Note = request.Note;
-            result.UpdatedAt = DateTime.UtcNow;
+            result.UpdatedAt = _dateTimeProvider.UtcNow;
         }
 
         await _context.SaveChangesAsync();
@@ -598,7 +697,7 @@ public class RefereeRacesController : ControllerBase
         }
 
         result.Status = RaceResultStatuses.RefereeConfirmed;
-        result.UpdatedAt = DateTime.UtcNow;
+        result.UpdatedAt = _dateTimeProvider.UtcNow;
 
         await _context.SaveChangesAsync();
 
@@ -711,11 +810,11 @@ public class RefereeRacesController : ControllerBase
         foreach (var result in results.Where(r => r.Status == RaceResultStatuses.Draft))
         {
             result.Status = RaceResultStatuses.RefereeConfirmed;
-            result.UpdatedAt = DateTime.UtcNow;
+            result.UpdatedAt = _dateTimeProvider.UtcNow;
         }
 
         race.Status = RaceStatuses.ResultPending;
-        race.UpdatedAt = DateTime.UtcNow;
+        race.UpdatedAt = _dateTimeProvider.UtcNow;
 
         await _notificationService.CreateForAdminsAsync(
             "Race Result Submitted",
@@ -791,7 +890,7 @@ public class RefereeRacesController : ControllerBase
             Description = request.Description,
             Action = request.Action,
             PenaltyPoints = request.PenaltyPoints,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = _dateTimeProvider.UtcNow
         };
 
         _context.RaceViolations.Add(violation);
@@ -1168,7 +1267,7 @@ public class RefereeRacesController : ControllerBase
             RefereeId = refereeId,
             ReportContent = request.ReportContent.Trim(),
             ReportType = request.ReportType,
-            SubmittedAt = DateTime.UtcNow
+            SubmittedAt = _dateTimeProvider.UtcNow
         };
 
         _context.RefereeReports.Add(report);
@@ -1266,7 +1365,7 @@ public class RefereeRacesController : ControllerBase
         }
 
         report.ReportContent = request.ReportContent.Trim();
-        report.SubmittedAt = DateTime.UtcNow;
+        report.SubmittedAt = _dateTimeProvider.UtcNow;
 
         await _context.SaveChangesAsync();
 
@@ -1420,4 +1519,3 @@ public class RefereeRacesController : ControllerBase
     }
 
 }
-

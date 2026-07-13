@@ -1,8 +1,10 @@
+using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner.Registrations;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services.Notifications;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,7 @@ namespace Eliteracingleague.API.Controllers.Owner;
 public class OwnerRegistrationsController : OwnerBaseController
 {
     private readonly INotificationService _notificationService;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
@@ -34,9 +37,11 @@ public class OwnerRegistrationsController : OwnerBaseController
 
     public OwnerRegistrationsController(
         EliteRacingLeagueContext context,
-        INotificationService notificationService) : base(context)
+        INotificationService notificationService,
+        IDateTimeProvider dateTimeProvider) : base(context)
     {
         _notificationService = notificationService;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     // API 1: Open Tournaments
@@ -113,15 +118,18 @@ public class OwnerRegistrationsController : OwnerBaseController
             limit = 20;
         }
 
-        var today = DateTime.UtcNow.Date;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
 
         var data = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
+                t.Season.Status == SeasonStatuses.Active &&
                 t.Status == TournamentStatuses.OpenRegistration &&
+                t.StartDate >= localToday &&
                 t.Race != null &&
                 RaceStatuses.RegisterableStatuses.Contains(t.Race.Status) &&
-                t.Race.RaceDate >= today)
+                t.Race.RaceDate >= localNow)
             .OrderBy(t => t.Race!.RaceDate)
             .Select(t => new
             {
@@ -199,7 +207,8 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.Status,
                 r.RaceDate,
                 TournamentStatus = r.Tournament.Status,
-                
+                RegistrationDeadline = r.Tournament.StartDate,
+                SeasonStatus = r.Tournament.Season.Status
             })
             .FirstOrDefaultAsync();
 
@@ -208,11 +217,32 @@ public class OwnerRegistrationsController : OwnerBaseController
             return NotFound(new { message = "Không tìm thấy race." });
         }
 
+        if (race.SeasonStatus != SeasonStatuses.Active)
+        {
+            return BadRequest(new
+            {
+                code = "SEASON_NOT_ACTIVE",
+                message = "Season của tournament hiện không hoạt động.",
+                seasonStatus = race.SeasonStatus
+            });
+        }
+
         if (race.TournamentStatus != TournamentStatuses.OpenRegistration)
         {
             return BadRequest(new
             {
                 message = "Tournament hiện không mở đăng ký."
+            });
+        }
+
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
+
+        if (race.RegistrationDeadline < localToday)
+        {
+            return BadRequest(new
+            {
+                message = "Đã hết hạn đăng ký tournament."
             });
         }
 
@@ -224,11 +254,11 @@ public class OwnerRegistrationsController : OwnerBaseController
             });
         }
 
-        if (race.RaceDate.Date < DateTime.UtcNow.Date)
+        if (race.RaceDate <= localNow)
         {
             return BadRequest(new
             {
-                message = "Race đã diễn ra, không thể chọn ngựa."
+                message = "Race đã bắt đầu hoặc đã diễn ra, không thể chọn ngựa."
             });
         }
 
@@ -295,8 +325,16 @@ public class OwnerRegistrationsController : OwnerBaseController
             return ownerProfileError;
         }
 
+        var utcNow = _dateTimeProvider.UtcNow;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
+
+        await using var transaction = await _context.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable);
+
         var race = await _context.Races
             .Include(r => r.Tournament)
+                .ThenInclude(t => t.Season)
             .Include(r => r.RaceRegistrations)
             .FirstOrDefaultAsync(r => r.RaceId == request.RaceId);
 
@@ -305,9 +343,25 @@ public class OwnerRegistrationsController : OwnerBaseController
             return NotFound(new { message = "Không tìm thấy race." });
         }
 
+        if (race.Tournament.Season.Status != SeasonStatuses.Active)
+        {
+            return BadRequest(new
+            {
+                code = "SEASON_NOT_ACTIVE",
+                message = "Season của tournament hiện không hoạt động.",
+                seasonId = race.Tournament.SeasonId,
+                seasonStatus = race.Tournament.Season.Status
+            });
+        }
+
         if (race.Tournament.Status != TournamentStatuses.OpenRegistration)
         {
             return BadRequest(new { message = "Tournament hiện không mở đăng ký." });
+        }
+
+        if (race.Tournament.StartDate < localToday)
+        {
+            return BadRequest(new { message = "Đã hết hạn đăng ký tournament." });
         }
 
         if (!RaceStatuses.CanRegister(race.Status))
@@ -315,9 +369,9 @@ public class OwnerRegistrationsController : OwnerBaseController
             return BadRequest(new { message = "Race hiện không mở đăng ký." });
         }
 
-        if (race.RaceDate.Date < DateTime.UtcNow.Date)
+        if (race.RaceDate <= localNow)
         {
-            return BadRequest(new { message = "Race đã diễn ra, không thể đăng ký." });
+            return BadRequest(new { message = "Race đã bắt đầu hoặc đã diễn ra, không thể đăng ký." });
         }
 
         var currentRegisteredCount = race.RaceRegistrations.Count(r =>
@@ -378,10 +432,9 @@ public class OwnerRegistrationsController : OwnerBaseController
             OwnerId = ownerId.Value,
             JockeyId = null,
             Status = RaceRegistrationStatuses.Pending,
-            SubmittedAt = DateTime.UtcNow
+            SubmittedAt = utcNow
         };
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
         _context.RaceRegistrations.Add(registration);
 
         await _context.SaveChangesAsync();
@@ -690,10 +743,3 @@ public class OwnerRegistrationsController : OwnerBaseController
 
 
 }
-
-
-
-
-
-
-

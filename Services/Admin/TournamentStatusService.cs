@@ -1,5 +1,6 @@
 ﻿using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Services
@@ -7,54 +8,44 @@ namespace Eliteracingleague.API.Services
     public class TournamentStatusService
     {
         private readonly EliteRacingLeagueContext _context;
+        private readonly IDateTimeProvider _dateTimeProvider;
 
-        public TournamentStatusService(EliteRacingLeagueContext context)
+        public TournamentStatusService(
+            EliteRacingLeagueContext context,
+            IDateTimeProvider dateTimeProvider)
         {
             _context = context;
+            _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task SyncTournamentStatusesAsync()
+        public async Task SyncTournamentStatusesAsync(
+            CancellationToken cancellationToken = default)
         {
-            var now = DateTime.Now;
-            var today = DateOnly.FromDateTime(now);
+            var localNow = _dateTimeProvider.GetLocalNow(
+                _dateTimeProvider.TimeZoneId);
+
+            var localToday = DateOnly.FromDateTime(localNow);
 
             var tournaments = await _context.Tournaments
                 .Include(t => t.Race)
                 .Where(t =>
-                    t.Status != TournamentStatuses.Cancelled &&
-                    t.Status != TournamentStatuses.Completed)
-                .ToListAsync();
+                    t.Status == TournamentStatuses.OpenRegistration &&
+                    t.StartDate < localToday)
+                .ToListAsync(cancellationToken);
+
+            if (tournaments.Count == 0)
+            {
+                return;
+            }
 
             foreach (var tournament in tournaments)
             {
-                // Draft là Admin chưa mở đăng ký, auto không được tự đổi
-                if (tournament.Status == TournamentStatuses.Draft)
-                {
-                    continue;
-                }
-
-                var race = tournament.Race;
-
-                if (race == null)
-                {
-                    continue;
-                }
-
-                // OpenRegistration + quá deadline => ClosedRegistration
-                // StartDate của tournament bạn đang dùng làm RegistrationDeadline
-                if (tournament.Status == TournamentStatuses.OpenRegistration &&
-                    tournament.StartDate < today)
-                {
-                    tournament.Status = TournamentStatuses.ClosedRegistration;
-                    tournament.UpdatedAt = now;
-                }
-
-                // Không auto chuyển race/tournament sang Ongoing.
-                // Race start phải do Referee bấm Start sau inspection + Mark Ready.
-                // Service này chỉ tự đóng đăng ký theo deadline.
+                
+                tournament.Status = TournamentStatuses.ClosedRegistration;
+                tournament.UpdatedAt = localNow;
             }
 
-            await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync(cancellationToken);
         }
     }
 }
