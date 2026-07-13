@@ -45,31 +45,22 @@ public class PredictionEvaluationService
         }
 
         var winner = await _context.RaceResults
-            .AsNoTracking()
-            .Where(r =>
-                r.RaceId == raceId &&
-                var winner = await _context.RaceResults
-    .AsNoTracking()
-    .Where(r =>
-        r.RaceId == raceId &&
-        WinnerResultStatuses.Contains(r.Status) &&
-        !_context.RaceViolations.Any(v =>
-            v.RaceId == r.RaceId &&
-            v.RegistrationId == r.RegistrationId &&
-            v.Action == RaceViolationActions.Disqualified))
-    .OrderBy(r => r.FinishPosition)
-    .Select(r => new
-    {
-        r.RegistrationId,
-        HorseName = r.Registration.Horse.HorseName
-    })
-    .FirstOrDefaultAsync();
-            .Select(r => new
-            {
-                r.RegistrationId,
-                HorseName = r.Registration.Horse.HorseName
-            })
-            .FirstOrDefaultAsync();
+     .AsNoTracking()
+     .Where(r =>
+         r.RaceId == raceId &&
+         WinnerResultStatuses.Contains(r.Status) &&
+         r.FinishPosition.HasValue &&
+         !_context.RaceViolations.Any(v =>
+             v.RaceId == r.RaceId &&
+             v.RegistrationId == r.RegistrationId &&
+             v.Action == RaceViolationActions.Disqualified))
+     .OrderBy(r => r.FinishPosition)
+     .Select(r => new
+     {
+         r.RegistrationId,
+         HorseName = r.Registration.Horse.HorseName
+     })
+     .FirstOrDefaultAsync();
 
         if (winner == null)
         {
