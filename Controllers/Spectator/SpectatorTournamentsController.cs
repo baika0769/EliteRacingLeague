@@ -51,6 +51,9 @@ public class SpectatorTournamentsController : ControllerBase
                 prizePool = t.PrizePool,
                 imageUrl = t.ImageUrl,
                 status = t.Status,
+                seasonId = t.SeasonId,
+                seasonName = t.Season.SeasonName,
+                seasonStatus = t.Season.Status,
                 hasPredicted = _context.RacePredictions
                     .Any(p =>
                         p.SpectatorId == spectatorId &&
@@ -84,6 +87,7 @@ public class SpectatorTournamentsController : ControllerBase
                         raceId = r.RaceId,
                         raceName = r.RaceName,
                         raceDate = r.RaceDate,
+                        predictionDeadline = r.PredictionDeadline,
                         distanceMeters = r.DistanceMeters,
                         maxHorses = r.MaxHorses,
                         status = r.Status
@@ -116,6 +120,9 @@ public class SpectatorTournamentsController : ControllerBase
                 imageUrl = t.ImageUrl,
                 rules = t.Rules,
                 status = t.Status,
+                seasonId = t.SeasonId,
+                seasonName = t.Season.SeasonName,
+                seasonStatus = t.Season.Status,
                 race = _context.Races
                     .Where(r =>
                         r.TournamentId == t.TournamentId &&

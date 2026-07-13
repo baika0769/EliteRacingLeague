@@ -126,9 +126,27 @@ public class SpectatorPredictionsController : ControllerBase
             return NotFound("Tournament not found.");
         }
 
+        if (tournament.Season == null)
+        {
+            return BadRequest(new
+            {
+                code = "SEASON_NOT_ASSIGNED",
+                message = "Tournament has not been assigned to a season.",
+                tournamentId = tournament.TournamentId
+            });
+        }
+
         if (tournament.Season.Status != SeasonStatuses.Active)
         {
-            return BadRequest("Prediction is only allowed in an active season.");
+            return BadRequest(new
+            {
+                code = "SEASON_NOT_ACTIVE",
+                message = "Prediction is only allowed in an active season.",
+                tournamentId = tournament.TournamentId,
+                seasonId = tournament.Season.SeasonId,
+                seasonName = tournament.Season.SeasonName,
+                seasonStatus = tournament.Season.Status
+            });
         }
 
         if (tournament.Status is TournamentStatuses.Cancelled or TournamentStatuses.Completed)
