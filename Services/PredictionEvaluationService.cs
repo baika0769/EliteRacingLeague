@@ -324,6 +324,13 @@ public class PredictionEvaluationService
             payouts[allocatedRows[index].Prediction.PredictionId] += 1;
         }
 
+        foreach (var prediction in correctPredictions)
+        {
+            payouts[prediction.PredictionId] +=
+                legacyPointsPerCorrectPrediction;
+        }
+
+
         return payouts;
     }
 }
