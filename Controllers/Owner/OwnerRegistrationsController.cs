@@ -501,6 +501,12 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.RegistrationId,
                 r.RaceId,
                 TournamentName = r.Race.Tournament.TournamentName,
+
+                SeasonId = r.Race.Tournament.SeasonId,
+                SeasonName = r.Race.Tournament.Season.SeasonName,
+                SeasonStatus = r.Race.Tournament.Season.Status,
+                RegistrationDeadline = r.Race.Tournament.StartDate,
+
                 HorseName = r.Horse.HorseName,
                 r.SubmittedAt,
                 r.Status,
@@ -513,6 +519,12 @@ public class OwnerRegistrationsController : OwnerBaseController
             RegistrationId = r.RegistrationId,
             RaceId = r.RaceId,
             TournamentName = r.TournamentName,
+
+            SeasonId = r.SeasonId,
+            SeasonName = r.SeasonName,
+            SeasonStatus = r.SeasonStatus,
+            RegistrationDeadline = r.RegistrationDeadline.ToString("yyyy-MM-dd"),
+
             HorseName = r.HorseName,
             RegDate = r.SubmittedAt.ToString("yyyy-MM-dd"),
             Status = r.Status,
@@ -554,6 +566,12 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.RegistrationId,
                 r.RaceId,
                 TournamentName = r.Race.Tournament.TournamentName,
+
+                SeasonId = r.Race.Tournament.SeasonId,
+                SeasonName = r.Race.Tournament.Season.SeasonName,
+                SeasonStatus = r.Race.Tournament.Season.Status,
+                RegistrationDeadline = r.Race.Tournament.StartDate,
+
                 HorseName = r.Horse.HorseName,
                 JockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
                 RaceDate = r.Race.RaceDate,
@@ -566,6 +584,12 @@ public class OwnerRegistrationsController : OwnerBaseController
             RegistrationId = r.RegistrationId,
             RaceId = r.RaceId,
             TournamentName = r.TournamentName,
+
+            SeasonId = r.SeasonId,
+            SeasonName = r.SeasonName,
+            SeasonStatus = r.SeasonStatus,
+            RegistrationDeadline = r.RegistrationDeadline.ToString("yyyy-MM-dd"),
+
             HorseName = r.HorseName,
             JockeyName = r.JockeyName,
             RaceDate = r.RaceDate.ToString("yyyy-MM-dd"),
@@ -607,6 +631,12 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.RaceId,
                 r.HorseId,
                 TournamentName = r.Race.Tournament.TournamentName,
+
+                SeasonId = r.Race.Tournament.SeasonId,
+                SeasonName = r.Race.Tournament.Season.SeasonName,
+                SeasonStatus = r.Race.Tournament.Season.Status,
+                RegistrationDeadline = r.Race.Tournament.StartDate,
+
                 HorseName = r.Horse.HorseName,
                 JockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
                 RaceDate = r.Race.RaceDate,
@@ -630,6 +660,12 @@ public class OwnerRegistrationsController : OwnerBaseController
             RaceId = data.RaceId,
             HorseId = data.HorseId,
             TournamentName = data.TournamentName,
+
+            SeasonId = data.SeasonId,
+            SeasonName = data.SeasonName,
+            SeasonStatus = data.SeasonStatus,
+            RegistrationDeadline = data.RegistrationDeadline.ToString("yyyy-MM-dd"),
+
             HorseName = data.HorseName,
             JockeyName = data.JockeyName,
             RaceDate = data.RaceDate.ToString("yyyy-MM-dd"),
@@ -750,5 +786,6 @@ public class OwnerRegistrationsController : OwnerBaseController
 
         return Ok(response);
     }
+
 
 }
