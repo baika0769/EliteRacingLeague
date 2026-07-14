@@ -7,6 +7,7 @@ public class RefereeRaceLifecycleResponse
     public string TournamentName { get; set; } = null!;
     public string RaceStatus { get; set; } = null!;
     public string TournamentStatus { get; set; } = null!;
+    public string SeasonStatus { get; set; } = null!;
     public string CurrentStage { get; set; } = null!;
     public string? NextStage { get; set; }
     public RefereeAllowedActionsResponse AllowedActions { get; set; } = new();

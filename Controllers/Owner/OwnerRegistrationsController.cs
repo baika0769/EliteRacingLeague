@@ -135,6 +135,12 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 t.TournamentId,
                 t.TournamentName,
+
+                SeasonId = t.SeasonId,
+                SeasonName = t.Season.SeasonName,
+                SeasonStatus = t.Season.Status,
+                RegistrationDeadline = t.StartDate,
+
                 t.Location,
                 t.PrizePool,
                 t.ImageUrl,
@@ -162,6 +168,10 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 TournamentId = t.TournamentId,
                 TournamentName = t.TournamentName,
+                SeasonId = t.SeasonId,
+                SeasonName = t.SeasonName,
+                SeasonStatus = t.SeasonStatus,
+                RegistrationDeadline = t.RegistrationDeadline.ToString("yyyy-MM-dd"),
                 RaceId = t.RaceId,
                 RaceDate = t.RaceDate.ToString("yyyy-MM-dd"),
                 Location = t.Location,
@@ -740,6 +750,5 @@ public class OwnerRegistrationsController : OwnerBaseController
 
         return Ok(response);
     }
-
 
 }

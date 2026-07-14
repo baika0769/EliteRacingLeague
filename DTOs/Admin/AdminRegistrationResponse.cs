@@ -13,6 +13,7 @@
         public int TournamentId { get; set; }
         public string TournamentName { get; set; } = string.Empty;
         public string TournamentLocation { get; set; } = string.Empty;
+        public string TournamentStatus { get; set; } = string.Empty;
         public DateOnly RegistrationDeadline { get; set; }
 
         public int SeasonId { get; set; }

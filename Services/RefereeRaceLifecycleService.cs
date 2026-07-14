@@ -144,6 +144,7 @@ public class RefereeRaceLifecycleService
             TournamentName = race.TournamentName,
             RaceStatus = race.Status,
             TournamentStatus = race.TournamentStatus,
+            SeasonStatus = race.SeasonStatus,
             CurrentStage = GetCurrentStage(race.Status),
             NextStage = GetNextStage(race.Status),
             AllowedActions = actions,

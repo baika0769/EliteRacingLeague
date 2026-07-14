@@ -54,6 +54,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     TournamentId = r.Race.TournamentId,
                     TournamentName = r.Race.Tournament.TournamentName,
                     TournamentLocation = r.Race.Tournament.Location,
+                    TournamentStatus = r.Race.Tournament.Status,
                     RegistrationDeadline = r.Race.Tournament.StartDate,
 
                     SeasonId = r.Race.Tournament.SeasonId,
