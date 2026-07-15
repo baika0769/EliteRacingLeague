@@ -38,7 +38,9 @@ public class PredictionEvaluationService
                     r.RaceId,
                     r.Status,
                     TournamentStatus = r.Tournament.Status,
-                    SeasonStatus = r.Tournament.Season.Status
+                    SeasonStatus = r.Tournament.Season.Status,
+                    PointsPerCorrectPrediction =
+                        (int?)r.Tournament.Season.PointsPerCorrectPrediction
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -142,9 +144,23 @@ public class PredictionEvaluationService
                     message: "All predictions for this race were already evaluated.");
             }
 
-            var payouts = CalculatePayouts(
+            var pointsPerCorrectPrediction =
+                raceInfo.PointsPerCorrectPrediction.GetValueOrDefault(100);
+
+            if (pointsPerCorrectPrediction <= 0)
+            {
+                pointsPerCorrectPrediction = 100;
+            }
+
+            var allCorrectPredictions = predictions
+                .Where(prediction =>
+                    prediction.PredictedRegistrationId == winner.RegistrationId)
+                .ToList();
+
+            var payouts = CalculatePariMutuelPayouts(
                 predictions,
-                winner.RegistrationId);
+                allCorrectPredictions,
+                pointsPerCorrectPrediction);
 
             var now = _dateTimeProvider.UtcNow;
             var newlyCorrectPredictions = 0;
@@ -240,15 +256,82 @@ public class PredictionEvaluationService
         }
     }
 
-    private static Dictionary<int, int> CalculatePayouts(
+    private static Dictionary<int, int> CalculatePariMutuelPayouts(
         IReadOnlyCollection<RacePrediction> allPredictions,
-        int winnerRegistrationId)
+        IReadOnlyCollection<RacePrediction> correctPredictions,
+        int legacyPointsPerCorrectPrediction)
     {
-        return allPredictions.ToDictionary(
+        var payouts = allPredictions.ToDictionary(
             prediction => prediction.PredictionId,
-            prediction => prediction.PredictedRegistrationId == winnerRegistrationId
-                ? prediction.StakePoints
-                : 0);
+            _ => 0);
+
+        if (correctPredictions.Count == 0)
+        {
+            return payouts;
+        }
+
+        var totalPool = allPredictions.Sum(
+            prediction => Math.Max(0, prediction.StakePoints));
+
+        var totalCorrectStake = correctPredictions.Sum(
+            prediction => Math.Max(0, prediction.StakePoints));
+
+        // Compatibility for predictions created before stake points were added.
+        if (totalPool <= 0 || totalCorrectStake <= 0)
+        {
+            foreach (var prediction in correctPredictions)
+            {
+                payouts[prediction.PredictionId] = legacyPointsPerCorrectPrediction;
+            }
+
+            return payouts;
+        }
+
+        var remainingPoints = totalPool;
+
+        var allocatedRows = correctPredictions
+            .Select(prediction =>
+            {
+                var exactNumerator =
+                    (long)totalPool * Math.Max(0, prediction.StakePoints);
+
+                var basePayout = (int)(exactNumerator / totalCorrectStake);
+                var remainder = exactNumerator % totalCorrectStake;
+
+                remainingPoints -= basePayout;
+
+                return new
+                {
+                    Prediction = prediction,
+                    BasePayout = basePayout,
+                    Remainder = remainder
+                };
+            })
+            .OrderByDescending(row => row.Remainder)
+            .ThenByDescending(row => row.Prediction.StakePoints)
+            .ThenBy(row => row.Prediction.PredictionId)
+            .ToList();
+
+        foreach (var row in allocatedRows)
+        {
+            payouts[row.Prediction.PredictionId] = row.BasePayout;
+        }
+
+        for (var index = 0;
+             index < remainingPoints && index < allocatedRows.Count;
+             index++)
+        {
+            payouts[allocatedRows[index].Prediction.PredictionId] += 1;
+        }
+
+        foreach (var prediction in correctPredictions)
+        {
+            payouts[prediction.PredictionId] +=
+                legacyPointsPerCorrectPrediction;
+        }
+
+
+        return payouts;
     }
 }
 
