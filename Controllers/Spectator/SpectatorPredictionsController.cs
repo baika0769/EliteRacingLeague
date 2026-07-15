@@ -87,15 +87,13 @@ public class SpectatorPredictionsController : ControllerBase
         var utcNow = _dateTimeProvider.UtcNow;
         var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
 
-        if (request.StakePoints < SpectatorBettingRules.MinimumStakePoints ||
-            request.StakePoints > SpectatorBettingRules.MaximumStakePoints)
+        if (request.StakePoints < SpectatorBettingRules.MinimumStakePoints)
         {
             return BadRequest(new
             {
                 error = "Invalid stake points.",
-                message = "Stake points must be between 10 and 100.",
-                minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
-                maximumStakePoints = SpectatorBettingRules.MaximumStakePoints
+                message = $"Stake must be at least {SpectatorBettingRules.MinimumStakePoints} points.",
+                minimumStakePoints = SpectatorBettingRules.MinimumStakePoints
             });
         }
 
