@@ -39,15 +39,75 @@ public class HorseLeaderboardItem
 public class TournamentHorseItem
 {
     public int RegistrationId { get; set; }
+    public string RegistrationStatus { get; set; } = null!;
+
     public int HorseId { get; set; }
     public string HorseName { get; set; } = null!;
     public string? ImageUrl { get; set; }
+    public string? HorseImageUrl { get; set; }
+    public int BreedId { get; set; }
     public string? BreedName { get; set; }
     public int? Age { get; set; }
+    public int? HorseAge { get; set; }
+    public decimal? HeightCm { get; set; }
+    public decimal WeightKg { get; set; }
+    public decimal HorseWeightKg { get; set; }
     public string? HealthStatus { get; set; }
-    public string RegistrationStatus { get; set; } = null!;
+    public string? HorseHealthStatus { get; set; }
+    public string? AchievementSummary { get; set; }
+    public bool IsActive { get; set; }
+
+    public int OwnerId { get; set; }
     public string? OwnerName { get; set; }
+
+    public int? JockeyId { get; set; }
     public string? JockeyName { get; set; }
+    public string? JockeyProfileImageUrl { get; set; }
+
+    public string Status { get; set; } = null!;
+    public int TournamentId { get; set; }
+    public string? TournamentName { get; set; }
+    public string? TournamentImageUrl { get; set; }
+    public SpectatorHorseResponse Horse { get; set; } = null!;
+    public SpectatorOwnerResponse Owner { get; set; } = null!;
+    public SpectatorJockeyResponse? Jockey { get; set; }
+}
+
+public class SpectatorHorseResponse
+{
+    public int HorseId { get; set; }
+    public string HorseName { get; set; } = string.Empty;
+    public string? ImageUrl { get; set; }
+    public int BreedId { get; set; }
+    public string BreedName { get; set; } = string.Empty;
+    public int Age { get; set; }
+    public decimal? HeightCm { get; set; }
+    public decimal WeightKg { get; set; }
+    public string HealthStatus { get; set; } = string.Empty;
+    public string? AchievementSummary { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class SpectatorOwnerResponse
+{
+    public int OwnerId { get; set; }
+    public string OwnerName { get; set; } = string.Empty;
+}
+
+public class SpectatorJockeyResponse
+{
+    public int JockeyId { get; set; }
+    public string JockeyName { get; set; } = string.Empty;
+    public string? ProfileImageUrl { get; set; }
+    public decimal WeightKg { get; set; }
+    public int YearsOfExperience { get; set; }
+    public string HealthStatus { get; set; } = string.Empty;
+    public string? CertificateNo { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class SpectatorRaceRegistrationResponse : TournamentHorseItem
+{
 }
 
 public class SpectatorRewardSummary
