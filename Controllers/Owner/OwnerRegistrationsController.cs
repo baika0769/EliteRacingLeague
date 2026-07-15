@@ -51,6 +51,7 @@ public class OwnerRegistrationsController : OwnerBaseController
     // API 5: Approved Registrations
     // API 6: Registration Detail
     // API 7: Registration Journey
+    // API 8: Cancel Pending Registration
 
     private static string? GetHorseIneligibleReason(
         bool isActive,
@@ -599,6 +600,131 @@ public class OwnerRegistrationsController : OwnerBaseController
         return Ok(response);
     }
 
+
+
+    [HttpPut("{registrationId:int}/cancel")]
+    public async Task<IActionResult> CancelPendingRegistration(int registrationId)
+    {
+        var ownerId = GetCurrentUserId();
+
+        if (ownerId == null)
+        {
+            return InvalidToken();
+        }
+
+        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+
+        if (ownerProfileError != null)
+        {
+            return ownerProfileError;
+        }
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+
+        try
+        {
+            var registration = await _context.RaceRegistrations
+                .Include(r => r.Horse)
+                .Include(r => r.Race)
+                    .ThenInclude(r => r.Tournament)
+                .FirstOrDefaultAsync(r =>
+                    r.RegistrationId == registrationId &&
+                    r.OwnerId == ownerId.Value);
+
+            if (registration == null)
+            {
+                return NotFound(new
+                {
+                    message = "Không tìm thấy đơn đăng ký hoặc bạn không có quyền hủy đơn này.",
+                    registrationId
+                });
+            }
+
+            if (registration.Status == RaceRegistrationStatuses.Cancelled)
+            {
+                return Ok(new
+                {
+                    message = "Đơn đăng ký đã được hủy trước đó.",
+                    registrationId = registration.RegistrationId,
+                    status = registration.Status
+                });
+            }
+
+            if (registration.Status != RaceRegistrationStatuses.Pending)
+            {
+                return BadRequest(new
+                {
+                    message = "Chỉ có thể hủy đơn khi đơn vẫn đang chờ Admin duyệt.",
+                    registrationId = registration.RegistrationId,
+                    currentStatus = registration.Status,
+                    allowedStatus = RaceRegistrationStatuses.Pending
+                });
+            }
+
+            var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+            var localToday = DateOnly.FromDateTime(localNow);
+
+            if (registration.Race.Tournament.Status != TournamentStatuses.OpenRegistration)
+            {
+                return BadRequest(new
+                {
+                    message = "Tournament đã đóng đăng ký nên không thể tự hủy đơn.",
+                    registrationId = registration.RegistrationId,
+                    tournamentStatus = registration.Race.Tournament.Status
+                });
+            }
+
+            if (registration.Race.Tournament.StartDate < localToday)
+            {
+                return BadRequest(new
+                {
+                    message = "Đã qua hạn đăng ký nên không thể tự hủy đơn.",
+                    registrationId = registration.RegistrationId,
+                    registrationDeadline = registration.Race.Tournament.StartDate
+                });
+            }
+
+            if (registration.Race.RaceDate <= localNow)
+            {
+                return BadRequest(new
+                {
+                    message = "Race đã bắt đầu hoặc đã diễn ra nên không thể hủy đơn.",
+                    registrationId = registration.RegistrationId,
+                    raceDate = registration.Race.RaceDate
+                });
+            }
+
+            registration.Status = RaceRegistrationStatuses.Cancelled;
+
+            await _context.SaveChangesAsync();
+
+            await _notificationService.CreateForAdminsAsync(
+                "Race Registration Cancelled",
+                $"Owner cancelled registration #{registration.RegistrationId} for horse {registration.Horse.HorseName} in tournament {registration.Race.Tournament.TournamentName}.",
+                "RaceRegistration",
+                "/admin/registrations",
+                "RaceRegistration",
+                registration.RegistrationId);
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new
+            {
+                message = "Hủy đơn đăng ký thành công.",
+                registrationId = registration.RegistrationId,
+                raceId = registration.RaceId,
+                horseId = registration.HorseId,
+                status = registration.Status
+            });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
 
 
     [HttpGet("{registrationId:int}")]

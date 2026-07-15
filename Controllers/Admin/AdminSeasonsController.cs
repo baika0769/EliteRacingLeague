@@ -272,6 +272,115 @@ public class AdminSeasonsController : ControllerBase
         }
     }
 
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> DeleteSeason(int id)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable);
+
+        try
+        {
+            var season = await _context.Seasons
+                .Include(s => s.SeasonRewardRules)
+                .FirstOrDefaultAsync(s => s.SeasonId == id);
+
+            if (season == null)
+            {
+                return NotFound(new AdminActionResponse
+                {
+                    Message = "Season not found",
+                    Id = id
+                });
+            }
+
+            if (season.Status != SeasonStatuses.Draft &&
+                season.Status != SeasonStatuses.Cancelled)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Only draft or cancelled season can be deleted",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
+
+            var tournamentCount = await _context.Tournaments
+                .AsNoTracking()
+                .CountAsync(t => t.SeasonId == season.SeasonId);
+
+            if (tournamentCount > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot delete a season that already contains tournaments. Delete or move all tournaments first.",
+                    seasonId = season.SeasonId,
+                    seasonName = season.SeasonName,
+                    status = season.Status,
+                    tournamentCount
+                });
+            }
+
+            var seasonRewardCount = await _context.SeasonRewards
+                .AsNoTracking()
+                .CountAsync(r => r.SeasonId == season.SeasonId);
+
+            if (seasonRewardCount > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot delete a season that already has awarded season rewards.",
+                    seasonId = season.SeasonId,
+                    seasonName = season.SeasonName,
+                    status = season.Status,
+                    seasonRewardCount
+                });
+            }
+
+            var appliedRewardCount = await _context.SeasonRewards
+                .AsNoTracking()
+                .CountAsync(r => r.AppliedToSeasonId == season.SeasonId);
+
+            if (appliedRewardCount > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot delete this season because bonus rewards from another season were applied to it.",
+                    seasonId = season.SeasonId,
+                    seasonName = season.SeasonName,
+                    status = season.Status,
+                    appliedRewardCount
+                });
+            }
+
+            var deletedRewardRuleCount = season.SeasonRewardRules.Count;
+
+            if (deletedRewardRuleCount > 0)
+            {
+                _context.SeasonRewardRules.RemoveRange(season.SeasonRewardRules);
+            }
+
+            _context.Seasons.Remove(season);
+
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return Ok(new
+            {
+                message = "Season deleted successfully",
+                seasonId = season.SeasonId,
+                seasonName = season.SeasonName,
+                previousStatus = season.Status,
+                deletedRewardRuleCount
+            });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
     [HttpGet("{id:int}/leaderboard")]
     public async Task<IActionResult> GetSeasonLeaderboard(
         int id,
