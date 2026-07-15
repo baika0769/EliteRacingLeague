@@ -71,6 +71,190 @@ public class RefereeRacesController : ControllerBase
             : NotFound(new { message = "Race not found." });
     }
 
+    private Task<RefereeRaceSummaryResponse?> GetRefereeRaceSummaryAsync(int raceId)
+    {
+        return _context.Races
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(r => new RefereeRaceSummaryResponse
+            {
+                RaceId = r.RaceId,
+                RaceName = r.RaceName,
+                TournamentId = r.TournamentId,
+                TournamentName = r.Tournament.TournamentName,
+                RaceDate = r.RaceDate,
+                DistanceMeters = r.DistanceMeters,
+                Location = r.Location,
+                RaceStatus = r.Status,
+                MaxHorses = r.MaxHorses
+            })
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<List<RefereeRaceRegistrationResponse>> GetRefereeRegistrationResponsesAsync(
+        int raceId,
+        bool usePendingInspectionFallback,
+        bool includeInspectionReportFields)
+    {
+        var registrations = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(registration =>
+                registration.RaceId == raceId &&
+                ActiveRegistrationStatuses.Contains(registration.Status) &&
+                registration.Race.Status != RaceStatuses.Cancelled &&
+                registration.Race.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(registration => new RefereeRaceRegistrationResponse
+            {
+                RegistrationId = registration.RegistrationId,
+                RegistrationCode = "#REG-" + registration.RegistrationId.ToString(),
+                RegistrationStatus = registration.Status,
+                Status = registration.Status,
+                Horse = new RefereeHorseResponse
+                {
+                    HorseId = registration.Horse.HorseId,
+                    HorseName = registration.Horse.HorseName,
+                    ImageUrl = registration.Horse.ImageUrl,
+                    BreedId = registration.Horse.BreedId,
+                    BreedName = registration.Horse.Breed.BreedName,
+                    Breed = registration.Horse.Breed.BreedName,
+                    Age = registration.Horse.Age,
+                    HeightCm = registration.Horse.HeightCm,
+                    WeightKg = registration.Horse.WeightKg,
+                    HealthStatus = registration.Horse.HealthStatus,
+                    HealthCertificateImageUrl = registration.Horse.HealthCertificateImageUrl,
+                    HealthCertificate = registration.Horse.HealthCertificateImageUrl,
+                    IsActive = registration.Horse.IsActive,
+                    AchievementSummary = registration.Horse.AchievementSummary
+                },
+                Owner = new RefereeOwnerResponse
+                {
+                    OwnerId = registration.OwnerId,
+                    OwnerName = registration.Owner.Owner.FullName,
+                    Email = registration.Owner.Owner.Email,
+                    Phone = registration.Owner.Owner.Phone
+                },
+                Jockey = registration.Jockey == null
+                    ? null
+                    : new RefereeJockeyResponse
+                    {
+                        JockeyId = registration.Jockey.JockeyId,
+                        JockeyName = registration.Jockey.JockeyNavigation.FullName,
+                        ProfileImageUrl = registration.Jockey.ProfileImageUrl,
+                        Avatar = registration.Jockey.ProfileImageUrl,
+                        WeightKg = registration.Jockey.WeightKg,
+                        YearsOfExperience = registration.Jockey.YearsOfExperience,
+                        Experience = registration.Jockey.YearsOfExperience,
+                        HealthStatus = registration.Jockey.HealthStatus,
+                        CertificateNo = registration.Jockey.CertificateNo,
+                        CertificateFileUrl = registration.Jockey.CertificateFileUrl,
+                        HealthCertificateUrl = registration.Jockey.HealthCertificateUrl,
+                        HealthCertificate = registration.Jockey.HealthCertificateUrl,
+                        IsActive = registration.Jockey.IsActive,
+                        Email = registration.Jockey.JockeyNavigation.Email,
+                        Phone = registration.Jockey.JockeyNavigation.Phone
+                    },
+                HorseId = registration.HorseId,
+                HorseName = registration.Horse.HorseName,
+                HorseImageUrl = registration.Horse.ImageUrl,
+                HorseHealthStatus = registration.Horse.HealthStatus,
+                HealthCertificateImageUrl = registration.Horse.HealthCertificateImageUrl,
+                OwnerId = registration.OwnerId,
+                JockeyId = registration.JockeyId,
+                JockeyName = registration.Jockey == null
+                    ? null
+                    : registration.Jockey.JockeyNavigation.FullName
+            })
+            .ToListAsync();
+
+        if (registrations.Count == 0)
+        {
+            return registrations;
+        }
+
+        var registrationIds = registrations
+            .Select(registration => registration.RegistrationId)
+            .ToList();
+
+        var inspections = await _context.PreRaceInspections
+            .AsNoTracking()
+            .Where(inspection =>
+                inspection.RaceId == raceId &&
+                registrationIds.Contains(inspection.RegistrationId))
+            .Select(inspection => new
+            {
+                inspection.RegistrationId,
+                Response = new RefereeInspectionResponse
+                {
+                    InspectionId = inspection.InspectionId,
+                    Status = inspection.Status,
+                    Note = inspection.Note,
+                    InspectedAt = inspection.InspectedAt,
+                    InspectedByRefereeId = inspection.RefereeId
+                }
+            })
+            .ToListAsync();
+
+        var inspectionByRegistrationId = inspections.ToDictionary(
+            inspection => inspection.RegistrationId,
+            inspection => inspection.Response);
+
+        foreach (var registration in registrations)
+        {
+            if (inspectionByRegistrationId.TryGetValue(
+                registration.RegistrationId,
+                out var inspection))
+            {
+                registration.Inspection = inspection;
+            }
+            else if (usePendingInspectionFallback)
+            {
+                registration.Inspection = new RefereeInspectionResponse
+                {
+                    Status = PreRaceInspectionStatuses.PendingConfirmation
+                };
+            }
+
+            if (includeInspectionReportFields)
+            {
+                ApplyInspectionReportFields(registration);
+            }
+        }
+
+        return registrations;
+    }
+
+    private static void ApplyInspectionReportFields(
+        RefereeRaceRegistrationResponse registration)
+    {
+        var inspectionStatus = registration.Inspection?.Status ??
+            PreRaceInspectionStatuses.PendingConfirmation;
+
+        registration.Checklist = inspectionStatus == PreRaceInspectionStatuses.Failed
+            ? new[] { true, true, false, true }
+            : new[] { true, true, true, true };
+        registration.RuleRef = inspectionStatus == PreRaceInspectionStatuses.Failed
+            ? "Rule 2.2"
+            : "N/A";
+        registration.Severity = inspectionStatus == PreRaceInspectionStatuses.Failed
+            ? "HIGH"
+            : inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation
+                ? "MEDIUM"
+                : "-";
+        registration.Violation = inspectionStatus == PreRaceInspectionStatuses.Failed
+            ? registration.Inspection?.Note ?? "Violation detected."
+            : inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation
+                ? "Awaiting referee confirmation."
+                : "Full compliance with technical and health standards.";
+        registration.Outcome = inspectionStatus == PreRaceInspectionStatuses.Failed
+            ? "PROHIBITED"
+            : inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation
+                ? "PENDING"
+                : "ALLOWED";
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAssignedRaces()
     {
@@ -159,30 +343,13 @@ public class RefereeRacesController : ControllerBase
 
         if (!assigned)
         {
-            return Forbid();
+            return await BuildLifecycleAccessErrorAsync(raceId);
         }
 
-        var registrations = await _context.RaceRegistrations
-            .AsNoTracking()
-            .Where(r =>
-                r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
-                r.Race.Status != RaceStatuses.Cancelled &&
-                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
-            .Select(r => new
-            {
-                registrationId = r.RegistrationId,
-                horseId = r.HorseId,
-                horseName = r.Horse.HorseName,
-                horseImageUrl = r.Horse.ImageUrl,
-                horseHealthStatus = r.Horse.HealthStatus,
-                healthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
-                ownerId = r.OwnerId,
-                jockeyId = r.JockeyId,
-                jockeyName = r.Jockey == null ? null : r.Jockey.JockeyNavigation.FullName,
-                status = r.Status
-            })
-            .ToListAsync();
+        var registrations = await GetRefereeRegistrationResponsesAsync(
+            raceId,
+            usePendingInspectionFallback: false,
+            includeInspectionReportFields: false);
 
         return Ok(registrations);
     }
@@ -415,14 +582,14 @@ public class RefereeRacesController : ControllerBase
 
         if (!PreRaceInspectionStatuses.IsValid(request.Status))
         {
-            return BadRequest("Invalid inspection status.");
+            return BadRequest(new { message = "Invalid inspection status." });
         }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
 
         if (!assigned)
         {
-            return Forbid();
+            return await BuildLifecycleAccessErrorAsync(raceId);
         }
 
         var race = await _context.Races
@@ -434,12 +601,12 @@ public class RefereeRacesController : ControllerBase
 
         if (race == null)
         {
-            return NotFound("Race not found or has been cancelled.");
+            return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
         if (race.Status != RaceStatuses.AssignedReferee)
         {
-            return BadRequest("Pre-race inspection can only be updated when race status is AssignedReferee.");
+            return BadRequest(new { message = "Pre-race inspection can only be updated when race status is AssignedReferee." });
         }
 
         var registration = await _context.RaceRegistrations
@@ -452,7 +619,7 @@ public class RefereeRacesController : ControllerBase
 
         if (registration == null)
         {
-            return NotFound("Registration not found or has been cancelled.");
+            return BadRequest(new { message = "Registration does not belong to this race or is not ready to race." });
         }
 
         var inspection = await _context.PreRaceInspections
@@ -1078,121 +1245,51 @@ public class RefereeRacesController : ControllerBase
 
         if (!assigned)
         {
-            return Forbid();
+            return await BuildLifecycleAccessErrorAsync(raceId);
         }
 
-        var race = await _context.Races
-            .AsNoTracking()
-            .Where(r =>
-                r.RaceId == raceId &&
-                r.Status != RaceStatuses.Cancelled &&
-                r.Tournament.Status != TournamentStatuses.Cancelled)
-            .Select(r => new
-            {
-                r.RaceId,
-                r.RaceName,
-                r.Location
-            })
-            .FirstOrDefaultAsync();
+        var race = await GetRefereeRaceSummaryAsync(raceId);
 
         if (race == null)
         {
-            return NotFound("Race not found or has been cancelled.");
+            return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
-        var query = _context.RaceRegistrations
-            .AsNoTracking()
-            .Where(r =>
-                r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
-                r.Race.Status != RaceStatuses.Cancelled &&
-                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
-            .Select(r => new
-            {
-                registrationId = r.RegistrationId,
-                horseId = r.HorseId,
-                horseName = r.Horse.HorseName,
-                horseImageUrl = r.Horse.ImageUrl,
-                horseHealthStatus = r.Horse.HealthStatus,
-                healthCertificateImageUrl = r.Horse.HealthCertificateImageUrl,
-                registrationCode = "#REG-" + r.RegistrationId.ToString(),
-                inspectionStatus = _context.PreRaceInspections
-                    .Where(i => i.RaceId == raceId && i.RegistrationId == r.RegistrationId)
-                    .Select(i => i.Status)
-                    .FirstOrDefault() ?? PreRaceInspectionStatuses.PendingConfirmation,
-                note = _context.PreRaceInspections
-                    .Where(i => i.RaceId == raceId && i.RegistrationId == r.RegistrationId)
-                    .Select(i => i.Note)
-                    .FirstOrDefault()
-            });
+        var registrations = await GetRefereeRegistrationResponsesAsync(
+            raceId,
+            usePendingInspectionFallback: true,
+            includeInspectionReportFields: true);
+
+        var allCount = registrations.Count;
+        var failedCount = registrations.Count(registration =>
+            registration.Inspection?.Status == PreRaceInspectionStatuses.Failed);
+        var inspectedCount = registrations.Count(registration =>
+            registration.Inspection?.Status != PreRaceInspectionStatuses.PendingConfirmation);
+        var pendingCount = Math.Max(0, allCount - inspectedCount);
+        var filteredRegistrations = registrations.AsEnumerable();
 
         if (filter == "flagged")
         {
-            query = query.Where(x => x.inspectionStatus == PreRaceInspectionStatuses.Failed);
+            filteredRegistrations = filteredRegistrations.Where(registration =>
+                registration.Inspection?.Status == PreRaceInspectionStatuses.Failed);
         }
 
         if (filter == "pending")
         {
-            query = query.Where(x => x.inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation);
+            filteredRegistrations = filteredRegistrations.Where(registration =>
+                registration.Inspection?.Status == PreRaceInspectionStatuses.PendingConfirmation);
         }
 
-        var rows = await query.ToListAsync();
-
-        var allCount = await _context.RaceRegistrations
-            .CountAsync(r =>
-                r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
-                r.Race.Status != RaceStatuses.Cancelled &&
-                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
-
-        var failedCount = await _context.PreRaceInspections
-            .CountAsync(i =>
-                i.RaceId == raceId &&
-                i.Status == PreRaceInspectionStatuses.Failed &&
-                i.Registration.Race.Status != RaceStatuses.Cancelled &&
-                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
-
-        var inspectedCount = await _context.PreRaceInspections
-            .CountAsync(i =>
-                i.RaceId == raceId &&
-                i.Status != PreRaceInspectionStatuses.PendingConfirmation &&
-                i.Registration.Race.Status != RaceStatuses.Cancelled &&
-                i.Registration.Race.Tournament.Status != TournamentStatuses.Cancelled);
-
-        var pendingCount = Math.Max(0, allCount - inspectedCount);
-
-        return Ok(new
+        return Ok(new PreRaceInspectionReportResponse
         {
-            race,
-            counts = new
+            Race = race,
+            Counts = new PreRaceInspectionReportCountsResponse
             {
-                all = allCount,
-                flagged = failedCount,
-                pending = pendingCount
+                All = allCount,
+                Flagged = failedCount,
+                Pending = pendingCount
             },
-            items = rows.Select(x => new
-            {
-                x.registrationId,
-                x.horseId,
-                x.horseName,
-                x.horseImageUrl,
-                x.horseHealthStatus,
-                x.healthCertificateImageUrl,
-                x.registrationCode,
-                checklist = x.inspectionStatus == PreRaceInspectionStatuses.Failed
-                    ? new[] { true, true, false, true }
-                    : new[] { true, true, true, true },
-                ruleRef = x.inspectionStatus == PreRaceInspectionStatuses.Failed ? "Rule 2.2" : "N/A",
-                severity = x.inspectionStatus == PreRaceInspectionStatuses.Failed ? "HIGH" :
-                           x.inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation ? "MEDIUM" : "-",
-                violation = x.inspectionStatus == PreRaceInspectionStatuses.Failed
-                    ? x.note ?? "Violation detected."
-                    : x.inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation
-                        ? "Awaiting referee confirmation."
-                        : "Full compliance with technical and health standards.",
-                outcome = x.inspectionStatus == PreRaceInspectionStatuses.Failed ? "PROHIBITED" :
-                          x.inspectionStatus == PreRaceInspectionStatuses.PendingConfirmation ? "PENDING" : "ALLOWED"
-            })
+            Items = filteredRegistrations.ToList()
         });
     }
 
