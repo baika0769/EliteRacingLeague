@@ -164,6 +164,9 @@ public class SpectatorTournamentsController : ControllerBase
                         predictionDeadline = r.PredictionDeadline,
                         distanceMeters = r.DistanceMeters,
                         maxHorses = r.MaxHorses,
+                        tournamentId = r.TournamentId,
+                        tournamentName = r.Tournament.TournamentName,
+                        tournamentImageUrl = r.Tournament.ImageUrl,
                         status = r.Status
                     })
                     .FirstOrDefault()
@@ -258,6 +261,9 @@ public class SpectatorTournamentsController : ControllerBase
                         predictionDeadline = r.PredictionDeadline,
                         distanceMeters = r.DistanceMeters,
                         maxHorses = r.MaxHorses,
+                        tournamentId = r.TournamentId,
+                        tournamentName = r.Tournament.TournamentName,
+                        tournamentImageUrl = r.Tournament.ImageUrl,
                         status = r.Status
                     })
                     .FirstOrDefault()
@@ -351,17 +357,67 @@ public class SpectatorTournamentsController : ControllerBase
             .Select(r => new TournamentHorseItem
             {
                 RegistrationId = r.RegistrationId,
+                RegistrationStatus = r.Status,
                 HorseId = r.HorseId,
                 HorseName = r.Horse.HorseName,
                 ImageUrl = r.Horse.ImageUrl,
+                HorseImageUrl = r.Horse.ImageUrl,
+                BreedId = r.Horse.BreedId,
                 BreedName = r.Horse.Breed.BreedName,
                 Age = r.Horse.Age,
+                HorseAge = r.Horse.Age,
+                HeightCm = r.Horse.HeightCm,
+                WeightKg = r.Horse.WeightKg,
+                HorseWeightKg = r.Horse.WeightKg,
                 HealthStatus = r.Horse.HealthStatus,
-                RegistrationStatus = r.Status,
+                HorseHealthStatus = r.Horse.HealthStatus,
+                AchievementSummary = r.Horse.AchievementSummary,
+                IsActive = r.Horse.IsActive,
+                OwnerId = r.OwnerId,
                 OwnerName = r.Owner.Owner.FullName,
+                JockeyId = r.JockeyId,
                 JockeyName = r.Jockey == null
                     ? null
-                    : r.Jockey.JockeyNavigation.FullName
+                    : r.Jockey.JockeyNavigation.FullName,
+                JockeyProfileImageUrl = r.Jockey == null
+                    ? null
+                    : r.Jockey.ProfileImageUrl,
+                Status = r.Status,
+                TournamentId = r.Race.TournamentId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                TournamentImageUrl = r.Race.Tournament.ImageUrl,
+                Horse = new SpectatorHorseResponse
+                {
+                    HorseId = r.Horse.HorseId,
+                    HorseName = r.Horse.HorseName,
+                    ImageUrl = r.Horse.ImageUrl,
+                    BreedId = r.Horse.BreedId,
+                    BreedName = r.Horse.Breed.BreedName,
+                    Age = r.Horse.Age,
+                    HeightCm = r.Horse.HeightCm,
+                    WeightKg = r.Horse.WeightKg,
+                    HealthStatus = r.Horse.HealthStatus,
+                    AchievementSummary = r.Horse.AchievementSummary,
+                    IsActive = r.Horse.IsActive
+                },
+                Owner = new SpectatorOwnerResponse
+                {
+                    OwnerId = r.OwnerId,
+                    OwnerName = r.Owner.Owner.FullName
+                },
+                Jockey = r.Jockey == null
+                    ? null
+                    : new SpectatorJockeyResponse
+                    {
+                        JockeyId = r.Jockey.JockeyId,
+                        JockeyName = r.Jockey.JockeyNavigation.FullName,
+                        ProfileImageUrl = r.Jockey.ProfileImageUrl,
+                        WeightKg = r.Jockey.WeightKg,
+                        YearsOfExperience = r.Jockey.YearsOfExperience,
+                        HealthStatus = r.Jockey.HealthStatus,
+                        CertificateNo = r.Jockey.CertificateNo,
+                        IsActive = r.Jockey.IsActive
+                    }
             })
             .ToListAsync();
 
@@ -399,23 +455,114 @@ public class SpectatorTournamentsController : ControllerBase
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderBy(r => r.RegistrationId)
-            .Select(r => new
+            .Select(r => new SpectatorRaceRegistrationResponse
             {
-                registrationId = r.RegistrationId,
-                horseId = r.HorseId,
-                horseName = r.Horse.HorseName,
-                horseAge = r.Horse.Age,
-                horseWeightKg = r.Horse.WeightKg,
-                horseHealthStatus = r.Horse.HealthStatus,
-                ownerId = r.OwnerId,
-                jockeyId = r.JockeyId,
-                jockeyName = r.Jockey == null
+                RegistrationId = r.RegistrationId,
+                RegistrationStatus = r.Status,
+                HorseId = r.HorseId,
+                HorseName = r.Horse.HorseName,
+                ImageUrl = r.Horse.ImageUrl,
+                HorseImageUrl = r.Horse.ImageUrl,
+                BreedId = r.Horse.BreedId,
+                BreedName = r.Horse.Breed.BreedName,
+                Age = r.Horse.Age,
+                HorseAge = r.Horse.Age,
+                HeightCm = r.Horse.HeightCm,
+                WeightKg = r.Horse.WeightKg,
+                HorseWeightKg = r.Horse.WeightKg,
+                HealthStatus = r.Horse.HealthStatus,
+                HorseHealthStatus = r.Horse.HealthStatus,
+                AchievementSummary = r.Horse.AchievementSummary,
+                IsActive = r.Horse.IsActive,
+                OwnerId = r.OwnerId,
+                OwnerName = r.Owner.Owner.FullName,
+                JockeyId = r.JockeyId,
+                JockeyName = r.Jockey == null
                     ? null
                     : r.Jockey.JockeyNavigation.FullName,
-                status = r.Status
+                JockeyProfileImageUrl = r.Jockey == null
+                    ? null
+                    : r.Jockey.ProfileImageUrl,
+                Status = r.Status,
+                TournamentId = r.Race.TournamentId,
+                TournamentName = r.Race.Tournament.TournamentName,
+                TournamentImageUrl = r.Race.Tournament.ImageUrl,
+                Horse = new SpectatorHorseResponse
+                {
+                    HorseId = r.Horse.HorseId,
+                    HorseName = r.Horse.HorseName,
+                    ImageUrl = r.Horse.ImageUrl,
+                    BreedId = r.Horse.BreedId,
+                    BreedName = r.Horse.Breed.BreedName,
+                    Age = r.Horse.Age,
+                    HeightCm = r.Horse.HeightCm,
+                    WeightKg = r.Horse.WeightKg,
+                    HealthStatus = r.Horse.HealthStatus,
+                    AchievementSummary = r.Horse.AchievementSummary,
+                    IsActive = r.Horse.IsActive
+                },
+                Owner = new SpectatorOwnerResponse
+                {
+                    OwnerId = r.OwnerId,
+                    OwnerName = r.Owner.Owner.FullName
+                },
+                Jockey = r.Jockey == null
+                    ? null
+                    : new SpectatorJockeyResponse
+                    {
+                        JockeyId = r.Jockey.JockeyId,
+                        JockeyName = r.Jockey.JockeyNavigation.FullName,
+                        ProfileImageUrl = r.Jockey.ProfileImageUrl,
+                        WeightKg = r.Jockey.WeightKg,
+                        YearsOfExperience = r.Jockey.YearsOfExperience,
+                        HealthStatus = r.Jockey.HealthStatus,
+                        CertificateNo = r.Jockey.CertificateNo,
+                        IsActive = r.Jockey.IsActive
+                    }
             })
             .ToListAsync();
 
         return Ok(registrations);
+    }
+
+    [HttpGet("/api/spectator/races/{raceId:int}/details")]
+    public async Task<IActionResult> GetRaceDetail(int raceId)
+    {
+        var race = await _context.Races
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Draft &&
+                r.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(r => new SpectatorRaceDetailResponse
+            {
+                RaceId = r.RaceId,
+                RaceName = r.RaceName,
+                RaceDate = r.RaceDate,
+                DistanceMeters = r.DistanceMeters,
+                Location = r.Location,
+                Status = r.Status,
+                TournamentId = r.TournamentId,
+                TournamentName = r.Tournament.TournamentName,
+                TournamentImageUrl = r.Tournament.ImageUrl,
+                Tournament = new SpectatorTournamentSummaryResponse
+                {
+                    TournamentId = r.TournamentId,
+                    TournamentName = r.Tournament.TournamentName,
+                    ImageUrl = r.Tournament.ImageUrl
+                }
+            })
+            .FirstOrDefaultAsync();
+
+        if (race == null)
+        {
+            return NotFound(new
+            {
+                message = "Race not found or has been cancelled."
+            });
+        }
+
+        return Ok(race);
     }
 }

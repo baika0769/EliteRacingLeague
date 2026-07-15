@@ -216,6 +216,9 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 imageUrl = await SaveTournamentImageAsync(
                     request.TournamentImage);
+                imageUrl ??= string.IsNullOrWhiteSpace(request.ImageUrl)
+                    ? null
+                    : request.ImageUrl.Trim();
             }
             catch (InvalidOperationException ex)
             {
@@ -432,6 +435,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                         Id = id
                     });
                 }
+            }
+            else if (request.ImageUrl != null)
+            {
+                tournament.ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl)
+                    ? null
+                    : request.ImageUrl.Trim();
             }
 
             var now = _dateTimeProvider.UtcNow;

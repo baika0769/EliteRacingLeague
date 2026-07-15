@@ -85,6 +85,8 @@ public class RefereeRacesController : ControllerBase
                 RaceName = r.RaceName,
                 TournamentId = r.TournamentId,
                 TournamentName = r.Tournament.TournamentName,
+                TournamentImageUrl = r.Tournament.ImageUrl,
+                ImageUrl = r.Tournament.ImageUrl,
                 RaceDate = r.RaceDate,
                 DistanceMeters = r.DistanceMeters,
                 Location = r.Location,
