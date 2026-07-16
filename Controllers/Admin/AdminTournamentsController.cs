@@ -18,6 +18,9 @@ namespace Eliteracingleague.API.Controllers.Admin
     [Route("api/admin/tournaments")]
     public class AdminTournamentsController : ControllerBase
     {
+        private const decimal MaxPrizePool = 1_000_000_000m;
+        private const int MaxRulesLength = 10_000;
+
         private readonly EliteRacingLeagueContext _context;
         private readonly IWebHostEnvironment _env;
         private readonly TournamentStatusService _tournamentStatusService;
@@ -210,6 +213,65 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var normalizedTournamentName = request.TournamentName.Trim();
+            var duplicateNameExists = await _context.Tournaments
+                .AsNoTracking()
+                .AnyAsync(t =>
+                    t.SeasonId == season.SeasonId &&
+                    t.Status != TournamentStatuses.Cancelled &&
+                    t.TournamentName == normalizedTournamentName);
+
+            if (duplicateNameExists)
+            {
+                return Conflict(new
+                {
+                    message = "A tournament with the same name already exists in this season.",
+                    seasonId = season.SeasonId,
+                    seasonName = season.SeasonName
+                });
+            }
+
+            if (request.RefereeId.HasValue)
+            {
+                var refereeIsEligible = await _context.RaceReferees
+                    .AsNoTracking()
+                    .AnyAsync(r =>
+                        r.RefereeId == request.RefereeId.Value &&
+                        r.IsActive &&
+                        r.Referee.Role == UserRoles.RaceReferee &&
+                        r.Referee.Status == UserStatuses.Active);
+
+                if (!refereeIsEligible)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Selected referee does not exist or is not active.",
+                        refereeId = request.RefereeId.Value
+                    });
+                }
+
+                var hasScheduleConflict = await _context.RefereeAssignments
+                    .AsNoTracking()
+                    .AnyAsync(a =>
+                        a.RefereeId == request.RefereeId.Value &&
+                        a.Status == RefereeAssignmentStatuses.Assigned &&
+                        a.Race.RaceDate == raceDateTime &&
+                        a.Race.Status != RaceStatuses.Cancelled &&
+                        a.Race.Status != RaceStatuses.Published &&
+                        a.Race.Tournament.Status != TournamentStatuses.Cancelled &&
+                        a.Race.Tournament.Status != TournamentStatuses.Completed);
+
+                if (hasScheduleConflict)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Selected referee is already assigned to another race at the same time.",
+                        refereeId = request.RefereeId.Value,
+                        raceDateTime
+                    });
+                }
+            }
+
             string? imageUrl;
 
             try
@@ -237,8 +299,10 @@ namespace Eliteracingleague.API.Controllers.Admin
 
                 var tournament = new Tournament
                 {
-                    TournamentName = request.TournamentName.Trim(),
-                    Description = request.Description,
+                    TournamentName = normalizedTournamentName,
+                    Description = string.IsNullOrWhiteSpace(request.Description)
+                        ? null
+                        : request.Description.Trim(),
                     Location = request.Location!.Trim(),
                     StartDate = request.RegistrationDeadline,
                     EndDate = request.RaceDate,
@@ -246,7 +310,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     PrizePool = request.PrizePool,
                     ImageUrl = imageUrl,
                     Status = TournamentStatuses.Draft,
-                    Rules = request.Rules,
+                    Rules = string.IsNullOrWhiteSpace(request.Rules)
+                        ? null
+                        : request.Rules.Trim(),
                     SeasonId = season.SeasonId,
                     CreatedAt = now,
                     CreatedBy = adminId,
@@ -277,6 +343,32 @@ namespace Eliteracingleague.API.Controllers.Admin
                 _context.Races.Add(race);
                 await _context.SaveChangesAsync();
 
+                if (request.RefereeId.HasValue)
+                {
+                    _context.RefereeAssignments.Add(new RefereeAssignment
+                    {
+                        RaceId = race.RaceId,
+                        RefereeId = request.RefereeId.Value,
+                        AssignedBy = adminId,
+                        Status = RefereeAssignmentStatuses.Assigned,
+                        AssignedAt = now
+                    });
+
+                    race.Status = RaceStatuses.AssignedReferee;
+                    race.UpdatedAt = now;
+
+                    await _notificationService.CreateForUserAsync(
+                        request.RefereeId.Value,
+                        "Race Assigned",
+                        $"You have been assigned to referee {race.RaceName} in tournament {tournament.TournamentName}.",
+                        "RefereeRaceAssignment",
+                        "/referee/races",
+                        "Race",
+                        race.RaceId);
+
+                    await _context.SaveChangesAsync();
+                }
+
                 await transaction.CommitAsync();
 
                 return Ok(new
@@ -289,7 +381,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     seasonId = season.SeasonId,
                     seasonName = season.SeasonName,
                     seasonStatus = season.Status,
-                    imageUrl = tournament.ImageUrl
+                    imageUrl = tournament.ImageUrl,
+                    refereeId = request.RefereeId,
+                    raceStatus = race.Status
                 });
             }
             catch
@@ -387,6 +481,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var normalizedTournamentName = request.TournamentName.Trim();
+            var duplicateNameExists = await _context.Tournaments
+                .AsNoTracking()
+                .AnyAsync(t =>
+                    t.TournamentId != tournament.TournamentId &&
+                    t.SeasonId == matchingSeason.SeasonId &&
+                    t.Status != TournamentStatuses.Cancelled &&
+                    t.TournamentName == normalizedTournamentName);
+
+            if (duplicateNameExists)
+            {
+                return Conflict(new
+                {
+                    message = "A tournament with the same name already exists in this season.",
+                    tournamentId = tournament.TournamentId,
+                    seasonId = matchingSeason.SeasonId,
+                    seasonName = matchingSeason.SeasonName
+                });
+            }
+
             if (race != null)
             {
                 var hasRegistrations = await _context.RaceRegistrations
@@ -445,14 +559,18 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var now = _dateTimeProvider.UtcNow;
 
-            tournament.TournamentName = request.TournamentName.Trim();
-            tournament.Description = request.Description;
+            tournament.TournamentName = normalizedTournamentName;
+            tournament.Description = string.IsNullOrWhiteSpace(request.Description)
+                ? null
+                : request.Description.Trim();
             tournament.Location = request.Location!.Trim();
             tournament.StartDate = request.RegistrationDeadline;
             tournament.EndDate = request.RaceDate;
             tournament.MaxHorses = request.MaxHorses;
             tournament.PrizePool = request.PrizePool;
-            tournament.Rules = request.Rules;
+            tournament.Rules = string.IsNullOrWhiteSpace(request.Rules)
+                ? null
+                : request.Rules.Trim();
             tournament.SeasonId = matchingSeason.SeasonId;
             tournament.UpdatedAt = now;
 
@@ -899,11 +1017,21 @@ namespace Eliteracingleague.API.Controllers.Admin
             return Ok(referees);
         }
 
-        [HttpPut("{id}/assign-referee")]
+        [HttpPut("{id:int}/assign-referee")]
         public async Task<IActionResult> AssignReferee(
             int id,
             [FromBody] AssignRefereeRequest request)
         {
+            var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            if (!int.TryParse(adminIdText, out var adminId))
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid admin token"
+                });
+            }
+
             var race = await _context.Races
                 .Include(r => r.Tournament)
                 .FirstOrDefaultAsync(r => r.TournamentId == id);
@@ -916,8 +1044,29 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (race.Tournament.Status is
+                    TournamentStatuses.Completed or
+                    TournamentStatuses.Cancelled ||
+                race.Status is
+                    RaceStatuses.Ongoing or
+                    RaceStatuses.Finished or
+                    RaceStatuses.ResultPending or
+                    RaceStatuses.Published or
+                    RaceStatuses.Cancelled)
+            {
+                return BadRequest(new
+                {
+                    message = "Referee cannot be changed after the race has started, finished, or been cancelled.",
+                    tournamentStatus = race.Tournament.Status,
+                    raceStatus = race.Status
+                });
+            }
+
             var referee = await _context.RaceReferees
-                .FirstOrDefaultAsync(r => r.RefereeId == request.RefereeId);
+                .Include(r => r.Referee)
+                .FirstOrDefaultAsync(r =>
+                    r.RefereeId == request.RefereeId &&
+                    r.Referee.Role == UserRoles.RaceReferee);
 
             if (referee == null)
             {
@@ -927,62 +1076,113 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (!referee.IsActive ||
+                referee.Referee.Status != UserStatuses.Active)
+            {
+                return BadRequest(new
+                {
+                    message = "Only an active referee account can be assigned.",
+                    refereeId = referee.RefereeId,
+                    userStatus = referee.Referee.Status,
+                    refereeIsActive = referee.IsActive
+                });
+            }
+
             var existing = await _context.RefereeAssignments
                 .FirstOrDefaultAsync(x => x.RaceId == race.RaceId);
 
-            if (existing != null)
+            if (existing != null &&
+                existing.RefereeId == request.RefereeId &&
+                existing.Status == RefereeAssignmentStatuses.Assigned)
             {
-                existing.RefereeId = request.RefereeId;
-                existing.Status = RefereeAssignmentStatuses.Assigned;
-                existing.AssignedAt = _dateTimeProvider.UtcNow;
-            }
-            else
-            {
-                var adminIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-                if (!int.TryParse(adminIdText, out var adminId))
+                return Ok(new
                 {
-                    return Unauthorized(new
-                    {
-                        message = "Invalid admin token"
-                    });
-                }
+                    message = "This referee is already assigned to the race.",
+                    refereeId = request.RefereeId,
+                    raceId = race.RaceId
+                });
+            }
 
-                _context.RefereeAssignments.Add(
-                    new RefereeAssignment
+            var hasScheduleConflict = await _context.RefereeAssignments
+                .AsNoTracking()
+                .AnyAsync(a =>
+                    a.RaceId != race.RaceId &&
+                    a.RefereeId == request.RefereeId &&
+                    a.Status == RefereeAssignmentStatuses.Assigned &&
+                    a.Race.RaceDate == race.RaceDate &&
+                    a.Race.Status != RaceStatuses.Cancelled &&
+                    a.Race.Status != RaceStatuses.Published &&
+                    a.Race.Tournament.Status != TournamentStatuses.Cancelled &&
+                    a.Race.Tournament.Status != TournamentStatuses.Completed);
+
+            if (hasScheduleConflict)
+            {
+                return BadRequest(new
+                {
+                    message = "Selected referee is already assigned to another race at the same time.",
+                    refereeId = request.RefereeId,
+                    raceDateTime = race.RaceDate
+                });
+            }
+
+            await using var transaction =
+                await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                var now = _dateTimeProvider.UtcNow;
+
+                if (existing != null)
+                {
+                    existing.RefereeId = request.RefereeId;
+                    existing.AssignedBy = adminId;
+                    existing.Status = RefereeAssignmentStatuses.Assigned;
+                    existing.AssignedAt = now;
+                }
+                else
+                {
+                    _context.RefereeAssignments.Add(new RefereeAssignment
                     {
                         RaceId = race.RaceId,
                         RefereeId = request.RefereeId,
                         AssignedBy = adminId,
                         Status = RefereeAssignmentStatuses.Assigned,
-                        AssignedAt = _dateTimeProvider.UtcNow
+                        AssignedAt = now
                     });
-            }
+                }
 
-            if (race.Tournament.Status == TournamentStatuses.Ongoing)
-            {
-                race.Status = RaceStatuses.Ongoing;
-            }
-            else if (race.Status == RaceStatuses.Scheduled)
-            {
-                race.Status = RaceStatuses.AssignedReferee;
-            }
+                if (race.Status == RaceStatuses.Scheduled)
+                {
+                    race.Status = RaceStatuses.AssignedReferee;
+                }
 
-            race.UpdatedAt = _dateTimeProvider.UtcNow;
-            await _notificationService.CreateForUserAsync(
-    request.RefereeId,
-    "Race Assigned",
-    $"You have been assigned to referee {race.RaceName} in tournament {race.Tournament.TournamentName}.",
-    "RefereeRaceAssignment",
-    "/referee/races",
-    "Race",
-    race.RaceId);
-            await _context.SaveChangesAsync();
+                race.UpdatedAt = now;
 
-            return Ok(new
+                await _notificationService.CreateForUserAsync(
+                    request.RefereeId,
+                    "Race Assigned",
+                    $"You have been assigned to referee {race.RaceName} in tournament {race.Tournament.TournamentName}.",
+                    "RefereeRaceAssignment",
+                    "/referee/races",
+                    "Race",
+                    race.RaceId);
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new
+                {
+                    message = "Referee assigned successfully",
+                    refereeId = request.RefereeId,
+                    raceId = race.RaceId,
+                    raceStatus = race.Status
+                });
+            }
+            catch
             {
-                message = "Referee assigned successfully"
-            });
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
 
         [HttpPut("{id}/cancel")]
@@ -1118,29 +1318,42 @@ namespace Eliteracingleague.API.Controllers.Admin
             AdminTournamentRequest request,
             int id)
         {
-            if (string.IsNullOrWhiteSpace(request.TournamentName))
+            var tournamentName = request.TournamentName?.Trim() ?? string.Empty;
+            if (tournamentName.Length is < 3 or > 200)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Tournament name is required",
+                    Message = "Tournament name must contain between 3 and 200 characters",
                     Id = id
                 });
             }
 
-            if (request.TournamentName.Trim().Length > 200)
+            var location = request.Location?.Trim() ?? string.Empty;
+            if (location.Length is < 3 or > 255)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Tournament name cannot exceed 200 characters",
+                    Message = "Location must contain between 3 and 255 characters",
                     Id = id
                 });
             }
 
-            if (string.IsNullOrWhiteSpace(request.Location))
+            if (!string.IsNullOrWhiteSpace(request.Description) &&
+                request.Description.Trim().Length > 1000)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Location is required",
+                    Message = "Description cannot exceed 1,000 characters",
+                    Id = id
+                });
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Rules) &&
+                request.Rules.Trim().Length > MaxRulesLength)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = $"Rules cannot exceed {MaxRulesLength:N0} characters",
                     Id = id
                 });
             }
@@ -1154,11 +1367,29 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            if (request.RaceDate.Year is < 2000 or > 2100)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Race date year must be between 2000 and 2100",
+                    Id = id
+                });
+            }
+
             if (request.RegistrationDeadline == default)
             {
                 return BadRequest(new AdminActionResponse
                 {
                     Message = "Registration deadline is required",
+                    Id = id
+                });
+            }
+
+            if (request.RegistrationDeadline.Year is < 2000 or > 2100)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Registration deadline year must be between 2000 and 2100",
                     Id = id
                 });
             }
@@ -1172,9 +1403,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (!TryParseRaceStartTime(
-                    request.RaceStartTime,
-                    out _))
+            if (!TryParseRaceStartTime(request.RaceStartTime, out _))
             {
                 return BadRequest(new AdminActionResponse
                 {
@@ -1183,19 +1412,16 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.MaxHorses < 1 ||
-                request.MaxHorses > 20)
+            if (request.MaxHorses is < 2 or > 20)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Max horses must be between 1 and 20",
+                    Message = "Max horses must be between 2 and 20",
                     Id = id
                 });
             }
 
-            if (request.DistanceMeters != 1000 &&
-                request.DistanceMeters != 1500 &&
-                request.DistanceMeters != 2400)
+            if (request.DistanceMeters is not (1000 or 1500 or 2400))
             {
                 return BadRequest(new AdminActionResponse
                 {
@@ -1204,16 +1430,42 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.PrizePool < 0)
+            if (request.PrizePool is < 0 or > MaxPrizePool)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = "Prize pool cannot be negative",
+                    Message = $"Prize pool must be between 0 and {MaxPrizePool:N0}",
                     Id = id
                 });
             }
 
+            if (!string.IsNullOrWhiteSpace(request.ImageUrl))
+            {
+                var imageUrl = request.ImageUrl.Trim();
+                if (imageUrl.Length > 500 || !IsAllowedImageUrl(imageUrl))
+                {
+                    return BadRequest(new AdminActionResponse
+                    {
+                        Message = "Image URL must be a relative path or an HTTP/HTTPS URL with at most 500 characters",
+                        Id = id
+                    });
+                }
+            }
+
             return null;
+        }
+
+        private static bool IsAllowedImageUrl(string imageUrl)
+        {
+            if (imageUrl.StartsWith("/", StringComparison.Ordinal) &&
+                !imageUrl.StartsWith("//", StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri) &&
+                   (uri.Scheme == Uri.UriSchemeHttp ||
+                    uri.Scheme == Uri.UriSchemeHttps);
         }
 
         private async Task<string?> SaveTournamentImageAsync(IFormFile? file)
@@ -1223,17 +1475,38 @@ namespace Eliteracingleague.API.Controllers.Admin
                 return null;
             }
 
-            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp" };
-            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-
-            if (!allowedExtensions.Contains(extension))
+            if (string.IsNullOrWhiteSpace(file.FileName))
             {
-                throw new InvalidOperationException("Only JPG, JPEG, PNG, and WEBP images are allowed.");
+                throw new InvalidOperationException("Tournament image file name is invalid.");
+            }
+
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".webp" };
+            var allowedContentTypes = new[]
+            {
+                "image/jpeg",
+                "image/png",
+                "image/webp"
+            };
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            var contentType = (file.ContentType ?? string.Empty).Trim().ToLowerInvariant();
+
+            if (!allowedExtensions.Contains(extension) ||
+                !allowedContentTypes.Contains(contentType))
+            {
+                throw new InvalidOperationException(
+                    "Only valid JPG, JPEG, PNG, and WEBP images are allowed.");
             }
 
             if (file.Length > 5 * 1024 * 1024)
             {
-                throw new InvalidOperationException("Tournament image must be less than 5MB.");
+                throw new InvalidOperationException("Tournament image must be 5MB or smaller.");
+            }
+
+            if (!await HasValidImageSignatureAsync(file, extension))
+            {
+                throw new InvalidOperationException(
+                    "The uploaded file content does not match a valid JPG, PNG, or WEBP image.");
             }
 
             var webRootPath = _env.WebRootPath;
@@ -1244,11 +1517,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             var uploadFolder = Path.Combine(webRootPath, "uploads", "tournaments");
-
-            if (!Directory.Exists(uploadFolder))
-            {
-                Directory.CreateDirectory(uploadFolder);
-            }
+            Directory.CreateDirectory(uploadFolder);
 
             var fileName = $"{Guid.NewGuid():N}{extension}";
             var fullPath = Path.Combine(uploadFolder, fileName);
@@ -1259,6 +1528,47 @@ namespace Eliteracingleague.API.Controllers.Admin
             return $"/uploads/tournaments/{fileName}";
         }
 
+        private static async Task<bool> HasValidImageSignatureAsync(
+            IFormFile file,
+            string extension)
+        {
+            await using var stream = file.OpenReadStream();
+            var header = new byte[12];
+            var bytesRead = await stream.ReadAsync(header.AsMemory(0, header.Length));
+
+            return extension switch
+            {
+                ".jpg" or ".jpeg" =>
+                    bytesRead >= 3 &&
+                    header[0] == 0xFF &&
+                    header[1] == 0xD8 &&
+                    header[2] == 0xFF,
+
+                ".png" =>
+                    bytesRead >= 8 &&
+                    header[0] == 0x89 &&
+                    header[1] == 0x50 &&
+                    header[2] == 0x4E &&
+                    header[3] == 0x47 &&
+                    header[4] == 0x0D &&
+                    header[5] == 0x0A &&
+                    header[6] == 0x1A &&
+                    header[7] == 0x0A,
+
+                ".webp" =>
+                    bytesRead >= 12 &&
+                    header[0] == 0x52 &&
+                    header[1] == 0x49 &&
+                    header[2] == 0x46 &&
+                    header[3] == 0x46 &&
+                    header[8] == 0x57 &&
+                    header[9] == 0x45 &&
+                    header[10] == 0x42 &&
+                    header[11] == 0x50,
+
+                _ => false
+            };
+        }
 
         private async Task CancelTournamentRelatedDataAsync(List<int> raceIds, DateTime now)
         {

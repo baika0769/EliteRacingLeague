@@ -45,7 +45,12 @@ public class AdminSystemController : ControllerBase
 
         if (!TryParseLocalTime(request.NowLocal, out var localNow))
         {
-            return BadRequest(new { message = "Invalid nowLocal. Use format yyyy-MM-ddTHH:mm:ss." });
+            return BadRequest(new { message = "Invalid nowLocal. Use exact format yyyy-MM-ddTHH:mm:ss." });
+        }
+
+        if (localNow.Year is < 2000 or > 2100)
+        {
+            return BadRequest(new { message = "Override time must be between year 2000 and 2100." });
         }
 
         var timeZoneId = string.IsNullOrWhiteSpace(request.Timezone)
@@ -82,12 +87,26 @@ public class AdminSystemController : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = DisabledMessage });
         }
 
-        if (request.Days < 0 || request.Hours < 0 || request.Minutes < 0)
+        if (request.Days < 0 || request.Days > 365 ||
+            request.Hours < 0 || request.Hours > 23 ||
+            request.Minutes < 0 || request.Minutes > 59)
         {
-            return BadRequest(new { message = "Advance duration cannot be negative." });
+            return BadRequest(new
+            {
+                message = "Advance duration must use 0-365 days, 0-23 hours, and 0-59 minutes."
+            });
         }
 
-        var duration = new TimeSpan(request.Days, request.Hours, request.Minutes, 0);
+        if (request.Days == 0 && request.Hours == 0 && request.Minutes == 0)
+        {
+            return BadRequest(new { message = "Advance duration must be greater than zero." });
+        }
+
+        var duration = new TimeSpan(
+            request.Days,
+            request.Hours,
+            request.Minutes,
+            0);
         _dateTimeProvider.Advance(duration);
 
         SyncTimeStatusesResponse? syncResult = null;
@@ -148,8 +167,13 @@ public class AdminSystemController : ControllerBase
 
     private static bool TryParseLocalTime(string? value, out DateTime dateTime)
     {
-        return DateTime.TryParse(
-            value,
+        return DateTime.TryParseExact(
+            value?.Trim(),
+            new[]
+            {
+                "yyyy-MM-ddTHH:mm:ss",
+                "yyyy-MM-ddTHH:mm"
+            },
             CultureInfo.InvariantCulture,
             DateTimeStyles.None,
             out dateTime);

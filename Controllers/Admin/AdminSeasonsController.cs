@@ -1,4 +1,5 @@
-﻿using System.Data;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
@@ -15,6 +16,11 @@ namespace Eliteracingleague.API.Controllers.Admin;
 [Route("api/admin/seasons")]
 public class AdminSeasonsController : ControllerBase
 {
+    private const int MaxPredictionPoints = 1_000_000;
+    private const int MaxRewardRules = 100;
+    private const int MaxRewardBonusPoints = 1_000_000;
+    private const int MaxSeasonDurationDays = 3660;
+
     private readonly EliteRacingLeagueContext _context;
     private readonly SpectatorLeaderboardService _leaderboardService;
 
@@ -132,6 +138,21 @@ public class AdminSeasonsController : ControllerBase
 
         var startDate = request.StartDate.Date;
         var endDate = request.EndDate.Date;
+        var normalizedName = request.SeasonName.Trim();
+
+        var duplicateNameExists = await _context.Seasons
+            .AsNoTracking()
+            .AnyAsync(s =>
+                s.Status != SeasonStatuses.Cancelled &&
+                s.SeasonName == normalizedName);
+
+        if (duplicateNameExists)
+        {
+            return Conflict(new
+            {
+                message = "Season name already exists"
+            });
+        }
 
         await using var transaction = await _context.Database.BeginTransactionAsync(
             IsolationLevel.Serializable);
@@ -159,7 +180,7 @@ public class AdminSeasonsController : ControllerBase
 
             var season = new Season
             {
-                SeasonName = request.SeasonName.Trim(),
+                SeasonName = normalizedName,
                 StartDate = startDate,
                 EndDate = endDate,
                 Status = SeasonStatuses.Draft,
@@ -200,6 +221,7 @@ public class AdminSeasonsController : ControllerBase
 
         var startDate = request.StartDate.Date;
         var endDate = request.EndDate.Date;
+        var normalizedName = request.SeasonName.Trim();
 
         await using var transaction = await _context.Database.BeginTransactionAsync(
             IsolationLevel.Serializable);
@@ -229,6 +251,22 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
+            var duplicateNameExists = await _context.Seasons
+                .AsNoTracking()
+                .AnyAsync(s =>
+                    s.SeasonId != season.SeasonId &&
+                    s.Status != SeasonStatuses.Cancelled &&
+                    s.SeasonName == normalizedName);
+
+            if (duplicateNameExists)
+            {
+                return Conflict(new
+                {
+                    message = "Season name already exists",
+                    seasonId = season.SeasonId
+                });
+            }
+
             var overlappingSeason = await FindOverlappingSeasonAsync(
                 startDate,
                 endDate,
@@ -248,7 +286,7 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
-            season.SeasonName = request.SeasonName.Trim();
+            season.SeasonName = normalizedName;
             season.StartDate = startDate;
             season.EndDate = endDate;
             season.PointsPerCorrectPrediction = request.PointsPerCorrectPrediction;
@@ -484,6 +522,14 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
+        if (request.Rules.Count > MaxRewardRules)
+        {
+            return BadRequest(new
+            {
+                message = $"A season can have at most {MaxRewardRules} reward rules"
+            });
+        }
+
         var duplicateRank = request.Rules
             .GroupBy(r => r.RankPosition)
             .FirstOrDefault(g => g.Count() > 1);
@@ -496,13 +542,30 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        foreach (var rule in request.Rules)
+        var orderedRanks = request.Rules
+            .Select(r => r.RankPosition)
+            .OrderBy(rank => rank)
+            .ToArray();
+
+        for (var index = 0; index < orderedRanks.Length; index++)
         {
-            if (rule.RankPosition <= 0)
+            var expectedRank = index + 1;
+            if (orderedRanks[index] != expectedRank)
             {
                 return BadRequest(new
                 {
-                    message = "Rank position must be greater than 0"
+                    message = $"Reward ranks must be consecutive from 1. Missing or invalid rank: {expectedRank}"
+                });
+            }
+        }
+
+        foreach (var rule in request.Rules)
+        {
+            if (rule.RankPosition <= 0 || rule.RankPosition > MaxRewardRules)
+            {
+                return BadRequest(new
+                {
+                    message = $"Rank position must be between 1 and {MaxRewardRules}"
                 });
             }
 
@@ -522,11 +585,20 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
-            if (rule.BonusPoints < 0)
+            if (!string.IsNullOrWhiteSpace(rule.RewardDescription) &&
+                rule.RewardDescription.Trim().Length > 1000)
             {
                 return BadRequest(new
                 {
-                    message = "Bonus points cannot be negative"
+                    message = $"Reward description for rank {rule.RankPosition} cannot exceed 1000 characters"
+                });
+            }
+
+            if (rule.BonusPoints < 0 || rule.BonusPoints > MaxRewardBonusPoints)
+            {
+                return BadRequest(new
+                {
+                    message = $"Bonus points must be between 0 and {MaxRewardBonusPoints:N0}"
                 });
             }
         }
@@ -1024,11 +1096,13 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (request.SeasonName.Trim().Length > 200)
+        var seasonNameLength = request.SeasonName.Trim().Length;
+
+        if (seasonNameLength < 3 || seasonNameLength > 200)
         {
             return BadRequest(new
             {
-                message = "Season name cannot exceed 200 characters"
+                message = "Season name must be between 3 and 200 characters"
             });
         }
 
@@ -1048,6 +1122,15 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
+        if (request.StartDate.Year is < 2000 or > 2100 ||
+            request.EndDate.Year is < 2000 or > 2100)
+        {
+            return BadRequest(new
+            {
+                message = "Season years must be between 2000 and 2100"
+            });
+        }
+
         if (request.EndDate.Date < request.StartDate.Date)
         {
             return BadRequest(new
@@ -1056,11 +1139,21 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (request.PointsPerCorrectPrediction <= 0)
+        var durationDays = (request.EndDate.Date - request.StartDate.Date).Days;
+        if (durationDays > MaxSeasonDurationDays)
         {
             return BadRequest(new
             {
-                message = "Points per correct prediction must be greater than 0"
+                message = $"Season duration cannot exceed {MaxSeasonDurationDays} days"
+            });
+        }
+
+        if (request.PointsPerCorrectPrediction <= 0 ||
+            request.PointsPerCorrectPrediction > MaxPredictionPoints)
+        {
+            return BadRequest(new
+            {
+                message = $"Points per correct prediction must be between 1 and {MaxPredictionPoints:N0}"
             });
         }
 
@@ -1070,27 +1163,38 @@ public class AdminSeasonsController : ControllerBase
 
 public class AdminSeasonRequest
 {
+    [Required]
+    [StringLength(200, MinimumLength = 3)]
     public string SeasonName { get; set; } = string.Empty;
 
     public DateTime StartDate { get; set; }
 
     public DateTime EndDate { get; set; }
 
+    [Range(1, 1_000_000)]
     public int PointsPerCorrectPrediction { get; set; } = 100;
 }
 
 public class UpsertSeasonRewardRulesRequest
 {
+    [Required]
+    [MinLength(1)]
+    [MaxLength(100)]
     public List<SeasonRewardRuleRequest> Rules { get; set; } = new();
 }
 
 public class SeasonRewardRuleRequest
 {
+    [Range(1, 100)]
     public int RankPosition { get; set; }
 
+    [Required]
+    [StringLength(200, MinimumLength = 1)]
     public string RewardName { get; set; } = string.Empty;
 
+    [StringLength(1000)]
     public string? RewardDescription { get; set; }
 
+    [Range(0, 1_000_000)]
     public int BonusPoints { get; set; }
 }

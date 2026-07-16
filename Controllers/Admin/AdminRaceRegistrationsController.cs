@@ -329,7 +329,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         [HttpPut("{id:int}/reject")]
         public async Task<IActionResult> RejectRegistration(
             int id,
-            [FromBody] AdminRejectRegistrationRequest? request)
+            [FromBody] AdminRejectRegistrationRequest request)
         {
             var registration = await _context.RaceRegistrations
                 .Include(r => r.Horse)
@@ -367,14 +367,24 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
+            var adminNote = request.AdminNote.Trim();
+
+            if (adminNote.Length < 5 || adminNote.Length > 500)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Reject reason must be between 5 and 500 characters",
+                    Id = id,
+                    Status = registration.Status
+                });
+            }
+
             var utcNow = _dateTimeProvider.UtcNow;
 
             registration.Status = RaceRegistrationStatuses.Rejected;
             registration.ReviewedBy = adminId;
             registration.ReviewedAt = utcNow;
-            registration.AdminNote = string.IsNullOrWhiteSpace(request?.AdminNote)
-                ? "Rejected by admin"
-                : request.AdminNote.Trim();
+            registration.AdminNote = adminNote;
 
             var hasNames = !string.IsNullOrWhiteSpace(registration.Horse.HorseName) &&
                 !string.IsNullOrWhiteSpace(registration.Race.Tournament.TournamentName);
@@ -383,8 +393,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 registration.OwnerId,
                 "Registration Rejected",
                 hasNames
-                    ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been rejected."
-                    : "Your registration has been rejected.",
+                    ? $"{registration.Horse.HorseName} registered for {registration.Race.Tournament.TournamentName} has been rejected. Reason: {adminNote}"
+                    : $"Your registration has been rejected. Reason: {adminNote}",
                 "RegistrationDetail",
                 $"/owner/registrations/{registration.RegistrationId}",
                 "RaceRegistration",

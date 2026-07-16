@@ -1,4 +1,6 @@
-﻿using Eliteracingleague.API.Constants;
+﻿using System.Net.Mail;
+using System.Text.RegularExpressions;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Eliteracingleague.API.Models;
@@ -14,6 +16,14 @@ namespace Eliteracingleague.API.Controllers.Admin;
 [Route("api/admin/referees")]
 public class AdminRefereesController : ControllerBase
 {
+    private static readonly Regex FullNameRegex = new(
+        @"^[\p{L}\p{M}][\p{L}\p{M}\s'.-]*$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex LicenseRegex = new(
+        @"^[A-Z0-9][A-Z0-9./-]{2,99}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private readonly EliteRacingLeagueContext _context;
     private readonly PasswordHasher<User> _passwordHasher;
 
@@ -24,38 +34,37 @@ public class AdminRefereesController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> CreateRefereeAccount(CreateRefereeAccountRequest request)
+    public async Task<IActionResult> CreateRefereeAccount(
+        [FromBody] CreateRefereeAccountRequest request)
     {
-        var fullName = request.FullName.Trim();
+        var fullName = NormalizeWhitespace(request.FullName);
         var email = request.Email.Trim().ToLowerInvariant();
-        var phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
-        var licenseNo = string.IsNullOrWhiteSpace(request.LicenseNo) ? null : request.LicenseNo.Trim();
+        var phone = NormalizePhone(request.Phone);
+        var licenseNo = NormalizeLicense(request.LicenseNo);
+        var status = request.Status.Trim();
 
-        if (string.IsNullOrWhiteSpace(fullName))
+        var validationError = ValidateRefereeProfile(
+            fullName,
+            email,
+            phone,
+            licenseNo,
+            request.ExperienceYears);
+
+        if (validationError != null)
         {
-            return BadRequest(new
-            {
-                message = "Full name is required."
-            });
+            return BadRequest(new { message = validationError });
         }
 
-        if (string.IsNullOrWhiteSpace(email))
+        var passwordError = ValidatePassword(request.Password);
+        if (passwordError != null)
         {
-            return BadRequest(new
-            {
-                message = "Email is required."
-            });
+            return BadRequest(new { message = passwordError });
         }
 
-        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
-        {
-            return BadRequest(new
-            {
-                message = "Password must be at least 6 characters."
-            });
-        }
-
-        if (request.Password != request.ConfirmPassword)
+        if (!string.Equals(
+                request.Password,
+                request.ConfirmPassword,
+                StringComparison.Ordinal))
         {
             return BadRequest(new
             {
@@ -63,43 +72,48 @@ public class AdminRefereesController : ControllerBase
             });
         }
 
-        if (request.ExperienceYears.HasValue && request.ExperienceYears.Value < 0)
+        if (status is not UserStatuses.Active and not UserStatuses.Inactive)
         {
             return BadRequest(new
             {
-                message = "Experience years cannot be negative."
+                message = "Status must be Active or Inactive."
             });
         }
 
-        var emailExists = await _context.Users.AnyAsync(u => u.Email == email);
+        var emailExists = await _context.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.Email == email);
 
         if (emailExists)
         {
-            return BadRequest(new
+            return Conflict(new
             {
                 message = "Email already exists."
             });
         }
 
-        if (!string.IsNullOrWhiteSpace(licenseNo))
+        if (licenseNo != null)
         {
             var licenseExists = await _context.RaceReferees
+                .AsNoTracking()
                 .AnyAsync(r => r.LicenseNo == licenseNo);
 
             if (licenseExists)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
                     message = "License number already exists."
                 });
             }
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
 
         try
         {
             var now = DateTime.UtcNow;
+            var isActive = status == UserStatuses.Active;
 
             var user = new User
             {
@@ -107,13 +121,15 @@ public class AdminRefereesController : ControllerBase
                 Email = email,
                 Phone = phone,
                 Role = UserRoles.RaceReferee,
-                Status = UserStatuses.Active,
+                Status = status,
                 EmailVerified = true,
                 CreatedAt = now,
                 UpdatedAt = now
             };
 
-            user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+            user.PasswordHash = _passwordHasher.HashPassword(
+                user,
+                request.Password);
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
@@ -123,7 +139,7 @@ public class AdminRefereesController : ControllerBase
                 RefereeId = user.UserId,
                 LicenseNo = licenseNo,
                 ExperienceYears = request.ExperienceYears ?? 0,
-                IsActive = true,
+                IsActive = isActive,
                 CreatedAt = now
             };
 
@@ -134,16 +150,25 @@ public class AdminRefereesController : ControllerBase
 
             return Ok(ToResponse(referee, user));
         }
-        catch (Exception ex)
+        catch (DbUpdateException)
         {
             await transaction.RollbackAsync();
 
-            return StatusCode(StatusCodes.Status500InternalServerError, new
+            return Conflict(new
             {
-                message = "Create referee account failed.",
-                error = ex.Message,
-                innerError = ex.InnerException?.Message
+                message = "Email or license number already exists."
             });
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new
+                {
+                    message = "Create referee account failed."
+                });
         }
     }
 
@@ -152,10 +177,7 @@ public class AdminRefereesController : ControllerBase
     {
         var referees = await _context.RaceReferees
             .AsNoTracking()
-            .Where(r =>
-                r.IsActive &&
-                r.Referee.Role == UserRoles.RaceReferee &&
-                r.Referee.Status == UserStatuses.Active)
+            .Where(r => r.Referee.Role == UserRoles.RaceReferee)
             .Select(r => new AdminRefereeResponse
             {
                 RefereeId = r.RefereeId,
@@ -219,33 +241,21 @@ public class AdminRefereesController : ControllerBase
         int id,
         [FromBody] UpdateRefereeRequest request)
     {
-        var fullName = request.FullName.Trim();
+        var fullName = NormalizeWhitespace(request.FullName);
         var email = request.Email.Trim().ToLowerInvariant();
-        var phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
-        var licenseNo = string.IsNullOrWhiteSpace(request.LicenseNo) ? null : request.LicenseNo.Trim();
+        var phone = NormalizePhone(request.Phone);
+        var licenseNo = NormalizeLicense(request.LicenseNo);
 
-        if (string.IsNullOrWhiteSpace(fullName))
-        {
-            return BadRequest(new
-            {
-                message = "Full name is required."
-            });
-        }
+        var validationError = ValidateRefereeProfile(
+            fullName,
+            email,
+            phone,
+            licenseNo,
+            request.ExperienceYears);
 
-        if (string.IsNullOrWhiteSpace(email))
+        if (validationError != null)
         {
-            return BadRequest(new
-            {
-                message = "Email is required."
-            });
-        }
-
-        if (request.ExperienceYears.HasValue && request.ExperienceYears.Value < 0)
-        {
-            return BadRequest(new
-            {
-                message = "Experience years cannot be negative."
-            });
+            return BadRequest(new { message = validationError });
         }
 
         var referee = await _context.RaceReferees
@@ -271,50 +281,41 @@ public class AdminRefereesController : ControllerBase
 
         if (emailExists)
         {
-            return BadRequest(new
+            return Conflict(new
             {
                 message = "Email already exists."
             });
         }
 
-        if (!string.IsNullOrWhiteSpace(licenseNo))
+        if (licenseNo != null)
         {
             var licenseExists = await _context.RaceReferees
                 .AsNoTracking()
-                .AnyAsync(r => r.RefereeId != id && r.LicenseNo == licenseNo);
+                .AnyAsync(r =>
+                    r.RefereeId != id &&
+                    r.LicenseNo == licenseNo);
 
             if (licenseExists)
             {
-                return BadRequest(new
+                return Conflict(new
                 {
                     message = "License number already exists."
                 });
             }
         }
 
-        if (!targetIsActive)
+        if (!targetIsActive &&
+            await HasUnfinishedAssignmentAsync(id))
         {
-            var hasUnfinishedAssignment = await _context.RefereeAssignments
-                .AsNoTracking()
-                .AnyAsync(a =>
-                    a.RefereeId == id &&
-                    a.Status == RefereeAssignmentStatuses.Assigned &&
-                    a.Race.Status != RaceStatuses.Published &&
-                    a.Race.Status != RaceStatuses.Cancelled &&
-                    a.Race.Tournament.Status != TournamentStatuses.Completed &&
-                    a.Race.Tournament.Status != TournamentStatuses.Cancelled);
-
-            if (hasUnfinishedAssignment)
+            return BadRequest(new
             {
-                return BadRequest(new
-                {
-                    message = "Cannot deactivate a referee who is assigned to an unfinished race. Reassign or cancel the race first.",
-                    refereeId = id
-                });
-            }
+                message = "Cannot deactivate a referee who is assigned to an unfinished race. Reassign or cancel the race first.",
+                refereeId = id
+            });
         }
 
-        if (targetIsActive && referee.Referee.Status == UserStatuses.Banned)
+        if (targetIsActive &&
+            referee.Referee.Status == UserStatuses.Banned)
         {
             return BadRequest(new
             {
@@ -337,9 +338,133 @@ public class AdminRefereesController : ControllerBase
         referee.ExperienceYears = request.ExperienceYears ?? 0;
         referee.IsActive = targetIsActive;
 
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+            return Ok(ToResponse(referee, referee.Referee));
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new
+            {
+                message = "Email or license number already exists."
+            });
+        }
+    }
 
-        return Ok(ToResponse(referee, referee.Referee));
+    private async Task<bool> HasUnfinishedAssignmentAsync(int refereeId)
+    {
+        return await _context.RefereeAssignments
+            .AsNoTracking()
+            .AnyAsync(a =>
+                a.RefereeId == refereeId &&
+                a.Status == RefereeAssignmentStatuses.Assigned &&
+                a.Race.Status != RaceStatuses.Published &&
+                a.Race.Status != RaceStatuses.Cancelled &&
+                a.Race.Tournament.Status != TournamentStatuses.Completed &&
+                a.Race.Tournament.Status != TournamentStatuses.Cancelled);
+    }
+
+    private static string? ValidateRefereeProfile(
+        string fullName,
+        string email,
+        string? phone,
+        string? licenseNo,
+        int? experienceYears)
+    {
+        if (fullName.Length < 2 || fullName.Length > 150)
+        {
+            return "Full name must be between 2 and 150 characters.";
+        }
+
+        if (!FullNameRegex.IsMatch(fullName))
+        {
+            return "Full name can only contain letters, spaces, apostrophes, dots, and hyphens.";
+        }
+
+        if (email.Length > 255 ||
+            !MailAddress.TryCreate(email, out var mailAddress) ||
+            !string.Equals(
+                mailAddress.Address,
+                email,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return "Email format is invalid.";
+        }
+
+        if (phone != null &&
+            (!Regex.IsMatch(phone, @"^\+?\d{9,15}$") ||
+             phone.Length > 16))
+        {
+            return "Phone must contain 9 to 15 digits and may start with +.";
+        }
+
+        if (licenseNo != null && !LicenseRegex.IsMatch(licenseNo))
+        {
+            return "License number must be 3 to 100 characters and contain only letters, numbers, dots, slashes, or hyphens.";
+        }
+
+        if (experienceYears is < 0 or > 60)
+        {
+            return "Experience years must be between 0 and 60.";
+        }
+
+        return null;
+    }
+
+    private static string? ValidatePassword(string password)
+    {
+        if (password.Length < 8 || password.Length > 72)
+        {
+            return "Password must be between 8 and 72 characters.";
+        }
+
+        if (password.Any(char.IsWhiteSpace))
+        {
+            return "Password cannot contain spaces.";
+        }
+
+        if (!password.Any(char.IsUpper) ||
+            !password.Any(char.IsLower) ||
+            !password.Any(char.IsDigit) ||
+            !password.Any(character => !char.IsLetterOrDigit(character)))
+        {
+            return "Password must include uppercase, lowercase, number, and special character.";
+        }
+
+        return null;
+    }
+
+    private static string NormalizeWhitespace(string value)
+    {
+        return Regex.Replace(value.Trim(), @"\s+", " ");
+    }
+
+    private static string? NormalizePhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+
+        if (!Regex.IsMatch(trimmed, @"^\+?[0-9\s().-]+$"))
+        {
+            return trimmed;
+        }
+
+        var prefix = trimmed.StartsWith('+') ? "+" : string.Empty;
+        var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+
+        return prefix + digits;
+    }
+
+    private static string? NormalizeLicense(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim().ToUpperInvariant();
     }
 
     private static AdminRefereeResponse ToResponse(
