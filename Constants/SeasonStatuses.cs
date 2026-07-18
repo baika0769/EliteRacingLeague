@@ -4,6 +4,7 @@ public static class SeasonStatuses
 {
     public const string Draft = "Draft";
     public const string Active = "Active";
+    public const string Settling = "Settling";
     public const string Closed = "Closed";
     public const string Cancelled = "Cancelled";
 
@@ -11,6 +12,7 @@ public static class SeasonStatuses
     {
         Draft,
         Active,
+        Settling,
         Closed,
         Cancelled
     };

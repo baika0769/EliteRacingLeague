@@ -25,4 +25,6 @@ public partial class Season
     public virtual ICollection<SeasonRewardRule> SeasonRewardRules { get; set; } = new List<SeasonRewardRule>();
 
     public virtual ICollection<SeasonReward> SeasonRewards { get; set; } = new List<SeasonReward>();
+
+    public virtual ICollection<SpectatorSeasonWallet> SpectatorSeasonWallets { get; set; } = new List<SpectatorSeasonWallet>();
 }

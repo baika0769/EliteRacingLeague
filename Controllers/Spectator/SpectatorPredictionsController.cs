@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
@@ -8,6 +8,7 @@ using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Eliteracingleague.API.Services;
 
 namespace Eliteracingleague.API.Controllers.Spectator;
 
@@ -18,6 +19,7 @@ public class SpectatorPredictionsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly SpectatorWalletService _spectatorWalletService;
 
     private static readonly string[] PredictableRegistrationStatuses =
     {
@@ -26,10 +28,12 @@ public class SpectatorPredictionsController : ControllerBase
 
     public SpectatorPredictionsController(
         EliteRacingLeagueContext context,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        SpectatorWalletService spectatorWalletService)
     {
         _context = context;
         _dateTimeProvider = dateTimeProvider;
+        _spectatorWalletService = spectatorWalletService;
     }
 
     private int GetUserId()
@@ -40,43 +44,71 @@ public class SpectatorPredictionsController : ControllerBase
     {
         var spectatorId = GetUserId();
 
-        var wallet = await _context.Users
+        var spectator = await _context.Users
             .AsNoTracking()
-            .Where(u => u.UserId == spectatorId && u.Role == UserRoles.Spectator)
-            .Select(u => new
-            {
-                bettingPoints = u.BettingPoints,
-                initialBettingPoints = SpectatorBettingRules.InitialBettingPoints,
-                minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
-                totalStakePoints = _context.RacePredictions
-                    .Where(p => p.SpectatorId == spectatorId && p.Status != RacePredictionStatuses.Cancelled)
-                    .Sum(p => (int?)p.StakePoints) ?? 0,
-                totalPayoutPoints = _context.RacePredictions
-                    .Where(p => p.SpectatorId == spectatorId && p.Status != RacePredictionStatuses.Cancelled)
-                    .Sum(p => (int?)p.PointsAwarded) ?? 0,
-                pendingStakePoints = _context.RacePredictions
-                    .Where(p =>
-                        p.SpectatorId == spectatorId &&
-                        p.Status != RacePredictionStatuses.Cancelled &&
-                        p.Status != RacePredictionStatuses.Evaluated)
-                    .Sum(p => (int?)p.StakePoints) ?? 0
-            })
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(u => u.UserId == spectatorId && u.Role == UserRoles.Spectator);
 
-        if (wallet == null)
+        if (spectator == null)
         {
             return NotFound(new { message = "Spectator wallet not found." });
         }
 
+        var activeSeason = await _context.Seasons
+            .AsNoTracking()
+            .Where(item => item.Status == SeasonStatuses.Active)
+            .OrderByDescending(item => item.StartDate)
+            .Select(item => new { item.SeasonId, item.SeasonName })
+            .FirstOrDefaultAsync();
+
+        if (activeSeason == null)
+        {
+            return Ok(new
+            {
+                seasonId = (int?)null,
+                seasonName = (string?)null,
+                bettingPoints = spectator.BettingPoints,
+                seasonScore = 0,
+                initialBettingPoints = SpectatorBettingRules.InitialBettingPoints,
+                minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
+                totalStakePoints = 0,
+                totalPayoutPoints = 0,
+                pendingStakePoints = 0,
+                netPoints = 0,
+                message = "There is no active season."
+            });
+        }
+
+        var wallet = await _context.SpectatorSeasonWallets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.SeasonId == activeSeason.SeasonId &&
+                item.SpectatorId == spectatorId);
+
+        var predictionQuery = _context.RacePredictions
+            .AsNoTracking()
+            .Where(p =>
+                p.SpectatorId == spectatorId &&
+                p.Race.Tournament.SeasonId == activeSeason.SeasonId &&
+                p.Status != RacePredictionStatuses.Cancelled);
+
+        var totalStakePoints = await predictionQuery.SumAsync(p => (int?)p.StakePoints) ?? 0;
+        var totalPayoutPoints = await predictionQuery.SumAsync(p => (int?)p.PointsAwarded) ?? 0;
+        var pendingStakePoints = await predictionQuery
+            .Where(p => p.Status != RacePredictionStatuses.Evaluated)
+            .SumAsync(p => (int?)p.StakePoints) ?? 0;
+
         return Ok(new
         {
-            wallet.bettingPoints,
-            wallet.initialBettingPoints,
-            wallet.minimumStakePoints,
-            wallet.totalStakePoints,
-            wallet.totalPayoutPoints,
-            wallet.pendingStakePoints,
-            netPoints = wallet.totalPayoutPoints - wallet.totalStakePoints
+            activeSeason.SeasonId,
+            activeSeason.SeasonName,
+            bettingPoints = wallet?.CurrentBettingPoints ?? spectator.BettingPoints,
+            seasonScore = wallet?.SeasonScore ?? totalPayoutPoints,
+            initialBettingPoints = wallet?.OpeningBettingPoints ?? SpectatorBettingRules.InitialBettingPoints,
+            minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
+            totalStakePoints,
+            totalPayoutPoints,
+            pendingStakePoints,
+            netPoints = totalPayoutPoints - totalStakePoints
         });
     }
 
@@ -106,17 +138,6 @@ public class SpectatorPredictionsController : ControllerBase
         if (spectator == null)
         {
             return Unauthorized(new { message = "Spectator account not found." });
-        }
-
-        if (spectator.BettingPoints < request.StakePoints)
-        {
-            return BadRequest(new
-            {
-                error = "Insufficient betting points.",
-                message = "You do not have enough points to place this bet.",
-                bettingPoints = spectator.BettingPoints,
-                requestedStakePoints = request.StakePoints
-            });
         }
 
         var tournament = await _context.Tournaments
@@ -149,6 +170,23 @@ public class SpectatorPredictionsController : ControllerBase
                 seasonId = tournament.Season.SeasonId,
                 seasonName = tournament.Season.SeasonName,
                 seasonStatus = tournament.Season.Status
+            });
+        }
+
+        var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+            tournament.SeasonId,
+            spectator,
+            spectator.BettingPoints,
+            utcNow);
+
+        if (wallet.CurrentBettingPoints < request.StakePoints)
+        {
+            return BadRequest(new
+            {
+                error = "Insufficient betting points.",
+                message = "You do not have enough points to place this bet.",
+                bettingPoints = wallet.CurrentBettingPoints,
+                requestedStakePoints = request.StakePoints
             });
         }
 
@@ -246,9 +284,6 @@ public class SpectatorPredictionsController : ControllerBase
             });
         }
 
-        spectator.BettingPoints -= request.StakePoints;
-        spectator.UpdatedAt = utcNow;
-
         var prediction = new RacePrediction
         {
             RaceId = race.RaceId,
@@ -265,16 +300,31 @@ public class SpectatorPredictionsController : ControllerBase
 
         _context.RacePredictions.Add(prediction);
         await _context.SaveChangesAsync();
+
+        var walletResult = await _spectatorWalletService.ApplyAsync(
+            wallet,
+            spectator,
+            PointTransactionTypes.PredictionStake,
+            -request.StakePoints,
+            scoreDelta: 0,
+            idempotencyKey: $"PREDICTION_STAKE_{prediction.PredictionId}",
+            referenceType: "RacePrediction",
+            referenceId: prediction.PredictionId,
+            description: $"Stake for prediction #{prediction.PredictionId}.",
+            now: utcNow);
+
+        await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
         return Ok(new
         {
-            message = "Prediction submitted successfully. Stake points have been deducted from your wallet.",
+            message = "Prediction submitted successfully. Stake points have been deducted from your season wallet.",
             predictionId = prediction.PredictionId,
             status = prediction.Status,
             stakePoints = prediction.StakePoints,
             payoutPoints = prediction.PointsAwarded,
-            bettingPoints = spectator.BettingPoints
+            bettingPoints = walletResult.BettingPoints,
+            seasonScore = walletResult.SeasonScore
         });
     }
 

@@ -50,6 +50,8 @@ builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 builder.Services.AddScoped<IRaceTimeStatusService, RaceTimeStatusService>();
 builder.Services.AddScoped<SpectatorLeaderboardService>();
+builder.Services.AddScoped<SpectatorWalletService>();
+builder.Services.AddScoped<PublicHomeService>();
 builder.Services.AddScoped<PredictionEvaluationService>();
 builder.Services.AddScoped<TournamentStatusService>();
 builder.Services.AddScoped<RefereeRaceLifecycleService>();

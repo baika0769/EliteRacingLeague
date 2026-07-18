@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.Models;
+namespace Eliteracingleague.API.Models;
 
 public partial class SeasonReward
 {
@@ -24,9 +24,29 @@ public partial class SeasonReward
 
     public DateTime? AppliedAt { get; set; }
 
-    public string Status { get; set; } = "Awarded";
+    public string Status { get; set; } = "Eligible";
 
     public DateTime AwardedAt { get; set; }
+
+    public DateTime? ClaimDeadline { get; set; }
+
+    public DateTime? ClaimedAt { get; set; }
+
+    public DateTime? ApprovedAt { get; set; }
+
+    public DateTime? PreparingAt { get; set; }
+
+    public DateTime? DeliveredAt { get; set; }
+
+    public DateTime? RejectedAt { get; set; }
+
+    public string? ReceiverName { get; set; }
+
+    public string? ReceiverPhone { get; set; }
+
+    public string? DeliveryAddress { get; set; }
+
+    public string? AdminNote { get; set; }
 
     public virtual Season Season { get; set; } = null!;
 

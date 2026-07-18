@@ -11,13 +11,16 @@ public class PredictionEvaluationService
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly SpectatorWalletService _spectatorWalletService;
 
     public PredictionEvaluationService(
         EliteRacingLeagueContext context,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        SpectatorWalletService spectatorWalletService)
     {
         _context = context;
         _dateTimeProvider = dateTimeProvider;
+        _spectatorWalletService = spectatorWalletService;
     }
 
     public async Task<PredictionEvaluationResult> EvaluateRacePredictionsAsync(
@@ -38,6 +41,7 @@ public class PredictionEvaluationService
                     r.RaceId,
                     r.Status,
                     TournamentStatus = r.Tournament.Status,
+                    SeasonId = r.Tournament.SeasonId,
                     SeasonStatus = r.Tournament.Season.Status,
                     PointsPerCorrectPrediction =
                         (int?)r.Tournament.Season.PointsPerCorrectPrediction
@@ -198,9 +202,30 @@ public class PredictionEvaluationService
 
                     if (payoutPoints > 0)
                     {
-                        prediction.Spectator.BettingPoints += payoutPoints;
-                        prediction.Spectator.UpdatedAt = now;
-                        newlyPaidPoints += payoutPoints;
+                        var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                            raceInfo.SeasonId,
+                            prediction.Spectator,
+                            prediction.Spectator.BettingPoints,
+                            now,
+                            cancellationToken);
+
+                        var payoutResult = await _spectatorWalletService.ApplyAsync(
+                            wallet,
+                            prediction.Spectator,
+                            PointTransactionTypes.PredictionPayout,
+                            payoutPoints,
+                            payoutPoints,
+                            $"PREDICTION_PAYOUT_{prediction.PredictionId}",
+                            "RacePrediction",
+                            prediction.PredictionId,
+                            $"Payout for correct prediction #{prediction.PredictionId}.",
+                            now,
+                            cancellationToken);
+
+                        if (!payoutResult.AlreadyApplied)
+                        {
+                            newlyPaidPoints += payoutPoints;
+                        }
                     }
 
                     _context.Notifications.Add(new Notification

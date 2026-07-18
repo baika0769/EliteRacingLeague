@@ -125,6 +125,16 @@ public class SpectatorLeaderboardService
             };
         }
 
+        var wallet = await _context.SpectatorSeasonWallets
+            .AsNoTracking()
+            .Where(item => item.SeasonId == season.SeasonId && item.SpectatorId == spectatorId)
+            .Select(item => new
+            {
+                item.CurrentBettingPoints,
+                item.SeasonScore
+            })
+            .FirstOrDefaultAsync();
+
         var rows = await _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
@@ -142,15 +152,14 @@ public class SpectatorLeaderboardService
         var totalPredictions = rows.Count;
         var correctPredictions = rows.Count(p => p.IsCorrect == true);
         var evaluatedPredictions = rows.Count(p => p.IsCorrect.HasValue);
-
         var totalStakePoints = rows.Sum(p => p.StakePoints);
         var totalPayoutPoints = rows.Sum(p => p.PointsAwarded);
         var netPoints = totalPayoutPoints - totalStakePoints;
 
         return new SpectatorRewardSummary
         {
-            RewardPoints = netPoints,
-            BettingPoints = userBalance,
+            RewardPoints = wallet?.SeasonScore ?? totalPayoutPoints,
+            BettingPoints = wallet?.CurrentBettingPoints ?? userBalance,
             TotalStakePoints = totalStakePoints,
             TotalPayoutPoints = totalPayoutPoints,
             NetPoints = netPoints,
@@ -258,18 +267,24 @@ public class SpectatorLeaderboardService
             {
                 g.Key.SpectatorId,
                 g.Key.SpectatorName,
-                Points = g.Sum(p => p.PointsAwarded - p.StakePoints),
+                LegacyScore = g.Sum(p => p.PointsAwarded),
                 CorrectPredictions = g.Count(p => p.IsCorrect == true),
                 TotalPredictions = g.Count()
             })
             .ToListAsync();
+
+        var spectatorIds = rows.Select(item => item.SpectatorId).ToArray();
+        var walletScores = await _context.SpectatorSeasonWallets
+            .AsNoTracking()
+            .Where(item => item.SeasonId == seasonId && spectatorIds.Contains(item.SpectatorId))
+            .ToDictionaryAsync(item => item.SpectatorId, item => item.SeasonScore);
 
         var ranked = rows
             .Select(r => new PredictorLeaderboardItem
             {
                 SpectatorId = r.SpectatorId,
                 SpectatorName = r.SpectatorName,
-                Points = r.Points,
+                Points = walletScores.GetValueOrDefault(r.SpectatorId, r.LegacyScore),
                 CorrectPredictions = r.CorrectPredictions,
                 TotalPredictions = r.TotalPredictions,
                 Accuracy = r.TotalPredictions == 0
@@ -291,4 +306,5 @@ public class SpectatorLeaderboardService
 
         return ranked;
     }
+
 }

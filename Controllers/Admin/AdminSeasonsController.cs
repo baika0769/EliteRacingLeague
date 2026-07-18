@@ -1,10 +1,11 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,13 +24,19 @@ public class AdminSeasonsController : ControllerBase
 
     private readonly EliteRacingLeagueContext _context;
     private readonly SpectatorLeaderboardService _leaderboardService;
+    private readonly SpectatorWalletService _spectatorWalletService;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     public AdminSeasonsController(
         EliteRacingLeagueContext context,
-        SpectatorLeaderboardService leaderboardService)
+        SpectatorLeaderboardService leaderboardService,
+        SpectatorWalletService spectatorWalletService,
+        IDateTimeProvider dateTimeProvider)
     {
         _context = context;
         _leaderboardService = leaderboardService;
+        _spectatorWalletService = spectatorWalletService;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet]
@@ -110,7 +117,17 @@ public class AdminSeasonsController : ControllerBase
                         r.AppliedToSeasonId,
                         r.AppliedAt,
                         r.Status,
-                        r.AwardedAt
+                        r.AwardedAt,
+                        r.ClaimDeadline,
+                        r.ClaimedAt,
+                        r.ApprovedAt,
+                        r.PreparingAt,
+                        r.DeliveredAt,
+                        r.RejectedAt,
+                        r.ReceiverName,
+                        r.ReceiverPhone,
+                        r.DeliveryAddress,
+                        r.AdminNote
                     })
             })
             .FirstOrDefaultAsync();
@@ -701,9 +718,7 @@ public class AdminSeasonsController : ControllerBase
 
             var activeSeason = await _context.Seasons
                 .AsNoTracking()
-                .Where(s =>
-                    s.SeasonId != season.SeasonId &&
-                    s.Status == SeasonStatuses.Active)
+                .Where(s => s.SeasonId != season.SeasonId && s.Status == SeasonStatuses.Active)
                 .Select(s => new
                 {
                     s.SeasonId,
@@ -725,43 +740,85 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
-            var now = DateTime.UtcNow;
+            var previousClosedSeason = await _context.Seasons
+                .AsNoTracking()
+                .Where(item =>
+                    item.SeasonId != season.SeasonId &&
+                    item.Status == SeasonStatuses.Closed &&
+                    item.EndDate <= season.StartDate)
+                .OrderByDescending(item => item.EndDate)
+                .ThenByDescending(item => item.SeasonId)
+                .Select(item => new { item.SeasonId, item.SeasonName })
+                .FirstOrDefaultAsync();
+
+            var bonusRewards = previousClosedSeason == null
+                ? new List<SeasonReward>()
+                : await _context.SeasonRewards
+                    .Where(item =>
+                        item.SeasonId == previousClosedSeason.SeasonId &&
+                        item.BonusPoints > 0 &&
+                        !item.IsBonusApplied &&
+                        item.AppliedToSeasonId == null)
+                    .OrderBy(item => item.SeasonRewardId)
+                    .ToListAsync();
+
+            var rewardsBySpectator = bonusRewards
+                .GroupBy(item => item.SpectatorId)
+                .ToDictionary(group => group.Key, group => group.ToList());
 
             var spectators = await _context.Users
                 .Where(u => u.Role == UserRoles.Spectator)
+                .OrderBy(u => u.UserId)
                 .ToListAsync();
+
+            var now = _dateTimeProvider.UtcNow;
+            var appliedBonusRewardCount = 0;
+            var totalBonusPoints = 0;
 
             foreach (var spectator in spectators)
             {
-                spectator.BettingPoints = SpectatorBettingRules.InitialBettingPoints;
-                spectator.UpdatedAt = now;
-            }
+                var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                    season.SeasonId,
+                    spectator,
+                    SpectatorBettingRules.InitialBettingPoints,
+                    now);
 
-            var unappliedRewards = await _context.SeasonRewards
-                .Where(r =>
-                    r.BonusPoints > 0 &&
-                    !r.IsBonusApplied &&
-                    r.AppliedToSeasonId == null &&
-                    r.SeasonId != season.SeasonId)
-                .ToListAsync();
+                wallet.Status = SeasonWalletStatuses.Active;
+                wallet.FinalBettingPoints = null;
+                wallet.FinalSeasonScore = null;
+                wallet.FinalRank = null;
+                wallet.FrozenAt = null;
+                wallet.SettledAt = null;
 
-            var spectatorById = spectators.ToDictionary(s => s.UserId);
-            var appliedBonusRewardCount = 0;
-
-            foreach (var reward in unappliedRewards)
-            {
-                if (!spectatorById.TryGetValue(reward.SpectatorId, out var spectator))
+                if (!rewardsBySpectator.TryGetValue(spectator.UserId, out var spectatorRewards))
                 {
                     continue;
                 }
 
-                spectator.BettingPoints += reward.BonusPoints;
-                spectator.UpdatedAt = now;
+                foreach (var reward in spectatorRewards)
+                {
+                    var result = await _spectatorWalletService.ApplyAsync(
+                        wallet,
+                        spectator,
+                        PointTransactionTypes.NextSeasonBonus,
+                        reward.BonusPoints,
+                        scoreDelta: 0,
+                        idempotencyKey: $"NEXT_SEASON_BONUS_{reward.SeasonRewardId}_{season.SeasonId}",
+                        referenceType: "SeasonReward",
+                        referenceId: reward.SeasonRewardId,
+                        description: $"Bonus carried from season #{reward.SeasonId}.",
+                        now: now);
 
-                reward.IsBonusApplied = true;
-                reward.AppliedToSeasonId = season.SeasonId;
-                reward.AppliedAt = now;
-                appliedBonusRewardCount++;
+                    if (!result.AlreadyApplied)
+                    {
+                        totalBonusPoints += reward.BonusPoints;
+                    }
+
+                    reward.IsBonusApplied = true;
+                    reward.AppliedToSeasonId = season.SeasonId;
+                    reward.AppliedAt = now;
+                    appliedBonusRewardCount++;
+                }
             }
 
             season.Status = SeasonStatuses.Active;
@@ -772,12 +829,16 @@ public class AdminSeasonsController : ControllerBase
 
             return Ok(new
             {
-                message = "Season activated successfully. Spectator betting points have been reset.",
+                message = "Season activated successfully. A separate betting wallet was opened for every spectator.",
                 seasonId = season.SeasonId,
                 seasonName = season.SeasonName,
                 status = season.Status,
-                resetSpectatorCount = spectators.Count,
-                appliedBonusRewardCount
+                openedWalletCount = spectators.Count,
+                initialBettingPoints = SpectatorBettingRules.InitialBettingPoints,
+                previousSeasonId = previousClosedSeason?.SeasonId,
+                previousSeasonName = previousClosedSeason?.SeasonName,
+                appliedBonusRewardCount,
+                totalBonusPoints
             });
         }
         catch
@@ -826,6 +887,18 @@ public class AdminSeasonsController : ControllerBase
                     Id = season.SeasonId,
                     Name = season.SeasonName,
                     Status = season.Status
+                });
+            }
+
+            var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+            if (localNow.Date < season.EndDate.Date)
+            {
+                return BadRequest(new
+                {
+                    message = "The season cannot be closed before its configured end date.",
+                    seasonId = season.SeasonId,
+                    endDate = season.EndDate,
+                    currentDate = localNow.Date
                 });
             }
 
@@ -879,28 +952,55 @@ public class AdminSeasonsController : ControllerBase
                 .OrderBy(r => r.RankPosition)
                 .ToListAsync();
 
-            IReadOnlyList<Eliteracingleague.API.DTOs.Spectator.PredictorLeaderboardItem> leaderboard =
-                Array.Empty<Eliteracingleague.API.DTOs.Spectator.PredictorLeaderboardItem>();
-
-            if (rewardRules.Count > 0)
+            if (rewardRules.Count == 0)
             {
-                var highestRewardRank = rewardRules.Max(r => r.RankPosition);
-                leaderboard = await _leaderboardService
-                    .GetPredictorLeaderboardAsync(highestRewardRank, season.SeasonId);
+                return BadRequest(new
+                {
+                    message = "Configure at least one reward rule before closing the season.",
+                    seasonId = season.SeasonId
+                });
             }
 
-            var existingRewards = await _context.SeasonRewards
-                .Where(r => r.SeasonId == season.SeasonId)
+            var existingRewardCount = await _context.SeasonRewards
+                .AsNoTracking()
+                .CountAsync(r => r.SeasonId == season.SeasonId);
+
+            if (existingRewardCount > 0)
+            {
+                return Conflict(new
+                {
+                    message = "Season rewards were already generated. They cannot be deleted and regenerated.",
+                    seasonId = season.SeasonId,
+                    existingRewardCount
+                });
+            }
+
+            season.Status = SeasonStatuses.Settling;
+            season.UpdatedAt = _dateTimeProvider.UtcNow;
+
+            var leaderboard = await _leaderboardService
+                .GetPredictorLeaderboardAsync(int.MaxValue, season.SeasonId);
+
+            var now = _dateTimeProvider.UtcNow;
+            var rankBySpectator = leaderboard.ToDictionary(item => item.SpectatorId, item => item.Rank);
+
+            var wallets = await _context.SpectatorSeasonWallets
+                .Where(item => item.SeasonId == season.SeasonId)
                 .ToListAsync();
 
-            if (existingRewards.Count > 0)
+            foreach (var wallet in wallets)
             {
-                _context.SeasonRewards.RemoveRange(existingRewards);
-                await _context.SaveChangesAsync();
+                wallet.FinalBettingPoints = wallet.CurrentBettingPoints;
+                wallet.FinalSeasonScore = wallet.SeasonScore;
+                wallet.FinalRank = rankBySpectator.TryGetValue(wallet.SpectatorId, out var finalRank)
+                    ? finalRank
+                    : null;
+                wallet.Status = SeasonWalletStatuses.Settled;
+                wallet.FrozenAt = now;
+                wallet.SettledAt = now;
             }
 
-            var now = DateTime.UtcNow;
-            var leaderboardByRank = leaderboard.ToDictionary(x => x.Rank);
+            var leaderboardByRank = leaderboard.ToDictionary(item => item.Rank);
             var rewardCount = 0;
 
             foreach (var rule in rewardRules)
@@ -922,8 +1022,22 @@ public class AdminSeasonsController : ControllerBase
                     IsBonusApplied = false,
                     AppliedToSeasonId = null,
                     AppliedAt = null,
-                    Status = "Awarded",
-                    AwardedAt = now
+                    Status = SeasonRewardStatuses.Eligible,
+                    AwardedAt = now,
+                    ClaimDeadline = now.AddDays(30)
+                });
+
+                _context.Notifications.Add(new Notification
+                {
+                    UserId = item.SpectatorId,
+                    Title = "Season Reward Available",
+                    Message = $"You finished season {season.SeasonName} at rank #{item.Rank} and received {rule.RewardName}. Please claim it before the deadline.",
+                    IsRead = false,
+                    CreatedAt = now,
+                    ActionType = "SpectatorRewards",
+                    ActionUrl = "/spectator/results",
+                    RelatedType = "Season",
+                    RelatedId = season.SeasonId
                 });
 
                 rewardCount++;
@@ -937,12 +1051,15 @@ public class AdminSeasonsController : ControllerBase
 
             return Ok(new
             {
-                message = "Season closed successfully.",
+                message = "Season closed successfully. Wallets were frozen and rewards were generated once.",
                 seasonId = season.SeasonId,
                 seasonName = season.SeasonName,
                 status = season.Status,
+                participantCount = leaderboard.Count,
+                settledWalletCount = wallets.Count,
                 configuredRewardRuleCount = rewardRules.Count,
-                rewardCount
+                rewardCount,
+                claimDeadlineDays = 30
             });
         }
         catch
@@ -1054,7 +1171,17 @@ public class AdminSeasonsController : ControllerBase
                 r.AppliedToSeasonId,
                 r.AppliedAt,
                 r.Status,
-                r.AwardedAt
+                r.AwardedAt,
+                r.ClaimDeadline,
+                r.ClaimedAt,
+                r.ApprovedAt,
+                r.PreparingAt,
+                r.DeliveredAt,
+                r.RejectedAt,
+                r.ReceiverName,
+                r.ReceiverPhone,
+                r.DeliveryAddress,
+                r.AdminNote
             })
             .ToListAsync();
 
@@ -1062,6 +1189,99 @@ public class AdminSeasonsController : ControllerBase
         {
             SeasonId = id,
             Rewards = rewards
+        });
+    }
+
+    [HttpPut("rewards/{rewardId:int}/status")]
+    public async Task<IActionResult> UpdateSeasonRewardStatus(
+        int rewardId,
+        [FromBody] UpdateSeasonRewardStatusRequest request)
+    {
+        if (!SeasonRewardStatuses.IsValid(request.Status) ||
+            request.Status is SeasonRewardStatuses.Eligible or SeasonRewardStatuses.Claimed or SeasonRewardStatuses.Expired)
+        {
+            return BadRequest(new
+            {
+                message = "Admin status must be Approved, Preparing, Delivered, or Rejected."
+            });
+        }
+
+        var reward = await _context.SeasonRewards
+            .Include(item => item.Season)
+            .Include(item => item.Spectator)
+            .FirstOrDefaultAsync(item => item.SeasonRewardId == rewardId);
+
+        if (reward == null)
+        {
+            return NotFound(new { message = "Season reward not found.", rewardId });
+        }
+
+        var allowed = reward.Status switch
+        {
+            SeasonRewardStatuses.Claimed => request.Status is SeasonRewardStatuses.Approved or SeasonRewardStatuses.Rejected,
+            SeasonRewardStatuses.Approved => request.Status is SeasonRewardStatuses.Preparing or SeasonRewardStatuses.Rejected,
+            SeasonRewardStatuses.Preparing => request.Status is SeasonRewardStatuses.Delivered or SeasonRewardStatuses.Rejected,
+            _ => false
+        };
+
+        if (!allowed)
+        {
+            return BadRequest(new
+            {
+                message = $"Cannot move reward from {reward.Status} to {request.Status}.",
+                rewardId,
+                currentStatus = reward.Status,
+                requestedStatus = request.Status
+            });
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+        reward.Status = request.Status;
+        reward.AdminNote = string.IsNullOrWhiteSpace(request.AdminNote)
+            ? null
+            : request.AdminNote.Trim();
+
+        switch (request.Status)
+        {
+            case SeasonRewardStatuses.Approved:
+                reward.ApprovedAt = now;
+                break;
+            case SeasonRewardStatuses.Preparing:
+                reward.PreparingAt = now;
+                break;
+            case SeasonRewardStatuses.Delivered:
+                reward.DeliveredAt = now;
+                break;
+            case SeasonRewardStatuses.Rejected:
+                reward.RejectedAt = now;
+                break;
+        }
+
+        _context.Notifications.Add(new Notification
+        {
+            UserId = reward.SpectatorId,
+            Title = "Season Reward Updated",
+            Message = $"Your reward {reward.RewardName} from season {reward.Season.SeasonName} is now {reward.Status}.",
+            IsRead = false,
+            CreatedAt = now,
+            ActionType = "SpectatorRewards",
+            ActionUrl = "/spectator/results",
+            RelatedType = "SeasonReward",
+            RelatedId = reward.SeasonRewardId
+        });
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = "Season reward status updated successfully.",
+            rewardId = reward.SeasonRewardId,
+            reward.Status,
+            reward.AdminNote,
+            reward.ApprovedAt,
+            reward.PreparingAt,
+            reward.DeliveredAt,
+            reward.RejectedAt
         });
     }
 
@@ -1197,4 +1417,14 @@ public class SeasonRewardRuleRequest
 
     [Range(0, 1_000_000)]
     public int BonusPoints { get; set; }
+}
+
+public class UpdateSeasonRewardStatusRequest
+{
+    [Required]
+    [StringLength(30)]
+    public string Status { get; set; } = string.Empty;
+
+    [StringLength(1000)]
+    public string? AdminNote { get; set; }
 }

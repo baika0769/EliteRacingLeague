@@ -36,33 +36,35 @@ public class SpectatorDashboardController : ControllerBase
     {
         var userId = GetUserId();
         var today = DateOnly.FromDateTime(_dateTimeProvider.UtcNow);
+        var activeSeason = await _leaderboardService.GetActiveSeasonAsync();
+        var activeSeasonId = activeSeason?.SeasonId;
 
         var upcomingTournaments = await _context.Tournaments
             .AsNoTracking()
             .CountAsync(t =>
+                (!activeSeasonId.HasValue || t.SeasonId == activeSeasonId.Value) &&
                 t.Status != TournamentStatuses.Draft &&
                 t.Status != TournamentStatuses.Cancelled &&
                 t.Status != TournamentStatuses.Completed &&
                 t.EndDate >= today);
 
-        var predictionsSubmitted = await _context.RacePredictions
-            .AsNoTracking()
-            .CountAsync(p =>
-                p.SpectatorId == userId &&
-                p.Status != RacePredictionStatuses.Cancelled);
+        var predictionsSubmitted = activeSeasonId.HasValue
+            ? await _context.RacePredictions
+                .AsNoTracking()
+                .CountAsync(p =>
+                    p.SpectatorId == userId &&
+                    p.Race.Tournament.SeasonId == activeSeasonId.Value &&
+                    p.Status != RacePredictionStatuses.Cancelled)
+            : 0;
 
         var rewardSummary = await _leaderboardService.GetRewardSummaryAsync(userId);
         var myRank = await _leaderboardService.GetMyRankAsync(userId);
-
-        var bettingPoints = await _context.Users
-            .AsNoTracking()
-            .Where(u => u.UserId == userId)
-            .Select(u => u.BettingPoints)
-            .FirstOrDefaultAsync();
+        var bettingPoints = rewardSummary.BettingPoints;
 
         var featuredTournament = await _context.Tournaments
             .AsNoTracking()
             .Where(t =>
+                (!activeSeasonId.HasValue || t.SeasonId == activeSeasonId.Value) &&
                 t.Status != TournamentStatuses.Draft &&
                 t.Status != TournamentStatuses.Cancelled &&
                 t.Status != TournamentStatuses.Completed &&
@@ -96,9 +98,12 @@ public class SpectatorDashboardController : ControllerBase
 
         return Ok(new
         {
+            activeSeasonId,
+            activeSeasonName = activeSeason?.SeasonName,
             upcomingTournaments,
             predictionsSubmitted,
             bettingPoints,
+            seasonScore = rewardSummary.RewardPoints,
             rewardPoints = rewardSummary.RewardPoints,
             netPoints = rewardSummary.NetPoints,
             totalStakePoints = rewardSummary.TotalStakePoints,

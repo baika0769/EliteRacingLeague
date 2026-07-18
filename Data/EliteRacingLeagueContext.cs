@@ -63,6 +63,10 @@ public partial class EliteRacingLeagueContext : DbContext
 
     public virtual DbSet<SeasonReward> SeasonRewards { get; set; }
 
+    public virtual DbSet<SpectatorSeasonWallet> SpectatorSeasonWallets { get; set; }
+
+    public virtual DbSet<PointTransaction> PointTransactions { get; set; }
+
     public virtual DbSet<Tournament> Tournaments { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
@@ -943,7 +947,7 @@ public partial class EliteRacingLeagueContext : DbContext
 
                 table.HasCheckConstraint(
                     "CK_seasons_status",
-                    "[status] IN ('Draft', 'Active', 'Closed', 'Cancelled')");
+                    "[status] IN ('Draft', 'Active', 'Settling', 'Closed', 'Cancelled')");
             });
 
             entity.HasIndex(
@@ -1027,6 +1031,16 @@ public partial class EliteRacingLeagueContext : DbContext
                 .IsUnicode(false)
                 .HasColumnName("status");
             entity.Property(e => e.AwardedAt).HasColumnName("awarded_at");
+            entity.Property(e => e.ClaimDeadline).HasColumnName("claim_deadline");
+            entity.Property(e => e.ClaimedAt).HasColumnName("claimed_at");
+            entity.Property(e => e.ApprovedAt).HasColumnName("approved_at");
+            entity.Property(e => e.PreparingAt).HasColumnName("preparing_at");
+            entity.Property(e => e.DeliveredAt).HasColumnName("delivered_at");
+            entity.Property(e => e.RejectedAt).HasColumnName("rejected_at");
+            entity.Property(e => e.ReceiverName).HasMaxLength(200).HasColumnName("receiver_name");
+            entity.Property(e => e.ReceiverPhone).HasMaxLength(30).IsUnicode(false).HasColumnName("receiver_phone");
+            entity.Property(e => e.DeliveryAddress).HasMaxLength(500).HasColumnName("delivery_address");
+            entity.Property(e => e.AdminNote).HasMaxLength(1000).HasColumnName("admin_note");
 
             entity.HasIndex(e => new { e.SeasonId, e.SpectatorId }).IsUnique();
 
@@ -1038,6 +1052,78 @@ public partial class EliteRacingLeagueContext : DbContext
                 .WithMany(u => u.SeasonRewards)
                 .HasForeignKey(e => e.SpectatorId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
+        });
+
+
+        modelBuilder.Entity<SpectatorSeasonWallet>(entity =>
+        {
+            entity.HasKey(e => e.SpectatorSeasonWalletId);
+
+            entity.ToTable("spectator_season_wallets", table =>
+            {
+                table.HasCheckConstraint("CK_spectator_season_wallets_balance", "[opening_betting_points] >= 0 AND [current_betting_points] >= 0");
+                table.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0");
+                table.HasCheckConstraint("CK_spectator_season_wallets_status", "[status] IN ('Active', 'Frozen', 'Settled')");
+            });
+
+            entity.Property(e => e.SpectatorSeasonWalletId).HasColumnName("spectator_season_wallet_id");
+            entity.Property(e => e.SeasonId).HasColumnName("season_id");
+            entity.Property(e => e.SpectatorId).HasColumnName("spectator_id");
+            entity.Property(e => e.OpeningBettingPoints).HasColumnName("opening_betting_points");
+            entity.Property(e => e.CurrentBettingPoints).HasColumnName("current_betting_points");
+            entity.Property(e => e.SeasonScore).HasColumnName("season_score");
+            entity.Property(e => e.FinalBettingPoints).HasColumnName("final_betting_points");
+            entity.Property(e => e.FinalSeasonScore).HasColumnName("final_season_score");
+            entity.Property(e => e.FinalRank).HasColumnName("final_rank");
+            entity.Property(e => e.Status).HasMaxLength(30).IsUnicode(false).HasColumnName("status");
+            entity.Property(e => e.OpenedAt).HasDefaultValueSql("(sysutcdatetime())").HasColumnName("opened_at");
+            entity.Property(e => e.FrozenAt).HasColumnName("frozen_at");
+            entity.Property(e => e.SettledAt).HasColumnName("settled_at");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
+
+            entity.HasIndex(e => new { e.SeasonId, e.SpectatorId }, "UX_spectator_season_wallets_season_spectator").IsUnique();
+            entity.HasIndex(e => new { e.SeasonId, e.SeasonScore }, "IX_spectator_season_wallets_season_score");
+
+            entity.HasOne(e => e.Season)
+                .WithMany(s => s.SpectatorSeasonWallets)
+                .HasForeignKey(e => e.SeasonId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
+
+            entity.HasOne(e => e.Spectator)
+                .WithMany(u => u.SpectatorSeasonWallets)
+                .HasForeignKey(e => e.SpectatorId)
+                .OnDelete(DeleteBehavior.ClientSetNull);
+        });
+
+        modelBuilder.Entity<PointTransaction>(entity =>
+        {
+            entity.HasKey(e => e.PointTransactionId);
+
+            entity.ToTable("point_transactions", table =>
+            {
+                table.HasCheckConstraint("CK_point_transactions_balance", "[balance_before] >= 0 AND [balance_after] >= 0");
+            });
+
+            entity.Property(e => e.PointTransactionId).HasColumnName("point_transaction_id");
+            entity.Property(e => e.SpectatorSeasonWalletId).HasColumnName("spectator_season_wallet_id");
+            entity.Property(e => e.TransactionType).HasMaxLength(40).IsUnicode(false).HasColumnName("transaction_type");
+            entity.Property(e => e.Amount).HasColumnName("amount");
+            entity.Property(e => e.ScoreDelta).HasColumnName("score_delta");
+            entity.Property(e => e.BalanceBefore).HasColumnName("balance_before");
+            entity.Property(e => e.BalanceAfter).HasColumnName("balance_after");
+            entity.Property(e => e.ReferenceType).HasMaxLength(50).IsUnicode(false).HasColumnName("reference_type");
+            entity.Property(e => e.ReferenceId).HasColumnName("reference_id");
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(150).IsUnicode(false).HasColumnName("idempotency_key");
+            entity.Property(e => e.Description).HasMaxLength(500).HasColumnName("description");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())").HasColumnName("created_at");
+
+            entity.HasIndex(e => e.IdempotencyKey, "UX_point_transactions_idempotency_key").IsUnique();
+            entity.HasIndex(e => new { e.SpectatorSeasonWalletId, e.CreatedAt }, "IX_point_transactions_wallet_created_at");
+
+            entity.HasOne(e => e.SpectatorSeasonWallet)
+                .WithMany(w => w.PointTransactions)
+                .HasForeignKey(e => e.SpectatorSeasonWalletId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -47,4 +47,6 @@ public partial class User
 
     public virtual ICollection<Tournament> Tournaments { get; set; } = new List<Tournament>();
     public virtual ICollection<SeasonReward> SeasonRewards { get; set; } = new List<SeasonReward>();
+
+    public virtual ICollection<SpectatorSeasonWallet> SpectatorSeasonWallets { get; set; } = new List<SpectatorSeasonWallet>();
 }

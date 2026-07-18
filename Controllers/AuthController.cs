@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Services.Email;
+using Eliteracingleague.API.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
@@ -26,6 +26,7 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
     private readonly IWebHostEnvironment _environment;
+    private readonly SpectatorWalletService _spectatorWalletService;
     private readonly PasswordHasher<User> _passwordHasher;
     private readonly PasswordHasher<EmailVerificationOtp> _otpHasher;
 
@@ -40,12 +41,14 @@ public class AuthController : ControllerBase
      EliteRacingLeagueContext context,
      IConfiguration configuration,
      IEmailService emailService,
-     IWebHostEnvironment environment)
+     IWebHostEnvironment environment,
+     SpectatorWalletService spectatorWalletService)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _environment = environment;
+        _spectatorWalletService = spectatorWalletService;
         _passwordHasher = new PasswordHasher<User>();
         _otpHasher = new PasswordHasher<EmailVerificationOtp>();
     }
@@ -104,6 +107,24 @@ public class AuthController : ControllerBase
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
+
+            if (role == UserRoles.Spectator)
+            {
+                var activeSeasonId = await _context.Seasons
+                    .Where(item => item.Status == SeasonStatuses.Active)
+                    .OrderByDescending(item => item.StartDate)
+                    .Select(item => (int?)item.SeasonId)
+                    .FirstOrDefaultAsync();
+
+                if (activeSeasonId.HasValue)
+                {
+                    await _spectatorWalletService.GetOrCreateWalletAsync(
+                        activeSeasonId.Value,
+                        user,
+                        SpectatorBettingRules.InitialBettingPoints,
+                        user.CreatedAt);
+                }
+            }
 
             CreateProfileForRole(user);
             var otpCode = await CreateEmailVerificationOtpAsync(user.UserId);

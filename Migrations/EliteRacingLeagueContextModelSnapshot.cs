@@ -1333,7 +1333,7 @@ namespace Eliteracingleague.API.Migrations
 
                             t.HasCheckConstraint("CK_seasons_points_positive", "[points_per_correct_prediction] > 0");
 
-                            t.HasCheckConstraint("CK_seasons_status", "[status] IN ('Draft', 'Active', 'Closed', 'Cancelled')");
+                            t.HasCheckConstraint("CK_seasons_status", "[status] IN ('Draft', 'Active', 'Settling', 'Closed', 'Cancelled')");
                         });
                 });
 
@@ -1357,6 +1357,51 @@ namespace Eliteracingleague.API.Migrations
                     b.Property<DateTime>("AwardedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("awarded_at");
+
+                    b.Property<string>("AdminNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("admin_note");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("approved_at");
+
+                    b.Property<DateTime?>("ClaimDeadline")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("claim_deadline");
+
+                    b.Property<DateTime?>("ClaimedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("claimed_at");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("delivered_at");
+
+                    b.Property<string>("DeliveryAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("delivery_address");
+
+                    b.Property<DateTime?>("PreparingAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("preparing_at");
+
+                    b.Property<string>("ReceiverName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("receiver_name");
+
+                    b.Property<string>("ReceiverPhone")
+                        .HasMaxLength(30)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("receiver_phone");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("rejected_at");
 
                     b.Property<int>("BonusPoints")
                         .HasColumnType("int")
@@ -1456,6 +1501,171 @@ namespace Eliteracingleague.API.Migrations
                         .IsUnique();
 
                     b.ToTable("season_reward_rules", (string)null);
+                });
+
+            modelBuilder.Entity("Eliteracingleague.API.Models.PointTransaction", b =>
+                {
+                    b.Property<int>("PointTransactionId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("point_transaction_id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PointTransactionId"));
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("int")
+                        .HasColumnName("amount");
+
+                    b.Property<int>("BalanceAfter")
+                        .HasColumnType("int")
+                        .HasColumnName("balance_after");
+
+                    b.Property<int>("BalanceBefore")
+                        .HasColumnType("int")
+                        .HasColumnName("balance_before");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("(sysutcdatetime())");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(150)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<int?>("ReferenceId")
+                        .HasColumnType("int")
+                        .HasColumnName("reference_id");
+
+                    b.Property<string>("ReferenceType")
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("reference_type");
+
+                    b.Property<int>("ScoreDelta")
+                        .HasColumnType("int")
+                        .HasColumnName("score_delta");
+
+                    b.Property<int>("SpectatorSeasonWalletId")
+                        .HasColumnType("int")
+                        .HasColumnName("spectator_season_wallet_id");
+
+                    b.Property<string>("TransactionType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(40)")
+                        .HasColumnName("transaction_type");
+
+                    b.HasKey("PointTransactionId");
+
+                    b.HasIndex("IdempotencyKey", "UX_point_transactions_idempotency_key")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "SpectatorSeasonWalletId", "CreatedAt" }, "IX_point_transactions_wallet_created_at");
+
+                    b.ToTable("point_transactions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_point_transactions_balance", "[balance_before] >= 0 AND [balance_after] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Eliteracingleague.API.Models.SpectatorSeasonWallet", b =>
+                {
+                    b.Property<int>("SpectatorSeasonWalletId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("spectator_season_wallet_id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SpectatorSeasonWalletId"));
+
+                    b.Property<int>("CurrentBettingPoints")
+                        .HasColumnType("int")
+                        .HasColumnName("current_betting_points");
+
+                    b.Property<int?>("FinalBettingPoints")
+                        .HasColumnType("int")
+                        .HasColumnName("final_betting_points");
+
+                    b.Property<int?>("FinalRank")
+                        .HasColumnType("int")
+                        .HasColumnName("final_rank");
+
+                    b.Property<int?>("FinalSeasonScore")
+                        .HasColumnType("int")
+                        .HasColumnName("final_season_score");
+
+                    b.Property<DateTime?>("FrozenAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("frozen_at");
+
+                    b.Property<DateTime>("OpenedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("opened_at")
+                        .HasDefaultValueSql("(sysutcdatetime())");
+
+                    b.Property<int>("OpeningBettingPoints")
+                        .HasColumnType("int")
+                        .HasColumnName("opening_betting_points");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("row_version");
+
+                    b.Property<int>("SeasonId")
+                        .HasColumnType("int")
+                        .HasColumnName("season_id");
+
+                    b.Property<int>("SeasonScore")
+                        .HasColumnType("int")
+                        .HasColumnName("season_score");
+
+                    b.Property<DateTime?>("SettledAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("settled_at");
+
+                    b.Property<int>("SpectatorId")
+                        .HasColumnType("int")
+                        .HasColumnName("spectator_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("status");
+
+                    b.HasKey("SpectatorSeasonWalletId");
+
+                    b.HasIndex("SpectatorId");
+
+                    b.HasIndex(new[] { "SeasonId", "SeasonScore" }, "IX_spectator_season_wallets_season_score");
+
+                    b.HasIndex(new[] { "SeasonId", "SpectatorId" }, "UX_spectator_season_wallets_season_spectator")
+                        .IsUnique();
+
+                    b.ToTable("spectator_season_wallets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_spectator_season_wallets_balance", "[opening_betting_points] >= 0 AND [current_betting_points] >= 0");
+
+                            t.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0");
+
+                            t.HasCheckConstraint("CK_spectator_season_wallets_status", "[status] IN ('Active', 'Frozen', 'Settled')");
+                        });
                 });
 
             modelBuilder.Entity("Eliteracingleague.API.Models.Tournament", b =>
@@ -2093,6 +2303,36 @@ namespace Eliteracingleague.API.Migrations
                     b.Navigation("Season");
                 });
 
+            modelBuilder.Entity("Eliteracingleague.API.Models.PointTransaction", b =>
+                {
+                    b.HasOne("Eliteracingleague.API.Models.SpectatorSeasonWallet", "SpectatorSeasonWallet")
+                        .WithMany("PointTransactions")
+                        .HasForeignKey("SpectatorSeasonWalletId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SpectatorSeasonWallet");
+                });
+
+            modelBuilder.Entity("Eliteracingleague.API.Models.SpectatorSeasonWallet", b =>
+                {
+                    b.HasOne("Eliteracingleague.API.Models.Season", "Season")
+                        .WithMany("SpectatorSeasonWallets")
+                        .HasForeignKey("SeasonId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .IsRequired();
+
+                    b.HasOne("Eliteracingleague.API.Models.User", "Spectator")
+                        .WithMany("SpectatorSeasonWallets")
+                        .HasForeignKey("SpectatorId")
+                        .OnDelete(DeleteBehavior.ClientSetNull)
+                        .IsRequired();
+
+                    b.Navigation("Season");
+
+                    b.Navigation("Spectator");
+                });
+
             modelBuilder.Entity("Eliteracingleague.API.Models.Tournament", b =>
                 {
                     b.HasOne("Eliteracingleague.API.Models.User", "CreatedByNavigation")
@@ -2215,7 +2455,14 @@ namespace Eliteracingleague.API.Migrations
 
                     b.Navigation("SeasonRewards");
 
+                    b.Navigation("SpectatorSeasonWallets");
+
                     b.Navigation("Tournaments");
+                });
+
+            modelBuilder.Entity("Eliteracingleague.API.Models.SpectatorSeasonWallet", b =>
+                {
+                    b.Navigation("PointTransactions");
                 });
 
             modelBuilder.Entity("Eliteracingleague.API.Models.Tournament", b =>
@@ -2244,6 +2491,8 @@ namespace Eliteracingleague.API.Migrations
                     b.Navigation("RefereeAssignments");
 
                     b.Navigation("SeasonRewards");
+
+                    b.Navigation("SpectatorSeasonWallets");
 
                     b.Navigation("Tournaments");
                 });

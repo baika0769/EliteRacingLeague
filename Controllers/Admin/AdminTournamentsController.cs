@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Eliteracingleague.API.Services;
 using Microsoft.EntityFrameworkCore;
 using Eliteracingleague.API.Data;
@@ -26,19 +26,22 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly TournamentStatusService _tournamentStatusService;
         private readonly INotificationService _notificationService;
         private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly SpectatorWalletService _spectatorWalletService;
 
         public AdminTournamentsController(
             EliteRacingLeagueContext context,
             IWebHostEnvironment env,
             TournamentStatusService tournamentStatusService,
             INotificationService notificationService,
-            IDateTimeProvider dateTimeProvider)
+            IDateTimeProvider dateTimeProvider,
+            SpectatorWalletService spectatorWalletService)
         {
             _context = context;
             _env = env;
             _tournamentStatusService = tournamentStatusService;
             _notificationService = notificationService;
             _dateTimeProvider = dateTimeProvider;
+            _spectatorWalletService = spectatorWalletService;
         }
 
         [HttpGet]
@@ -1614,6 +1617,8 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var refundablePredictions = await _context.RacePredictions
                 .Include(p => p.Spectator)
+                .Include(p => p.Race)
+                    .ThenInclude(r => r.Tournament)
                 .Where(p => raceIds.Contains(p.RaceId)
                     && (p.Status == RacePredictionStatuses.Pending || p.Status == RacePredictionStatuses.Locked))
                 .ToListAsync();
@@ -1622,8 +1627,23 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 if (prediction.StakePoints > 0)
                 {
-                    prediction.Spectator.BettingPoints += prediction.StakePoints;
-                    prediction.Spectator.UpdatedAt = now;
+                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                        prediction.Race.Tournament.SeasonId,
+                        prediction.Spectator,
+                        prediction.Spectator.BettingPoints,
+                        now);
+
+                    await _spectatorWalletService.ApplyAsync(
+                        wallet,
+                        prediction.Spectator,
+                        PointTransactionTypes.PredictionRefund,
+                        prediction.StakePoints,
+                        scoreDelta: 0,
+                        idempotencyKey: $"PREDICTION_REFUND_{prediction.PredictionId}",
+                        referenceType: "RacePrediction",
+                        referenceId: prediction.PredictionId,
+                        description: $"Refund because tournament was cancelled for prediction #{prediction.PredictionId}.",
+                        now: now);
                 }
 
                 prediction.Status = RacePredictionStatuses.Cancelled;

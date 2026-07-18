@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Services;
@@ -15,13 +15,16 @@ public class AdminPredictionsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly PredictionEvaluationService _predictionEvaluationService;
+    private readonly SpectatorWalletService _spectatorWalletService;
 
     public AdminPredictionsController(
         EliteRacingLeagueContext context,
-        PredictionEvaluationService predictionEvaluationService)
+        PredictionEvaluationService predictionEvaluationService,
+        SpectatorWalletService spectatorWalletService)
     {
         _context = context;
         _predictionEvaluationService = predictionEvaluationService;
+        _spectatorWalletService = spectatorWalletService;
     }
 
     [HttpGet]
@@ -208,8 +211,25 @@ public class AdminPredictionsController : ControllerBase
             {
                 if (prediction.StakePoints > 0)
                 {
-                    prediction.Spectator.BettingPoints += prediction.StakePoints;
-                    prediction.Spectator.UpdatedAt = now;
+                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                        prediction.Race.Tournament.SeasonId,
+                        prediction.Spectator,
+                        prediction.Spectator.BettingPoints,
+                        now,
+                        cancellationToken);
+
+                    await _spectatorWalletService.ApplyAsync(
+                        wallet,
+                        prediction.Spectator,
+                        PointTransactionTypes.PredictionRefund,
+                        prediction.StakePoints,
+                        scoreDelta: 0,
+                        idempotencyKey: $"PREDICTION_REFUND_{prediction.PredictionId}",
+                        referenceType: "RacePrediction",
+                        referenceId: prediction.PredictionId,
+                        description: $"Refund for cancelled prediction #{prediction.PredictionId}.",
+                        now: now,
+                        cancellationToken: cancellationToken);
                 }
 
                 prediction.Status = RacePredictionStatuses.Cancelled;
