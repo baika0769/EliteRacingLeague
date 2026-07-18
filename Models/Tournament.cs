@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -37,7 +37,9 @@ public partial class Tournament
 
     public virtual User CreatedByNavigation { get; set; } = null!;
 
-    public virtual Race? Race { get; set; }
+    public virtual ICollection<Race> Races { get; set; } = new List<Race>();
+
+    public virtual ICollection<TournamentStanding> TournamentStandings { get; set; } = new List<TournamentStanding>();
 
     public virtual Season Season { get; set; } = null!;
 }

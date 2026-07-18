@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
@@ -27,7 +27,7 @@ namespace Eliteracingleague.API.Services
             var localToday = DateOnly.FromDateTime(localNow);
 
             var tournaments = await _context.Tournaments
-                .Include(t => t.Race)
+                .Include(t => t.Races)
                 .Where(t =>
                     t.Status == TournamentStatuses.OpenRegistration &&
                     t.StartDate < localToday)

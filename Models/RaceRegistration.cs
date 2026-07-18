@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -27,6 +27,14 @@ public partial class RaceRegistration
 
     public string? AdminNote { get; set; }
 
+    public string? WithdrawalReason { get; set; }
+
+    public DateTime? WithdrawnAt { get; set; }
+
+    public int? WithdrawnByUserId { get; set; }
+
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public virtual Horse Horse { get; set; } = null!;
 
     public virtual Jockey? Jockey { get; set; }
@@ -52,4 +60,8 @@ public partial class RaceRegistration
     public virtual ICollection<RaceViolation> RaceViolations { get; set; } = new List<RaceViolation>();
 
     public virtual User? ReviewedByNavigation { get; set; }
+
+    public virtual User? WithdrawnByUser { get; set; }
+
+    public virtual ICollection<RaceResultRevision> RaceResultRevisions { get; set; } = new List<RaceResultRevision>();
 }

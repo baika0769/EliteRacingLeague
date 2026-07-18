@@ -302,6 +302,7 @@ public class AuthController : ControllerBase
             user.Status = UserStatuses.Pending;
         }
 
+        user.TokenVersion++;
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -419,6 +420,16 @@ public class AuthController : ControllerBase
             });
         }
 
+        var now = DateTime.UtcNow;
+        if (user.LockoutEndAt.HasValue && user.LockoutEndAt.Value > now)
+        {
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                message = "Tài khoản tạm khóa do đăng nhập sai nhiều lần.",
+                lockoutEndAt = user.LockoutEndAt
+            });
+        }
+
         var result = _passwordHasher.VerifyHashedPassword(
             user,
             user.PasswordHash,
@@ -427,11 +438,24 @@ public class AuthController : ControllerBase
 
         if (result == PasswordVerificationResult.Failed)
         {
+            user.FailedLoginAttempts++;
+            if (user.FailedLoginAttempts >= 5)
+            {
+                user.LockoutEndAt = now.AddMinutes(15);
+                user.FailedLoginAttempts = 0;
+            }
+            await _context.SaveChangesAsync();
             return Unauthorized(new
             {
                 message = "Email hoặc mật khẩu không đúng."
             });
         }
+
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndAt = null;
+        user.LastLoginAt = now;
+        user.UpdatedAt = now;
+        await _context.SaveChangesAsync();
 
         if (!user.EmailVerified)
         {
@@ -559,6 +583,7 @@ public class AuthController : ControllerBase
         user.PasswordHash = _passwordHasher.HashPassword(
             user,
             request.NewPassword);
+        user.TokenVersion++; // Revoke all previously issued access tokens.
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -567,6 +592,106 @@ public class AuthController : ControllerBase
         {
             message = "Password changed successfully."
         });
+    }
+
+
+    [HttpPost("forgot-password")]
+    [EnableRateLimiting("LoginRateLimit")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        // Always return the same response to prevent account enumeration.
+        if (user != null && user.EmailVerified && user.Status != UserStatuses.Banned)
+        {
+            var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawToken)));
+            var now = DateTime.UtcNow;
+
+            var oldTokens = await _context.PasswordResetTokens
+                .Where(t => t.UserId == user.UserId && !t.IsUsed && t.ExpiresAt > now)
+                .ToListAsync();
+            foreach (var oldToken in oldTokens)
+            {
+                oldToken.IsUsed = true;
+                oldToken.UsedAt = now;
+            }
+
+            _context.PasswordResetTokens.Add(new PasswordResetToken
+            {
+                UserId = user.UserId,
+                TokenHash = tokenHash,
+                ExpiresAt = now.AddMinutes(30),
+                IsUsed = false,
+                CreatedAt = now,
+                RequestedIp = HttpContext.Connection.RemoteIpAddress?.ToString()
+            });
+            await _context.SaveChangesAsync();
+
+            var frontendBaseUrl = _configuration["Frontend:BaseUrl"]?.TrimEnd('/') ?? "http://localhost:5173";
+            var resetUrl = $"{frontendBaseUrl}/reset-password?token={Uri.EscapeDataString(rawToken)}";
+            await _emailService.SendEmailAsync(user.Email, "Elite Racing League - Reset Password",
+                $"<p>Hello {System.Net.WebUtility.HtmlEncode(user.FullName)},</p>" +
+                $"<p>Use this link within 30 minutes to reset your password:</p>" +
+                $"<p><a href=\"{resetUrl}\">Reset password</a></p>" +
+                "<p>If you did not request this, ignore the email.</p>");
+        }
+
+        return Ok(new { message = "If the email is valid, a password reset link has been sent." });
+    }
+
+    [HttpPost("reset-password")]
+    [EnableRateLimiting("LoginRateLimit")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResetPassword(ResetPasswordRequest request)
+    {
+        if (request.NewPassword != request.ConfirmPassword)
+            return BadRequest(new { message = "Confirm password does not match." });
+
+        var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(request.Token)));
+        var now = DateTime.UtcNow;
+        var resetToken = await _context.PasswordResetTokens
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.TokenHash == tokenHash && !t.IsUsed && t.ExpiresAt > now);
+
+        if (resetToken == null)
+            return BadRequest(new { message = "Password reset token is invalid or expired." });
+
+        resetToken.User.PasswordHash = _passwordHasher.HashPassword(resetToken.User, request.NewPassword);
+        resetToken.User.TokenVersion++;
+        resetToken.User.FailedLoginAttempts = 0;
+        resetToken.User.LockoutEndAt = null;
+        resetToken.User.UpdatedAt = now;
+        resetToken.IsUsed = true;
+        resetToken.UsedAt = now;
+
+        var siblingTokens = await _context.PasswordResetTokens
+            .Where(t => t.UserId == resetToken.UserId && !t.IsUsed)
+            .ToListAsync();
+        foreach (var token in siblingTokens)
+        {
+            token.IsUsed = true;
+            token.UsedAt = now;
+        }
+
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Password reset successfully. Please login again." });
+    }
+
+    [HttpPost("logout-all")]
+    [Authorize]
+    public async Task<IActionResult> LogoutAll()
+    {
+        var userIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdText, out var userId)) return Unauthorized();
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (user == null) return Unauthorized();
+        user.TokenVersion++;
+        user.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "All active tokens have been revoked." });
     }
 
 
@@ -839,7 +964,8 @@ public class AuthController : ControllerBase
         new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
         new Claim(ClaimTypes.Name, user.FullName),
         new Claim(ClaimTypes.Email, user.Email),
-        new Claim(ClaimTypes.Role, user.Role)
+        new Claim(ClaimTypes.Role, user.Role),
+        new Claim("token_version", user.TokenVersion.ToString())
     };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey!));

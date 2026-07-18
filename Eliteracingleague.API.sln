@@ -5,6 +5,8 @@ VisualStudioVersion = 18.6.11819.183
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Eliteracingleague.API", "Eliteracingleague.API.csproj", "{A33807BE-9E37-2666-7F09-2E5686459E1C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Eliteracingleague.API.IntegrationTests", "tests\Eliteracingleague.API.IntegrationTests\Eliteracingleague.API.IntegrationTests.csproj", "{7E0AC2D6-3C73-46D9-96C9-F8DD0714E9A0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A33807BE-9E37-2666-7F09-2E5686459E1C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7E0AC2D6-3C73-46D9-96C9-F8DD0714E9A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7E0AC2D6-3C73-46D9-96C9-F8DD0714E9A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7E0AC2D6-3C73-46D9-96C9-F8DD0714E9A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7E0AC2D6-3C73-46D9-96C9-F8DD0714E9A0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

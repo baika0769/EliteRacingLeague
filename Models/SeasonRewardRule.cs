@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.Models;
+namespace Eliteracingleague.API.Models;
 
 public partial class SeasonRewardRule
 {
@@ -14,9 +14,15 @@ public partial class SeasonRewardRule
 
     public int BonusPoints { get; set; }
 
+    public int? RewardItemId { get; set; }
+
+    public int Quantity { get; set; } = 1;
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }
 
     public virtual Season Season { get; set; } = null!;
+
+    public virtual RewardItem? RewardItem { get; set; }
 }

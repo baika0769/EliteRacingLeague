@@ -42,9 +42,10 @@ public class PublicHomeService
             .AsNoTracking()
             .Where(item =>
                 item.Status == RaceStatuses.Published &&
-                item.Tournament.Status == TournamentStatuses.Completed &&
+                item.Tournament.Status != TournamentStatuses.Cancelled &&
                 item.RaceResults.Any(result =>
                     result.Status == RaceResultStatuses.Published &&
+                    result.OutcomeStatus == RaceOutcomeStatuses.Finished &&
                     result.FinishPosition.HasValue))
             .Select(item => new
             {
@@ -69,6 +70,7 @@ public class PublicHomeService
                 .Where(item =>
                     item.RaceId == latestRace.RaceId &&
                     item.Status == RaceResultStatuses.Published &&
+                    item.OutcomeStatus == RaceOutcomeStatuses.Finished &&
                     item.FinishPosition.HasValue &&
                     !_context.RaceViolations.Any(violation =>
                         violation.RaceId == item.RaceId &&
@@ -117,16 +119,46 @@ public class PublicHomeService
         var safeLimit = Math.Clamp(limit, 1, 200);
         var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
 
-        return await _context.Tournaments
+        var candidateRaces = await _context.Races
             .AsNoTracking()
-            .Where(item =>
-                item.Status != TournamentStatuses.Draft &&
-                item.Status != TournamentStatuses.Cancelled &&
-                item.Status != TournamentStatuses.Completed &&
-                item.Race != null &&
-                item.Race.Status != RaceStatuses.Cancelled &&
-                item.Race.RaceDate >= localNow)
-            .OrderBy(item => item.Race!.RaceDate)
+            .Where(race =>
+                race.Tournament.Status != TournamentStatuses.Draft &&
+                race.Tournament.Status != TournamentStatuses.Cancelled &&
+                race.Tournament.Status != TournamentStatuses.Completed &&
+                race.Status != RaceStatuses.Cancelled &&
+                race.RaceDate >= localNow)
+            .OrderBy(race => race.RaceDate)
+            .ThenByDescending(race => race.Tournament.PrizePool)
+            .Select(race => new
+            {
+                race.RaceId,
+                race.RaceName,
+                race.RaceDate,
+                race.DistanceMeters,
+                RaceLocation = race.Location,
+                RaceStatus = race.Status,
+                race.TournamentId,
+                race.Tournament.TournamentName,
+                race.Tournament.Description,
+                TournamentLocation = race.Tournament.Location,
+                race.Tournament.StartDate,
+                race.Tournament.EndDate,
+                race.Tournament.PrizePool,
+                race.Tournament.ImageUrl,
+                TournamentStatus = race.Tournament.Status,
+                race.Tournament.SeasonId,
+                race.Tournament.Season.SeasonName,
+                RegisteredHorseCount = race.RaceRegistrations.Count(registration =>
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    registration.Status != RaceRegistrationStatuses.Withdrawn)
+            })
+            .ToListAsync(cancellationToken);
+
+        return candidateRaces
+            .GroupBy(item => item.TournamentId)
+            .Select(group => group.OrderBy(item => item.RaceDate).First())
+            .OrderBy(item => item.RaceDate)
             .ThenByDescending(item => item.PrizePool)
             .Take(safeLimit)
             .Select(item => new PublicTournamentResponse
@@ -134,32 +166,26 @@ public class PublicHomeService
                 TournamentId = item.TournamentId,
                 TournamentName = item.TournamentName,
                 Description = item.Description,
-                Location = item.Location,
+                Location = item.TournamentLocation,
                 StartDate = item.StartDate,
                 EndDate = item.EndDate,
                 PrizePool = item.PrizePool,
                 ImageUrl = item.ImageUrl,
-                Status = item.Status,
+                Status = item.TournamentStatus,
                 SeasonId = item.SeasonId,
-                SeasonName = item.Season.SeasonName,
-                RegisteredHorseCount = item.Race == null
-                    ? 0
-                    : item.Race.RaceRegistrations.Count(registration =>
-                        registration.Status != RaceRegistrationStatuses.Rejected &&
-                        registration.Status != RaceRegistrationStatuses.Cancelled),
-                Race = item.Race == null
-                    ? null
-                    : new PublicRaceResponse
-                    {
-                        RaceId = item.Race.RaceId,
-                        RaceName = item.Race.RaceName,
-                        RaceDate = item.Race.RaceDate,
-                        DistanceMeters = item.Race.DistanceMeters,
-                        Location = item.Race.Location,
-                        Status = item.Race.Status
-                    }
+                SeasonName = item.SeasonName,
+                RegisteredHorseCount = item.RegisteredHorseCount,
+                Race = new PublicRaceResponse
+                {
+                    RaceId = item.RaceId,
+                    RaceName = item.RaceName,
+                    RaceDate = item.RaceDate,
+                    DistanceMeters = item.DistanceMeters,
+                    Location = item.RaceLocation,
+                    Status = item.RaceStatus
+                }
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
 }

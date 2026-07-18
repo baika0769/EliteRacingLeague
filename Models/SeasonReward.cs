@@ -18,6 +18,12 @@ public partial class SeasonReward
 
     public int BonusPoints { get; set; }
 
+    public int? RewardItemId { get; set; }
+
+    public int Quantity { get; set; } = 1;
+
+    public bool InventoryReserved { get; set; }
+
     public bool IsBonusApplied { get; set; }
 
     public int? AppliedToSeasonId { get; set; }
@@ -51,4 +57,6 @@ public partial class SeasonReward
     public virtual Season Season { get; set; } = null!;
 
     public virtual User Spectator { get; set; } = null!;
+
+    public virtual RewardItem? RewardItem { get; set; }
 }

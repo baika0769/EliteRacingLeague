@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -22,6 +22,12 @@ public partial class JockeyInvitation
     public DateTime SentAt { get; set; }
 
     public DateTime? RespondedAt { get; set; }
+
+    public DateTime? ExpiresAt { get; set; }
+
+    public string? ResponseNote { get; set; }
+
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public virtual HorseOwner InvitedByOwner { get; set; } = null!;
 

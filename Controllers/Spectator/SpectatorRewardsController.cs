@@ -4,6 +4,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.Rewards;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,15 +20,18 @@ public class SpectatorRewardsController : ControllerBase
     private readonly EliteRacingLeagueContext _context;
     private readonly SpectatorLeaderboardService _leaderboardService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly RewardInventoryService _rewardInventoryService;
 
     public SpectatorRewardsController(
         EliteRacingLeagueContext context,
         SpectatorLeaderboardService leaderboardService,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        RewardInventoryService rewardInventoryService)
     {
         _context = context;
         _leaderboardService = leaderboardService;
         _dateTimeProvider = dateTimeProvider;
+        _rewardInventoryService = rewardInventoryService;
     }
 
     private int GetUserId()
@@ -119,6 +123,11 @@ public class SpectatorRewardsController : ControllerBase
                 item.RewardName,
                 item.RewardDescription,
                 item.BonusPoints,
+                item.RewardItemId,
+                item.Quantity,
+                item.InventoryReserved,
+                RewardItemName = item.RewardItem == null ? null : item.RewardItem.Name,
+                RewardItemImageUrl = item.RewardItem == null ? null : item.RewardItem.ImageUrl,
                 item.IsBonusApplied,
                 item.AppliedToSeasonId,
                 item.AppliedAt,
@@ -192,6 +201,7 @@ public class SpectatorRewardsController : ControllerBase
         var userId = GetUserId();
         var reward = await _context.SeasonRewards
             .Include(item => item.Season)
+            .Include(item => item.RewardItem)
             .FirstOrDefaultAsync(item =>
                 item.SeasonRewardId == rewardId &&
                 item.SpectatorId == userId);
@@ -215,6 +225,10 @@ public class SpectatorRewardsController : ControllerBase
         if (reward.ClaimDeadline.HasValue && now > reward.ClaimDeadline.Value)
         {
             reward.Status = SeasonRewardStatuses.Expired;
+            if (reward.RewardItem != null)
+                await _rewardInventoryService.ReleaseAsync(
+                    reward.RewardItem, reward, userId, now,
+                    "Reward claim deadline expired.");
             await _context.SaveChangesAsync();
 
             return BadRequest(new

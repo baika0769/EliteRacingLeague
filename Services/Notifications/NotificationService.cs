@@ -118,13 +118,15 @@ public class NotificationService : INotificationService
             return true;
         }
 
+        var duplicateWindowStart = DateTime.UtcNow.AddMinutes(-5);
         return await _context.Notifications
             .AsNoTracking()
             .AnyAsync(n =>
                 n.UserId == userId &&
                 n.ActionType == actionType &&
                 n.RelatedType == relatedType &&
-                n.RelatedId == relatedId,
+                n.RelatedId == relatedId &&
+                n.CreatedAt >= duplicateWindowStart,
                 cancellationToken);
     }
 }

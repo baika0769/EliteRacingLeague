@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -40,4 +40,6 @@ public partial class Horse
     public virtual HorseOwner Owner { get; set; } = null!;
 
     public virtual ICollection<RaceRegistration> RaceRegistrations { get; set; } = new List<RaceRegistration>();
+
+    public virtual ICollection<TournamentStanding> TournamentStandings { get; set; } = new List<TournamentStanding>();
 }

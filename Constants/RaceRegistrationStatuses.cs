@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.Constants;
+namespace Eliteracingleague.API.Constants;
 
 public static class RaceRegistrationStatuses
 {
@@ -7,6 +7,7 @@ public static class RaceRegistrationStatuses
     public const string JockeyInvited = "JockeyInvited";
     public const string ReadyToRace = "ReadyToRace";
     public const string Rejected = "Rejected";
+    public const string Withdrawn = "Withdrawn";
     public const string Cancelled = "Cancelled";
     public const string Completed = "Completed";
 
@@ -25,6 +26,7 @@ public static class RaceRegistrationStatuses
         JockeyInvited,
         ReadyToRace,
         Rejected,
+        Withdrawn,
         Cancelled,
         Completed
     };
@@ -52,12 +54,13 @@ public static class RaceRegistrationStatuses
 
         return currentStatus switch
         {
-            Pending => nextStatus is Approved or Rejected or Cancelled,
-            Approved => nextStatus is JockeyInvited or Cancelled,
-            JockeyInvited => nextStatus is ReadyToRace or Cancelled,
-            ReadyToRace => nextStatus is Completed or Cancelled,
+            Pending => nextStatus is Approved or Rejected or Withdrawn or Cancelled,
+            Approved => nextStatus is JockeyInvited or Withdrawn or Cancelled,
+            JockeyInvited => nextStatus is ReadyToRace or Approved or Withdrawn or Cancelled,
+            ReadyToRace => nextStatus is Completed or Withdrawn or Cancelled,
 
             Rejected => false,
+            Withdrawn => false,
             Cancelled => false,
             Completed => false,
 

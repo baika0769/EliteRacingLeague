@@ -23,6 +23,14 @@ public partial class User
 
     public int BettingPoints { get; set; }
 
+    public int TokenVersion { get; set; }
+
+    public DateTime? LastLoginAt { get; set; }
+
+    public int FailedLoginAttempts { get; set; }
+
+    public DateTime? LockoutEndAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }
@@ -49,4 +57,12 @@ public partial class User
     public virtual ICollection<SeasonReward> SeasonRewards { get; set; } = new List<SeasonReward>();
 
     public virtual ICollection<SpectatorSeasonWallet> SpectatorSeasonWallets { get; set; } = new List<SpectatorSeasonWallet>();
+
+    public virtual ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
+    public virtual ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = new List<PasswordResetToken>();
+
+    public virtual ICollection<RaceResultRevision> RaceResultRevisions { get; set; } = new List<RaceResultRevision>();
+
+    public virtual ICollection<RewardInventoryTransaction> RewardInventoryTransactions { get; set; } = new List<RewardInventoryTransaction>();
 }

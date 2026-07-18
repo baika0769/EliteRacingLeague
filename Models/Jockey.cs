@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -44,4 +44,6 @@ public partial class Jockey
     public virtual ICollection<PrizeAward> PrizeAwards { get; set; } = new List<PrizeAward>();
 
     public virtual ICollection<RaceRegistration> RaceRegistrations { get; set; } = new List<RaceRegistration>();
+
+    public virtual ICollection<TournamentStanding> TournamentStandings { get; set; } = new List<TournamentStanding>();
 }

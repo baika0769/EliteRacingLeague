@@ -14,6 +14,7 @@ public class CreateRaceResultRequest
     public decimal? FinishTimeSeconds { get; set; }
     public int? FinishPosition { get; set; }
     public decimal? Score { get; set; }
+    public string OutcomeStatus { get; set; } = "Finished";
     public string? Note { get; set; }
 }
 

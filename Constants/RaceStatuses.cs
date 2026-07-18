@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.Constants;
+namespace Eliteracingleague.API.Constants;
 
 public static class RaceStatuses
 {
@@ -9,6 +9,7 @@ public static class RaceStatuses
     public const string Finished = "Finished";
     public const string ResultPending = "ResultPending";
     public const string Published = "Published";
+    public const string Postponed = "Postponed";
     public const string Cancelled = "Cancelled";
 
     public static readonly string[] All =
@@ -20,6 +21,7 @@ public static class RaceStatuses
         Finished,
         ResultPending,
         Published,
+        Postponed,
         Cancelled
     };
 
@@ -43,12 +45,12 @@ public static class RaceStatuses
 
     public static bool IsClosedForPrediction(string? status)
     {
-        return status is Ongoing or Finished or ResultPending or Published or Cancelled;
+        return status is Ongoing or Finished or ResultPending or Published or Postponed or Cancelled;
     }
 
     public static bool IsClosedForJockeyAssignment(string? status)
     {
-        return status is Ongoing or Finished or ResultPending or Published or Cancelled;
+        return status is Ongoing or Finished or ResultPending or Published or Postponed or Cancelled;
     }
 
     public static bool IsCompletedForDashboard(string? status)

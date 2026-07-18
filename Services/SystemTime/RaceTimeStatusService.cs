@@ -37,16 +37,29 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         var expiredInvitations = await _context.JockeyInvitations
             .Include(i => i.Registration)
                 .ThenInclude(r => r.Race)
+            .Include(i => i.Registration)
+                .ThenInclude(r => r.JockeyInvitations)
             .Where(i =>
                 i.Status == InvitationStatuses.Pending &&
-                i.Registration.Race.JockeySelectionDeadline.HasValue &&
-                i.Registration.Race.JockeySelectionDeadline.Value <= localNow)
+                ((i.ExpiresAt.HasValue && i.ExpiresAt.Value <= localNow) ||
+                 (i.Registration.Race.JockeySelectionDeadline.HasValue &&
+                  i.Registration.Race.JockeySelectionDeadline.Value <= localNow)))
             .ToListAsync(cancellationToken);
 
         foreach (var invitation in expiredInvitations)
         {
             invitation.Status = InvitationStatuses.Expired;
             invitation.RespondedAt = localNow;
+            invitation.ResponseNote = "Invitation expired automatically.";
+
+            var registration = invitation.Registration;
+            if (registration.Status == RaceRegistrationStatuses.JockeyInvited &&
+                !registration.JockeyInvitations.Any(other =>
+                    other.InvitationId != invitation.InvitationId &&
+                    other.Status == InvitationStatuses.Pending))
+            {
+                registration.Status = RaceRegistrationStatuses.Approved;
+            }
         }
 
         var predictionsToLock = await _context.RacePredictions
@@ -69,7 +82,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             .Where(t =>
                 t.Status == TournamentStatuses.OpenRegistration &&
                 t.StartDate < localToday &&
-                (t.Race == null || t.Race.RaceDate > localNow))
+                (!t.Races.Any() || t.Races.Any(r => r.RaceDate > localNow)))
             .ToListAsync(cancellationToken);
 
         foreach (var tournament in tournamentsToCloseRegistration)
@@ -104,7 +117,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         var localToday = DateOnly.FromDateTime(localNow);
 
         var tournaments = await _context.Tournaments
-            .Include(t => t.Race)
+            .Include(t => t.Races)
             .Where(t => RecalculatableTournamentStatuses.Contains(t.Status))
             .ToListAsync(cancellationToken);
 

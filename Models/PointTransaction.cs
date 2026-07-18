@@ -14,6 +14,12 @@ public class PointTransaction
     // Số thay đổi của điểm thành tích season.
     public int ScoreDelta { get; set; }
 
+    // Thay đổi công nợ thu hồi điểm: dương là phát sinh nợ, âm là đã thu hồi.
+    public int RecoveryDebtDelta { get; set; }
+
+    // Số tiền điểm nghiệp vụ yêu cầu trước khi bù trừ công nợ.
+    public int RequestedAmount { get; set; }
+
     public int BalanceBefore { get; set; }
 
     public int BalanceAfter { get; set; }

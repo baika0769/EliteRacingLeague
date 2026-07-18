@@ -45,13 +45,33 @@ namespace Eliteracingleague.API.Controllers.Admin
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetTournaments()
+        public async Task<IActionResult> GetTournaments(CancellationToken cancellationToken)
         {
-            await _tournamentStatusService.SyncTournamentStatusesAsync();
+            await _tournamentStatusService.SyncTournamentStatusesAsync(cancellationToken);
 
             var tournaments = await _context.Tournaments
                 .AsNoTracking()
-                .Select(t => new
+                .Include(t => t.Season)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.RefereeAssignments)
+                        .ThenInclude(a => a.Referee)
+                            .ThenInclude(r => r.Referee)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.RaceRegistrations)
+                .AsSplitQuery()
+                .OrderByDescending(t => t.TournamentId)
+                .ToListAsync(cancellationToken);
+
+            return Ok(tournaments.Select(t =>
+            {
+                var race = t.Races.OrderBy(r => r.RaceDate).FirstOrDefault();
+                var entriesCount = t.Races.Sum(r => r.RaceRegistrations.Count(registration =>
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    registration.Status != RaceRegistrationStatuses.Withdrawn));
+                var totalCapacity = t.Races.Sum(r => r.MaxHorses);
+
+                return new
                 {
                     tournamentId = t.TournamentId,
                     tournamentName = t.TournamentName,
@@ -59,117 +79,51 @@ namespace Eliteracingleague.API.Controllers.Admin
                     location = t.Location,
                     startDate = t.StartDate,
                     endDate = t.EndDate,
-                    maxHorses = t.MaxHorses,
+                    maxHorses = totalCapacity > 0 ? totalCapacity : t.MaxHorses,
                     prizePool = t.PrizePool,
                     imageUrl = t.ImageUrl,
                     status = t.Status,
                     rules = t.Rules,
                     createdBy = t.CreatedBy,
                     createdAt = t.CreatedAt,
-
                     seasonId = t.SeasonId,
                     seasonName = t.Season.SeasonName,
                     seasonStatus = t.Season.Status,
-
-                    raceId = t.Race == null ? (int?)null : t.Race.RaceId,
-                    raceDateTime = t.Race == null ? (DateTime?)null : t.Race.RaceDate,
-                    raceStartTime = t.Race == null
-                        ? null
-                        : t.Race.RaceDate.ToString("HH:mm"),
-                    distanceMeters = t.Race == null ? (int?)null : t.Race.DistanceMeters,
-                    raceStatus = t.Race == null ? null : t.Race.Status,
-                    predictionDeadline = t.Race == null
-                        ? (DateTime?)null
-                        : t.Race.PredictionDeadline,
-
-                    entriesCount = _context.RaceRegistrations
-                        .Count(r =>
-                            r.Race.TournamentId == t.TournamentId &&
-                            r.Status != RaceRegistrationStatuses.Rejected &&
-                            r.Status != RaceRegistrationStatuses.Cancelled),
-
-                    entriesText =
-                        _context.RaceRegistrations
-                            .Count(r =>
-                                r.Race.TournamentId == t.TournamentId &&
-                                r.Status != RaceRegistrationStatuses.Rejected &&
-                                r.Status != RaceRegistrationStatuses.Cancelled)
-                        + "/" + t.MaxHorses,
-
-                    referee = t.Race == null
-                        ? "Unassigned"
-                        : t.Race.RefereeAssignments
-                            .OrderByDescending(a => a.AssignedAt)
-                            .Select(a => a.Referee.Referee.FullName)
-                            .FirstOrDefault() ?? "Unassigned"
-                })
-                .OrderByDescending(t => t.tournamentId)
-                .ToListAsync();
-
-            return Ok(tournaments);
+                    raceCount = t.Races.Count,
+                    raceId = race?.RaceId,
+                    raceDateTime = race?.RaceDate,
+                    raceStartTime = race?.RaceDate.ToString("HH:mm"),
+                    distanceMeters = race?.DistanceMeters,
+                    raceStatus = race?.Status,
+                    predictionDeadline = race?.PredictionDeadline,
+                    entriesCount,
+                    entriesText = $"{entriesCount}/{(totalCapacity > 0 ? totalCapacity : t.MaxHorses)}",
+                    referee = race?.RefereeAssignments
+                        .OrderByDescending(a => a.AssignedAt)
+                        .Select(a => a.Referee.Referee.FullName)
+                        .FirstOrDefault() ?? "Unassigned"
+                };
+            }));
         }
 
         [HttpGet("{id:int}")]
-        public async Task<IActionResult> GetTournamentById(int id)
+        public async Task<IActionResult> GetTournamentById(
+            int id,
+            CancellationToken cancellationToken)
         {
-            await _tournamentStatusService.SyncTournamentStatusesAsync();
+            await _tournamentStatusService.SyncTournamentStatusesAsync(cancellationToken);
 
             var tournament = await _context.Tournaments
                 .AsNoTracking()
-                .Where(t => t.TournamentId == id)
-                .Select(t => new
-                {
-                    tournamentId = t.TournamentId,
-                    tournamentName = t.TournamentName,
-                    description = t.Description,
-                    location = t.Location,
-                    startDate = t.StartDate,
-                    endDate = t.EndDate,
-                    maxHorses = t.MaxHorses,
-                    prizePool = t.PrizePool,
-                    imageUrl = t.ImageUrl,
-                    status = t.Status,
-                    rules = t.Rules,
-                    createdBy = t.CreatedBy,
-                    createdAt = t.CreatedAt,
-
-                    seasonId = t.SeasonId,
-                    seasonName = t.Season.SeasonName,
-                    seasonStatus = t.Season.Status,
-
-                    raceId = t.Race == null ? (int?)null : t.Race.RaceId,
-                    raceDateTime = t.Race == null ? (DateTime?)null : t.Race.RaceDate,
-                    raceStartTime = t.Race == null
-                        ? null
-                        : t.Race.RaceDate.ToString("HH:mm"),
-                    distanceMeters = t.Race == null ? (int?)null : t.Race.DistanceMeters,
-                    raceStatus = t.Race == null ? null : t.Race.Status,
-                    predictionDeadline = t.Race == null
-                        ? (DateTime?)null
-                        : t.Race.PredictionDeadline,
-
-                    entriesCount = _context.RaceRegistrations
-                        .Count(r =>
-                            r.Race.TournamentId == t.TournamentId &&
-                            r.Status != RaceRegistrationStatuses.Rejected &&
-                            r.Status != RaceRegistrationStatuses.Cancelled),
-
-                    entriesText =
-                        _context.RaceRegistrations
-                            .Count(r =>
-                                r.Race.TournamentId == t.TournamentId &&
-                                r.Status != RaceRegistrationStatuses.Rejected &&
-                                r.Status != RaceRegistrationStatuses.Cancelled)
-                        + "/" + t.MaxHorses,
-
-                    referee = t.Race == null
-                        ? "Unassigned"
-                        : t.Race.RefereeAssignments
-                            .OrderByDescending(a => a.AssignedAt)
-                            .Select(a => a.Referee.Referee.FullName)
-                            .FirstOrDefault() ?? "Unassigned"
-                })
-                .FirstOrDefaultAsync();
+                .Include(t => t.Season)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.RefereeAssignments)
+                        .ThenInclude(a => a.Referee)
+                            .ThenInclude(r => r.Referee)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.RaceRegistrations)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(t => t.TournamentId == id, cancellationToken);
 
             if (tournament == null)
             {
@@ -180,7 +134,58 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            return Ok(tournament);
+            var primaryRace = tournament.Races.OrderBy(r => r.RaceDate).FirstOrDefault();
+            var entriesCount = tournament.Races.Sum(r => r.RaceRegistrations.Count(registration =>
+                registration.Status != RaceRegistrationStatuses.Rejected &&
+                registration.Status != RaceRegistrationStatuses.Cancelled &&
+                registration.Status != RaceRegistrationStatuses.Withdrawn));
+            var totalCapacity = tournament.Races.Sum(r => r.MaxHorses);
+
+            return Ok(new
+            {
+                tournamentId = tournament.TournamentId,
+                tournamentName = tournament.TournamentName,
+                description = tournament.Description,
+                location = tournament.Location,
+                startDate = tournament.StartDate,
+                endDate = tournament.EndDate,
+                maxHorses = totalCapacity > 0 ? totalCapacity : tournament.MaxHorses,
+                prizePool = tournament.PrizePool,
+                imageUrl = tournament.ImageUrl,
+                status = tournament.Status,
+                rules = tournament.Rules,
+                createdBy = tournament.CreatedBy,
+                createdAt = tournament.CreatedAt,
+                seasonId = tournament.SeasonId,
+                seasonName = tournament.Season.SeasonName,
+                seasonStatus = tournament.Season.Status,
+                raceCount = tournament.Races.Count,
+                raceId = primaryRace?.RaceId,
+                raceDateTime = primaryRace?.RaceDate,
+                raceStartTime = primaryRace?.RaceDate.ToString("HH:mm"),
+                distanceMeters = primaryRace?.DistanceMeters,
+                raceStatus = primaryRace?.Status,
+                predictionDeadline = primaryRace?.PredictionDeadline,
+                entriesCount,
+                entriesText = $"{entriesCount}/{(totalCapacity > 0 ? totalCapacity : tournament.MaxHorses)}",
+                referee = primaryRace?.RefereeAssignments
+                    .OrderByDescending(a => a.AssignedAt)
+                    .Select(a => a.Referee.Referee.FullName)
+                    .FirstOrDefault() ?? "Unassigned",
+                races = tournament.Races.OrderBy(r => r.RaceDate).Select(r => new
+                {
+                    raceId = r.RaceId,
+                    raceName = r.RaceName,
+                    raceDate = r.RaceDate,
+                    distanceMeters = r.DistanceMeters,
+                    maxHorses = r.MaxHorses,
+                    status = r.Status,
+                    registeredCount = r.RaceRegistrations.Count(registration =>
+                        registration.Status != RaceRegistrationStatuses.Rejected &&
+                        registration.Status != RaceRegistrationStatuses.Cancelled &&
+                        registration.Status != RaceRegistrationStatuses.Withdrawn)
+                })
+            });
         }
 
         [HttpPost]
@@ -408,7 +413,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             var tournament = await _context.Tournaments
-                .Include(t => t.Race)
+                .Include(t => t.Races)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -433,7 +438,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var race = tournament.Race;
+            var race = tournament.Races.OrderBy(r => r.RaceDate).FirstOrDefault();
 
             if (race != null &&
                 race.Status is
@@ -629,7 +634,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             [FromBody] UpdateTournamentStatusRequest request)
         {
             var tournament = await _context.Tournaments
-                .Include(t => t.Race)
+                .Include(t => t.Races)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -686,9 +691,9 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.Status = TournamentStatuses.ClosedRegistration;
             tournament.UpdatedAt = now;
 
-            if (tournament.Race != null)
+            foreach (var race in tournament.Races)
             {
-                tournament.Race.UpdatedAt = now;
+                race.UpdatedAt = now;
             }
 
             await _context.SaveChangesAsync();
@@ -707,7 +712,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var tournament = await _context.Tournaments
                 .Include(t => t.Season)
-                .Include(t => t.Race)
+                .Include(t => t.Races)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -756,25 +761,26 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (tournament.Race == null)
+            if (tournament.Races.Count == 0)
             {
                 return BadRequest(new
                 {
                     code = "RACE_NOT_FOUND",
-                    message = "Tournament cannot be approved because its race does not exist.",
+                    message = "Tournament cannot be approved because it has no races.",
                     tournamentId = tournament.TournamentId
                 });
             }
 
-            if (!RaceStatuses.CanRegister(tournament.Race.Status))
+            var invalidRace = tournament.Races.FirstOrDefault(r => !RaceStatuses.CanRegister(r.Status));
+            if (invalidRace != null)
             {
                 return BadRequest(new
                 {
                     code = "RACE_NOT_REGISTERABLE",
-                    message = "Tournament cannot be approved because the race is not in a registerable status.",
+                    message = "Every race must be in a registerable status before the tournament is opened.",
                     tournamentId = tournament.TournamentId,
-                    raceId = tournament.Race.RaceId,
-                    raceStatus = tournament.Race.Status
+                    raceId = invalidRace.RaceId,
+                    raceStatus = invalidRace.Status
                 });
             }
 
@@ -793,8 +799,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var raceDate = DateOnly.FromDateTime(
-                tournament.Race.RaceDate);
+            var earliestRaceDate = tournament.Races.Min(r => r.RaceDate);
+            var raceDate = DateOnly.FromDateTime(earliestRaceDate);
 
             if (raceDate < localToday)
             {
@@ -811,7 +817,10 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             tournament.Status = TournamentStatuses.OpenRegistration;
             tournament.UpdatedAt = now;
-            tournament.Race.UpdatedAt = now;
+            foreach (var race in tournament.Races)
+            {
+                race.UpdatedAt = now;
+            }
 
             await _context.SaveChangesAsync();
 
@@ -824,8 +833,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                 seasonId = tournament.Season.SeasonId,
                 seasonName = tournament.Season.SeasonName,
                 seasonStatus = tournament.Season.Status,
-                raceId = tournament.Race.RaceId,
-                raceStatus = tournament.Race.Status
+                raceCount = tournament.Races.Count,
+                raceIds = tournament.Races.OrderBy(r => r.RaceDate).Select(r => r.RaceId).ToArray()
             });
         }
 

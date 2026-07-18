@@ -10,6 +10,10 @@ using Eliteracingleague.API.Services.JockeyMatching;
 using Eliteracingleague.API.Services.Leaderboards;
 using Eliteracingleague.API.Services.Notifications;
 using Eliteracingleague.API.Services.SystemTime;
+using Eliteracingleague.API.Services.Auditing;
+using Eliteracingleague.API.Services.Racing;
+using Eliteracingleague.API.Services.Rewards;
+using Eliteracingleague.API.Middleware;
 using Eliteracingleague.API.Constants;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
@@ -24,17 +28,17 @@ builder.Services.AddControllers();
 
 builder.Services.AddCors(options =>
 {
+    var configuredOrigins = builder.Configuration
+        .GetSection("Cors:AllowedOrigins")
+        .Get<string[]>() ?? Array.Empty<string>();
+
+    var origins = configuredOrigins.Length > 0
+        ? configuredOrigins
+        : new[] { "http://localhost:5173", "https://localhost:5173", "http://localhost:5174", "https://localhost:5174" };
+
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy
-            .WithOrigins(
-                "http://localhost:5174",
-                "https://localhost:5174",
-                "http://localhost:5173",
-                "https://localhost:5173",
-                "http://localhost:3000",
-                "https://localhost:3000"
-            )
+        policy.WithOrigins(origins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -44,7 +48,15 @@ builder.Services.AddCors(options =>
 builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<RaceSchedulingValidationService>();
+builder.Services.AddScoped<RacePredictionSettlementService>();
+builder.Services.AddScoped<RaceResultCorrectionService>();
+builder.Services.AddScoped<RaceResultValidationService>();
+builder.Services.AddScoped<TournamentStandingService>();
+builder.Services.AddScoped<RewardInventoryService>();
 builder.Services.AddScoped<JockeyAccessService>();
 builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
@@ -152,6 +164,13 @@ builder.Services.AddAuthentication(options =>
                 return;
             }
 
+            var tokenVersionText = context.Principal?.FindFirst("token_version")?.Value;
+            if (!int.TryParse(tokenVersionText, out var tokenVersion) || tokenVersion != user.TokenVersion)
+            {
+                context.Fail("Token has been revoked.");
+                return;
+            }
+
             var tokenRole = context.Principal?.FindFirst(ClaimTypes.Role)?.Value;
             if (!string.Equals(user.Role, tokenRole, StringComparison.Ordinal))
             {
@@ -223,6 +242,9 @@ if (app.Environment.IsDevelopment())
 
 
 
+app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<GlobalExceptionMiddleware>();
+
 app.UseHttpsRedirection();
 
 app.UseStaticFiles();
@@ -241,3 +263,5 @@ app.MapControllers();
 
 
 app.Run();
+
+public partial class Program { }

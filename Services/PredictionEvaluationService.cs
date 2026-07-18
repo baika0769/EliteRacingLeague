@@ -56,11 +56,12 @@ public class PredictionEvaluationService
             }
 
             if (raceInfo.Status != RaceStatuses.Published ||
-                raceInfo.TournamentStatus != TournamentStatuses.Completed)
+                raceInfo.TournamentStatus == TournamentStatuses.Cancelled ||
+                raceInfo.SeasonStatus is SeasonStatuses.Settling or SeasonStatuses.Closed or SeasonStatuses.Cancelled)
             {
                 return PredictionEvaluationResult.Fail(
                     raceId,
-                    "Predictions can only be evaluated after the race is published and the tournament is completed.");
+                    "Predictions can only be evaluated for a published race in an active season.");
             }
 
             var winner = await _context.RaceResults
@@ -68,6 +69,7 @@ public class PredictionEvaluationService
                 .Where(result =>
                     result.RaceId == raceId &&
                     result.Status == RaceResultStatuses.Published &&
+                    result.OutcomeStatus == RaceOutcomeStatuses.Finished &&
                     result.FinishPosition.HasValue &&
                     !_context.RaceViolations.Any(violation =>
                         violation.RaceId == result.RaceId &&

@@ -3,8 +3,11 @@ using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
+using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.Rewards;
+using Eliteracingleague.API.Services.Auditing;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,17 +29,23 @@ public class AdminSeasonsController : ControllerBase
     private readonly SpectatorLeaderboardService _leaderboardService;
     private readonly SpectatorWalletService _spectatorWalletService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly RewardInventoryService _rewardInventoryService;
+    private readonly IAuditService _auditService;
 
     public AdminSeasonsController(
         EliteRacingLeagueContext context,
         SpectatorLeaderboardService leaderboardService,
         SpectatorWalletService spectatorWalletService,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        RewardInventoryService rewardInventoryService,
+        IAuditService auditService)
     {
         _context = context;
         _leaderboardService = leaderboardService;
         _spectatorWalletService = spectatorWalletService;
         _dateTimeProvider = dateTimeProvider;
+        _rewardInventoryService = rewardInventoryService;
+        _auditService = auditService;
     }
 
     [HttpGet]
@@ -618,6 +627,17 @@ public class AdminSeasonsController : ControllerBase
                     message = $"Bonus points must be between 0 and {MaxRewardBonusPoints:N0}"
                 });
             }
+            if (rule.Quantity <= 0 || rule.Quantity > 100)
+            {
+                return BadRequest(new { message = $"Reward quantity for rank {rule.RankPosition} must be between 1 and 100." });
+            }
+            if (rule.RewardItemId.HasValue)
+            {
+                var rewardItemExists = await _context.RewardItems.AsNoTracking().AnyAsync(item =>
+                    item.RewardItemId == rule.RewardItemId.Value && item.IsActive);
+                if (!rewardItemExists)
+                    return BadRequest(new { message = $"Reward item for rank {rule.RankPosition} was not found or is inactive." });
+            }
         }
 
         var now = DateTime.UtcNow;
@@ -647,6 +667,8 @@ public class AdminSeasonsController : ControllerBase
                         ? null
                         : requestRule.RewardDescription.Trim(),
                     BonusPoints = requestRule.BonusPoints,
+                    RewardItemId = requestRule.RewardItemId,
+                    Quantity = requestRule.Quantity,
                     CreatedAt = now
                 });
             }
@@ -657,6 +679,8 @@ public class AdminSeasonsController : ControllerBase
                     ? null
                     : requestRule.RewardDescription.Trim();
                 existingRule.BonusPoints = requestRule.BonusPoints;
+                existingRule.RewardItemId = requestRule.RewardItemId;
+                existingRule.Quantity = requestRule.Quantity;
                 existingRule.UpdatedAt = now;
             }
         }
@@ -851,6 +875,8 @@ public class AdminSeasonsController : ControllerBase
     [HttpPut("{id:int}/close")]
     public async Task<IActionResult> CloseSeason(int id)
     {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
+
         await using var transaction = await _context.Database.BeginTransactionAsync(
             IsolationLevel.Serializable);
 
@@ -947,7 +973,7 @@ public class AdminSeasonsController : ControllerBase
             }
 
             var rewardRules = await _context.SeasonRewardRules
-                .AsNoTracking()
+                .Include(r => r.RewardItem)
                 .Where(r => r.SeasonId == season.SeasonId)
                 .OrderBy(r => r.RankPosition)
                 .ToListAsync();
@@ -1010,7 +1036,7 @@ public class AdminSeasonsController : ControllerBase
                     continue;
                 }
 
-                _context.SeasonRewards.Add(new SeasonReward
+                var seasonReward = new SeasonReward
                 {
                     SeasonId = season.SeasonId,
                     SpectatorId = item.SpectatorId,
@@ -1019,13 +1045,23 @@ public class AdminSeasonsController : ControllerBase
                     RewardName = rule.RewardName,
                     RewardDescription = rule.RewardDescription,
                     BonusPoints = rule.BonusPoints,
+                    RewardItemId = rule.RewardItemId,
+                    Quantity = Math.Max(1, rule.Quantity),
                     IsBonusApplied = false,
                     AppliedToSeasonId = null,
                     AppliedAt = null,
                     Status = SeasonRewardStatuses.Eligible,
                     AwardedAt = now,
                     ClaimDeadline = now.AddDays(30)
-                });
+                };
+                _context.SeasonRewards.Add(seasonReward);
+
+                if (rule.RewardItem != null)
+                {
+                    await _rewardInventoryService.ReserveAsync(
+                        rule.RewardItem, seasonReward, seasonReward.Quantity,
+                        adminId, now);
+                }
 
                 _context.Notifications.Add(new Notification
                 {
@@ -1046,6 +1082,11 @@ public class AdminSeasonsController : ControllerBase
             season.Status = SeasonStatuses.Closed;
             season.UpdatedAt = now;
 
+            await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+                "Season", season.SeasonId.ToString(),
+                new { Status = SeasonStatuses.Active },
+                new { Status = season.Status, RewardCount = rewardCount },
+                "Season closed and rewards generated");
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
 
@@ -1167,6 +1208,10 @@ public class AdminSeasonsController : ControllerBase
                 r.RewardName,
                 r.RewardDescription,
                 r.BonusPoints,
+                r.RewardItemId,
+                r.Quantity,
+                r.InventoryReserved,
+                RewardItemName = r.RewardItem == null ? null : r.RewardItem.Name,
                 r.IsBonusApplied,
                 r.AppliedToSeasonId,
                 r.AppliedAt,
@@ -1197,6 +1242,7 @@ public class AdminSeasonsController : ControllerBase
         int rewardId,
         [FromBody] UpdateSeasonRewardStatusRequest request)
     {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
         if (!SeasonRewardStatuses.IsValid(request.Status) ||
             request.Status is SeasonRewardStatuses.Eligible or SeasonRewardStatuses.Claimed or SeasonRewardStatuses.Expired)
         {
@@ -1209,6 +1255,7 @@ public class AdminSeasonsController : ControllerBase
         var reward = await _context.SeasonRewards
             .Include(item => item.Season)
             .Include(item => item.Spectator)
+            .Include(item => item.RewardItem)
             .FirstOrDefaultAsync(item => item.SeasonRewardId == rewardId);
 
         if (reward == null)
@@ -1251,9 +1298,14 @@ public class AdminSeasonsController : ControllerBase
                 break;
             case SeasonRewardStatuses.Delivered:
                 reward.DeliveredAt = now;
+                if (reward.RewardItem != null)
+                    await _rewardInventoryService.DeliverAsync(reward.RewardItem, reward, adminId, now);
                 break;
             case SeasonRewardStatuses.Rejected:
                 reward.RejectedAt = now;
+                if (reward.RewardItem != null)
+                    await _rewardInventoryService.ReleaseAsync(reward.RewardItem, reward, adminId, now,
+                        "Reward rejected by admin.");
                 break;
         }
 
@@ -1270,6 +1322,9 @@ public class AdminSeasonsController : ControllerBase
             RelatedId = reward.SeasonRewardId
         });
 
+        await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+            "SeasonReward", reward.SeasonRewardId.ToString(), null,
+            new { reward.Status, reward.InventoryReserved }, reward.AdminNote);
         await _context.SaveChangesAsync();
 
         return Ok(new
@@ -1417,6 +1472,11 @@ public class SeasonRewardRuleRequest
 
     [Range(0, 1_000_000)]
     public int BonusPoints { get; set; }
+
+    public int? RewardItemId { get; set; }
+
+    [Range(1, 100)]
+    public int Quantity { get; set; } = 1;
 }
 
 public class UpdateSeasonRewardStatusRequest

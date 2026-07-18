@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner.Registrations;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services.Notifications;
+using Eliteracingleague.API.Services.Racing;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,6 +19,7 @@ public class OwnerRegistrationsController : OwnerBaseController
 {
     private readonly INotificationService _notificationService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly RaceSchedulingValidationService _schedulingValidation;
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
@@ -38,10 +40,12 @@ public class OwnerRegistrationsController : OwnerBaseController
     public OwnerRegistrationsController(
         EliteRacingLeagueContext context,
         INotificationService notificationService,
-        IDateTimeProvider dateTimeProvider) : base(context)
+        IDateTimeProvider dateTimeProvider,
+        RaceSchedulingValidationService schedulingValidation) : base(context)
     {
         _notificationService = notificationService;
         _dateTimeProvider = dateTimeProvider;
+        _schedulingValidation = schedulingValidation;
     }
 
     // API 1: Open Tournaments
@@ -93,102 +97,78 @@ public class OwnerRegistrationsController : OwnerBaseController
 
 
     [HttpGet("open-tournaments")]
-    public async Task<IActionResult> GetOpenTournaments([FromQuery] int limit = 6)
+    public async Task<IActionResult> GetOpenTournaments(
+        [FromQuery] int limit = 6,
+        CancellationToken cancellationToken = default)
     {
         var ownerId = GetCurrentUserId();
-
-        if (ownerId == null)
-        {
-            return InvalidToken();
-        }
+        if (ownerId == null) return InvalidToken();
 
         var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
+        if (ownerProfileError != null) return ownerProfileError;
 
-        if (ownerProfileError != null)
-        {
-            return ownerProfileError;
-        }
-
-        if (limit <= 0)
-        {
-            limit = 6;
-        }
-
-        if (limit > 20)
-        {
-            limit = 20;
-        }
-
+        limit = Math.Clamp(limit, 1, 20);
         var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
         var localToday = DateOnly.FromDateTime(localNow);
 
-        var data = await _context.Tournaments
+        var data = await _context.Races
             .AsNoTracking()
-            .Where(t =>
-                t.Season.Status == SeasonStatuses.Active &&
-                t.Status == TournamentStatuses.OpenRegistration &&
-                t.StartDate >= localToday &&
-                t.Race != null &&
-                RaceStatuses.RegisterableStatuses.Contains(t.Race.Status) &&
-                t.Race.RaceDate >= localNow)
-            .OrderBy(t => t.Race!.RaceDate)
-            .Select(t => new
+            .Where(r =>
+                r.Tournament.Season.Status == SeasonStatuses.Active &&
+                r.Tournament.Status == TournamentStatuses.OpenRegistration &&
+                r.Tournament.StartDate >= localToday &&
+                RaceStatuses.RegisterableStatuses.Contains(r.Status) &&
+                r.RaceDate >= localNow)
+            .OrderBy(r => r.RaceDate)
+            .Select(r => new
             {
-                t.TournamentId,
-                t.TournamentName,
-
-                SeasonId = t.SeasonId,
-                SeasonName = t.Season.SeasonName,
-                SeasonStatus = t.Season.Status,
-                RegistrationDeadline = t.StartDate,
-
-                t.Location,
-                t.PrizePool,
-                t.ImageUrl,
-
-                RaceId = t.Race!.RaceId,
-                RaceDate = t.Race.RaceDate,
-                DistanceMeters = t.Race.DistanceMeters,
-                MaxHorses = t.Race.MaxHorses,
-
-                RegisteredCount = t.Race.RaceRegistrations.Count(r =>
-                    r.Status != RaceRegistrationStatuses.Rejected &&
-                    r.Status != RaceRegistrationStatuses.Cancelled),
-
-                OwnerAlreadyRegistered = t.Race.RaceRegistrations.Any(r =>
-                    r.OwnerId == ownerId.Value &&
-                    r.Status != RaceRegistrationStatuses.Rejected &&
-                    r.Status != RaceRegistrationStatuses.Cancelled)
+                r.TournamentId,
+                r.Tournament.TournamentName,
+                SeasonId = r.Tournament.SeasonId,
+                SeasonName = r.Tournament.Season.SeasonName,
+                SeasonStatus = r.Tournament.Season.Status,
+                RegistrationDeadline = r.Tournament.StartDate,
+                r.Tournament.Location,
+                r.Tournament.PrizePool,
+                r.Tournament.ImageUrl,
+                r.RaceId,
+                r.RaceDate,
+                r.DistanceMeters,
+                r.MaxHorses,
+                RegisteredCount = r.RaceRegistrations.Count(registration =>
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    registration.Status != RaceRegistrationStatuses.Withdrawn),
+                OwnerAlreadyRegistered = r.RaceRegistrations.Any(registration =>
+                    registration.OwnerId == ownerId.Value &&
+                    registration.Status != RaceRegistrationStatuses.Rejected &&
+                    registration.Status != RaceRegistrationStatuses.Cancelled &&
+                    registration.Status != RaceRegistrationStatuses.Withdrawn)
             })
-            .ToListAsync();
-
-        var response = data
-            .Where(t => t.RegisteredCount < t.MaxHorses && !t.OwnerAlreadyRegistered)
+            .Where(r => r.RegisteredCount < r.MaxHorses && !r.OwnerAlreadyRegistered)
             .Take(limit)
-            .Select(t => new OwnerOpenTournamentResponse
-            {
-                TournamentId = t.TournamentId,
-                TournamentName = t.TournamentName,
-                SeasonId = t.SeasonId,
-                SeasonName = t.SeasonName,
-                SeasonStatus = t.SeasonStatus,
-                RegistrationDeadline = t.RegistrationDeadline.ToString("yyyy-MM-dd"),
-                RaceId = t.RaceId,
-                RaceDate = t.RaceDate.ToString("yyyy-MM-dd"),
-                Location = t.Location,
-                DistanceMeters = t.DistanceMeters,
-                PrizePool = t.PrizePool,
-                MaxHorses = t.MaxHorses,
-                RegisteredCount = t.RegisteredCount,
-                AvailableSlots = Math.Max(0, t.MaxHorses - t.RegisteredCount),
-                OwnerAlreadyRegistered = t.OwnerAlreadyRegistered,
-                ImageUrl = t.ImageUrl
-            })
-            .ToList();
+            .ToListAsync(cancellationToken);
 
-        return Ok(response);
+        return Ok(data.Select(r => new OwnerOpenTournamentResponse
+        {
+            TournamentId = r.TournamentId,
+            TournamentName = r.TournamentName,
+            SeasonId = r.SeasonId,
+            SeasonName = r.SeasonName,
+            SeasonStatus = r.SeasonStatus,
+            RegistrationDeadline = r.RegistrationDeadline.ToString("yyyy-MM-dd"),
+            RaceId = r.RaceId,
+            RaceDate = r.RaceDate.ToString("yyyy-MM-dd"),
+            Location = r.Location,
+            DistanceMeters = r.DistanceMeters,
+            PrizePool = r.PrizePool,
+            MaxHorses = r.MaxHorses,
+            RegisteredCount = r.RegisteredCount,
+            AvailableSlots = Math.Max(0, r.MaxHorses - r.RegisteredCount),
+            OwnerAlreadyRegistered = r.OwnerAlreadyRegistered,
+            ImageUrl = r.ImageUrl
+        }));
     }
-
 
     [HttpGet("eligible-horses")]
     public async Task<IActionResult> GetEligibleHorses([FromQuery] int raceId)
@@ -387,7 +367,8 @@ public class OwnerRegistrationsController : OwnerBaseController
 
         var currentRegisteredCount = race.RaceRegistrations.Count(r =>
             r.Status != RaceRegistrationStatuses.Rejected &&
-            r.Status != RaceRegistrationStatuses.Cancelled);
+            r.Status != RaceRegistrationStatuses.Cancelled &&
+            r.Status != RaceRegistrationStatuses.Withdrawn);
 
         if (currentRegisteredCount >= race.MaxHorses)
         {
@@ -410,7 +391,8 @@ public class OwnerRegistrationsController : OwnerBaseController
                 r.RaceId == request.RaceId &&
                 r.OwnerId == ownerId.Value &&
                 r.Status != RaceRegistrationStatuses.Rejected &&
-                r.Status != RaceRegistrationStatuses.Cancelled);
+                r.Status != RaceRegistrationStatuses.Cancelled &&
+                r.Status != RaceRegistrationStatuses.Withdrawn);
 
         if (alreadyRegisteredByOwner)
         {
@@ -429,6 +411,9 @@ public class OwnerRegistrationsController : OwnerBaseController
         {
             return BadRequest(new { message = ineligibleReason });
         }
+
+        await _schedulingValidation.EnsureHorseAndJockeyNoConflictAsync(
+            request.RaceId, request.HorseId, null);
 
         var ownerName = await _context.Users
             .AsNoTracking()

@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.DTOs.Admin
+namespace Eliteracingleague.API.DTOs.Admin
 {
     public class AdminRaceResultResponse
     {
@@ -8,7 +8,9 @@
         public decimal? FinishTimeSeconds { get; set; }
         public int? FinishPosition { get; set; }
         public decimal? Score { get; set; }
+        public string OutcomeStatus { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+        public int RevisionNumber { get; set; }
         public int EnteredByRefereeId { get; set; }
         public int? AdminConfirmedBy { get; set; }
         public DateTime? PublishedAt { get; set; }

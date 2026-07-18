@@ -4,6 +4,7 @@ using Eliteracingleague.API.DTOs.Jockey;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.JockeyMatching;
+using Eliteracingleague.API.Services.Racing;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,17 +21,20 @@ public class JockeyInvitationsController : ControllerBase
     private readonly JockeyAccessService _jockeyAccess;
     private readonly IJockeyMatchScoreService _matchScoreService;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly RaceSchedulingValidationService _schedulingValidation;
 
     public JockeyInvitationsController(
         EliteRacingLeagueContext context,
         JockeyAccessService jockeyAccess,
         IJockeyMatchScoreService matchScoreService,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        RaceSchedulingValidationService schedulingValidation)
     {
         _context = context;
         _jockeyAccess = jockeyAccess;
         _matchScoreService = matchScoreService;
         _dateTimeProvider = dateTimeProvider;
+        _schedulingValidation = schedulingValidation;
     }
 
     [HttpGet("pending")]
@@ -256,14 +260,18 @@ public class JockeyInvitationsController : ControllerBase
         }
 
         var now = _dateTimeProvider.UtcNow;
-        var deadline = invitation.Registration.Race.JockeySelectionDeadline;
+        var deadline = invitation.ExpiresAt ?? invitation.Registration.Race.JockeySelectionDeadline;
 
         if (deadline.HasValue && now > deadline.Value)
         {
-            return BadRequest(new
+            if (invitation.Status == InvitationStatuses.Pending)
             {
-                message = "The jockey selection deadline has passed."
-            });
+                invitation.Status = InvitationStatuses.Expired;
+                invitation.RespondedAt = now;
+                invitation.ResponseNote = "Invitation expired before response.";
+                await _context.SaveChangesAsync();
+            }
+            return BadRequest(new { message = "The jockey selection deadline has passed.", status = invitation.Status });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -275,8 +283,14 @@ public class JockeyInvitationsController : ControllerBase
             });
         }
 
+        await _schedulingValidation.EnsureHorseAndJockeyNoConflictAsync(
+            invitation.Registration.RaceId,
+            invitation.Registration.HorseId,
+            jockeyId.Value);
+
         invitation.Status = InvitationStatuses.Accepted;
         invitation.RespondedAt = now;
+        invitation.ResponseNote = "Accepted by jockey.";
 
         var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
         var horseName = invitation.Registration.Horse.HorseName;
@@ -341,6 +355,17 @@ public class JockeyInvitationsController : ControllerBase
 
         invitation.Status = InvitationStatuses.Rejected;
         invitation.RespondedAt = DateTime.UtcNow;
+        invitation.ResponseNote = "Rejected by jockey.";
+
+        var hasOtherActiveInvitation = await _context.JockeyInvitations.AnyAsync(i =>
+            i.RegistrationId == invitation.RegistrationId &&
+            i.InvitationId != invitation.InvitationId &&
+            (i.Status == InvitationStatuses.Pending || i.Status == InvitationStatuses.Accepted));
+        if (!hasOtherActiveInvitation && invitation.Registration.JockeyId == null &&
+            invitation.Registration.Status == RaceRegistrationStatuses.JockeyInvited)
+        {
+            invitation.Registration.Status = RaceRegistrationStatuses.Approved;
+        }
 
         var jockeyName = invitation.Jockey.JockeyNavigation.FullName;
         var horseName = invitation.Registration.Horse.HorseName;

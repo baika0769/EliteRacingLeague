@@ -15,6 +15,9 @@ public class SpectatorSeasonWallet
     // Điểm thành tích chỉ tăng từ phần thưởng dự đoán đúng, không lấy điểm mở ví để đổi quà.
     public int SeasonScore { get; set; }
 
+    // Điểm đã chi sau khi nhận payout nhưng phải thu hồi do sửa/hủy kết quả.
+    public int PendingRecoveryPoints { get; set; }
+
     public int? FinalBettingPoints { get; set; }
 
     public int? FinalSeasonScore { get; set; }

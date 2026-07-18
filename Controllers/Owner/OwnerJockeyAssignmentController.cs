@@ -2,6 +2,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Racing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -32,8 +33,13 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         RaceRegistrationStatuses.Completed
     };
 
-    public OwnerJockeyAssignmentController(EliteRacingLeagueContext context) : base(context)
+    private readonly RaceSchedulingValidationService _schedulingValidation;
+
+    public OwnerJockeyAssignmentController(
+        EliteRacingLeagueContext context,
+        RaceSchedulingValidationService schedulingValidation) : base(context)
     {
+        _schedulingValidation = schedulingValidation;
     }
 
     [HttpGet("registrations")]
@@ -391,6 +397,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
+        await _schedulingValidation.EnsureHorseAndJockeyNoConflictAsync(
+            registration.RaceId, registration.HorseId, request.JockeyId);
+
         var raceDate = DateOnly.FromDateTime(registration.Race.RaceDate.Date);
         var isUnavailable = await _context.JockeyAvailabilities
             .AsNoTracking()
@@ -422,29 +431,16 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         }
 
         var existingInvitation = await _context.JockeyInvitations
-            .AsNoTracking()
-            .Where(i =>
+            .FirstOrDefaultAsync(i =>
                 i.RegistrationId == registrationId &&
-                i.JockeyId == request.JockeyId)
-            .Select(i => i.Status)
-            .FirstOrDefaultAsync();
+                i.JockeyId == request.JockeyId);
 
-        if (existingInvitation == InvitationStatuses.Pending ||
-            existingInvitation == InvitationStatuses.Accepted)
+        if (existingInvitation?.Status is InvitationStatuses.Pending or InvitationStatuses.Accepted)
         {
-            return BadRequest(new
+            return Conflict(new
             {
-                message = "Jockey này đã có lời mời cho đăng ký race này.",
-                invitationStatus = existingInvitation
-            });
-        }
-
-        if (existingInvitation != null)
-        {
-            return BadRequest(new
-            {
-                message = "Jockey này đã từng được mời cho đăng ký race này, không thể tạo trùng theo ràng buộc hiện có.",
-                invitationStatus = existingInvitation
+                message = "Jockey already has an active invitation for this registration.",
+                invitationStatus = existingInvitation.Status
             });
         }
 
@@ -455,18 +451,26 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             .FirstAsync();
 
         var now = DateTime.UtcNow;
-        var invitation = new JockeyInvitation
+        var expiresAt = registration.Race.JockeySelectionDeadline ?? registration.Race.RaceDate.AddHours(-1);
+        if (expiresAt <= now)
+            return BadRequest(new { message = "The jockey selection deadline has passed." });
+
+        var invitation = existingInvitation ?? new JockeyInvitation
         {
             RegistrationId = registrationId,
-            JockeyId = request.JockeyId,
-            InvitedByOwnerId = ownerId.Value,
-            Status = InvitationStatuses.Pending,
-            FeeAmount = request.FeeAmount,
-            Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
-            SentAt = now
+            JockeyId = request.JockeyId
         };
+        invitation.InvitedByOwnerId = ownerId.Value;
+        invitation.Status = InvitationStatuses.Pending;
+        invitation.FeeAmount = request.FeeAmount;
+        invitation.Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim();
+        invitation.SentAt = now;
+        invitation.ExpiresAt = expiresAt;
+        invitation.RespondedAt = null;
+        invitation.ResponseNote = null;
 
-        _context.JockeyInvitations.Add(invitation);
+        if (existingInvitation == null)
+            _context.JockeyInvitations.Add(invitation);
 
         if (registration.Status == RaceRegistrationStatuses.Approved)
         {
@@ -752,6 +756,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
         if (registration.Status == RaceRegistrationStatuses.Cancelled ||
             registration.Status == RaceRegistrationStatuses.Rejected ||
+            registration.Status == RaceRegistrationStatuses.Withdrawn ||
             registration.Status == RaceRegistrationStatuses.Completed)
         {
             return BadRequest(new
@@ -777,6 +782,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 registrationStatus = registration.Status
             });
         }
+
+        await _schedulingValidation.EnsureHorseAndJockeyNoConflictAsync(
+            registration.RaceId, registration.HorseId, invitation.JockeyId);
 
         var jockeyAlreadyAssigned = await _context.RaceRegistrations
             .AsNoTracking()

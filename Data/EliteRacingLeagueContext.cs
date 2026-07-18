@@ -67,6 +67,18 @@ public partial class EliteRacingLeagueContext : DbContext
 
     public virtual DbSet<PointTransaction> PointTransactions { get; set; }
 
+    public virtual DbSet<AuditLog> AuditLogs { get; set; }
+
+    public virtual DbSet<RaceResultRevision> RaceResultRevisions { get; set; }
+
+    public virtual DbSet<TournamentStanding> TournamentStandings { get; set; }
+
+    public virtual DbSet<RewardItem> RewardItems { get; set; }
+
+    public virtual DbSet<RewardInventoryTransaction> RewardInventoryTransactions { get; set; }
+
+    public virtual DbSet<PasswordResetToken> PasswordResetTokens { get; set; }
+
     public virtual DbSet<Tournament> Tournaments { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
@@ -362,6 +374,9 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasColumnName("message");
             entity.Property(e => e.RegistrationId).HasColumnName("registration_id");
             entity.Property(e => e.RespondedAt).HasColumnName("responded_at");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.ResponseNote).HasMaxLength(500).HasColumnName("response_note");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
             entity.Property(e => e.SentAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("sent_at");
@@ -594,7 +609,7 @@ public partial class EliteRacingLeagueContext : DbContext
 
             entity.ToTable("races");
 
-            entity.HasIndex(e => e.TournamentId, "UQ__races__B93AA09C53DC9C5A").IsUnique();
+            entity.HasIndex(e => e.TournamentId, "IX_races_tournament_id");
 
             entity.Property(e => e.RaceId).HasColumnName("race_id");
             entity.Property(e => e.CreatedAt)
@@ -619,9 +634,16 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasColumnName("status");
             entity.Property(e => e.TournamentId).HasColumnName("tournament_id");
             entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.OriginalRaceDate).HasColumnName("original_race_date");
+            entity.Property(e => e.PostponedAt).HasColumnName("postponed_at");
+            entity.Property(e => e.PostponementReason).HasMaxLength(1000).HasColumnName("postponement_reason");
+            entity.Property(e => e.CancelledAt).HasColumnName("cancelled_at");
+            entity.Property(e => e.CancellationReason).HasMaxLength(1000).HasColumnName("cancellation_reason");
+            entity.Property(e => e.LifecycleVersion).HasDefaultValue(0).HasColumnName("lifecycle_version");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
 
-            entity.HasOne(d => d.Tournament).WithOne(p => p.Race)
-                .HasForeignKey<Race>(d => d.TournamentId)
+            entity.HasOne(d => d.Tournament).WithMany(p => p.Races)
+                .HasForeignKey(d => d.TournamentId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_races_tournaments");
         });
@@ -742,6 +764,10 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.SubmittedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("submitted_at");
+            entity.Property(e => e.WithdrawalReason).HasMaxLength(500).HasColumnName("withdrawal_reason");
+            entity.Property(e => e.WithdrawnAt).HasColumnName("withdrawn_at");
+            entity.Property(e => e.WithdrawnByUserId).HasColumnName("withdrawn_by_user_id");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
 
             entity.HasOne(d => d.Horse).WithMany(p => p.RaceRegistrations)
                 .HasForeignKey(d => d.HorseId)
@@ -765,6 +791,11 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.HasOne(d => d.ReviewedByNavigation).WithMany(p => p.RaceRegistrations)
                 .HasForeignKey(d => d.ReviewedBy)
                 .HasConstraintName("FK_race_registrations_reviewed_by");
+
+            entity.HasOne(d => d.WithdrawnByUser).WithMany()
+                .HasForeignKey(d => d.WithdrawnByUserId)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("FK_race_registrations_withdrawn_by");
         });
 
         modelBuilder.Entity<RaceResult>(entity =>
@@ -796,6 +827,9 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.Score)
                 .HasColumnType("decimal(10, 2)")
                 .HasColumnName("score");
+            entity.Property(e => e.OutcomeStatus).HasMaxLength(30).IsUnicode(false).HasDefaultValue("Finished").HasColumnName("outcome_status");
+            entity.Property(e => e.RevisionNumber).HasDefaultValue(0).HasColumnName("revision_number");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
             entity.Property(e => e.Status)
                 .HasMaxLength(30)
                 .IsUnicode(false)
@@ -997,6 +1031,8 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.RewardName).HasMaxLength(200).HasColumnName("reward_name");
             entity.Property(e => e.RewardDescription).HasColumnName("reward_description");
             entity.Property(e => e.BonusPoints).HasColumnName("bonus_points");
+            entity.Property(e => e.RewardItemId).HasColumnName("reward_item_id");
+            entity.Property(e => e.Quantity).HasDefaultValue(1).HasColumnName("quantity");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("created_at");
@@ -1007,6 +1043,11 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.HasOne(e => e.Season)
                 .WithMany(s => s.SeasonRewardRules)
                 .HasForeignKey(e => e.SeasonId);
+
+            entity.HasOne(e => e.RewardItem)
+                .WithMany(r => r.SeasonRewardRules)
+                .HasForeignKey(e => e.RewardItemId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<SeasonReward>(entity =>
@@ -1023,6 +1064,9 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.RewardName).HasMaxLength(200).HasColumnName("reward_name");
             entity.Property(e => e.RewardDescription).HasColumnName("reward_description");
             entity.Property(e => e.BonusPoints).HasColumnName("bonus_points");
+            entity.Property(e => e.RewardItemId).HasColumnName("reward_item_id");
+            entity.Property(e => e.Quantity).HasDefaultValue(1).HasColumnName("quantity");
+            entity.Property(e => e.InventoryReserved).HasDefaultValue(false).HasColumnName("inventory_reserved");
             entity.Property(e => e.IsBonusApplied).HasColumnName("is_bonus_applied");
             entity.Property(e => e.AppliedToSeasonId).HasColumnName("applied_to_season_id");
             entity.Property(e => e.AppliedAt).HasColumnName("applied_at");
@@ -1052,6 +1096,11 @@ public partial class EliteRacingLeagueContext : DbContext
                 .WithMany(u => u.SeasonRewards)
                 .HasForeignKey(e => e.SpectatorId)
                 .OnDelete(DeleteBehavior.ClientSetNull);
+
+            entity.HasOne(e => e.RewardItem)
+                .WithMany(r => r.SeasonRewards)
+                .HasForeignKey(e => e.RewardItemId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
 
@@ -1062,7 +1111,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.ToTable("spectator_season_wallets", table =>
             {
                 table.HasCheckConstraint("CK_spectator_season_wallets_balance", "[opening_betting_points] >= 0 AND [current_betting_points] >= 0");
-                table.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0");
+                table.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0 AND [pending_recovery_points] >= 0");
                 table.HasCheckConstraint("CK_spectator_season_wallets_status", "[status] IN ('Active', 'Frozen', 'Settled')");
             });
 
@@ -1072,6 +1121,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.OpeningBettingPoints).HasColumnName("opening_betting_points");
             entity.Property(e => e.CurrentBettingPoints).HasColumnName("current_betting_points");
             entity.Property(e => e.SeasonScore).HasColumnName("season_score");
+            entity.Property(e => e.PendingRecoveryPoints).HasDefaultValue(0).HasColumnName("pending_recovery_points");
             entity.Property(e => e.FinalBettingPoints).HasColumnName("final_betting_points");
             entity.Property(e => e.FinalSeasonScore).HasColumnName("final_season_score");
             entity.Property(e => e.FinalRank).HasColumnName("final_rank");
@@ -1109,6 +1159,8 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.TransactionType).HasMaxLength(40).IsUnicode(false).HasColumnName("transaction_type");
             entity.Property(e => e.Amount).HasColumnName("amount");
             entity.Property(e => e.ScoreDelta).HasColumnName("score_delta");
+            entity.Property(e => e.RecoveryDebtDelta).HasDefaultValue(0).HasColumnName("recovery_debt_delta");
+            entity.Property(e => e.RequestedAmount).HasDefaultValue(0).HasColumnName("requested_amount");
             entity.Property(e => e.BalanceBefore).HasColumnName("balance_before");
             entity.Property(e => e.BalanceAfter).HasColumnName("balance_after");
             entity.Property(e => e.ReferenceType).HasMaxLength(50).IsUnicode(false).HasColumnName("reference_type");
@@ -1124,6 +1176,136 @@ public partial class EliteRacingLeagueContext : DbContext
                 .WithMany(w => w.PointTransactions)
                 .HasForeignKey(e => e.SpectatorSeasonWalletId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(e => e.AuditLogId);
+            entity.ToTable("audit_logs");
+            entity.Property(e => e.AuditLogId).HasColumnName("audit_log_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Action).HasMaxLength(80).IsUnicode(false).HasColumnName("action");
+            entity.Property(e => e.EntityType).HasMaxLength(100).IsUnicode(false).HasColumnName("entity_type");
+            entity.Property(e => e.EntityId).HasMaxLength(100).IsUnicode(false).HasColumnName("entity_id");
+            entity.Property(e => e.OldValuesJson).HasColumnType("nvarchar(max)").HasColumnName("old_values_json");
+            entity.Property(e => e.NewValuesJson).HasColumnType("nvarchar(max)").HasColumnName("new_values_json");
+            entity.Property(e => e.Reason).HasMaxLength(1000).HasColumnName("reason");
+            entity.Property(e => e.IpAddress).HasMaxLength(64).IsUnicode(false).HasColumnName("ip_address");
+            entity.Property(e => e.UserAgent).HasMaxLength(500).HasColumnName("user_agent");
+            entity.Property(e => e.CorrelationId).HasMaxLength(100).IsUnicode(false).HasColumnName("correlation_id");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())").HasColumnName("created_at");
+            entity.HasIndex(e => new { e.EntityType, e.EntityId, e.CreatedAt });
+            entity.HasIndex(e => e.CorrelationId);
+            entity.HasOne(e => e.User).WithMany(u => u.AuditLogs).HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<RaceResultRevision>(entity =>
+        {
+            entity.HasKey(e => e.RaceResultRevisionId);
+            entity.ToTable("race_result_revisions");
+            entity.Property(e => e.RaceResultRevisionId).HasColumnName("race_result_revision_id");
+            entity.Property(e => e.RaceId).HasColumnName("race_id");
+            entity.Property(e => e.ResultId).HasColumnName("result_id");
+            entity.Property(e => e.RegistrationId).HasColumnName("registration_id");
+            entity.Property(e => e.VersionNumber).HasColumnName("version_number");
+            entity.Property(e => e.ChangeType).HasMaxLength(50).IsUnicode(false).HasColumnName("change_type");
+            entity.Property(e => e.SnapshotJson).HasColumnType("nvarchar(max)").HasColumnName("snapshot_json");
+            entity.Property(e => e.Reason).HasMaxLength(1000).HasColumnName("reason");
+            entity.Property(e => e.ChangedByUserId).HasColumnName("changed_by_user_id");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("(sysutcdatetime())").HasColumnName("created_at");
+            entity.HasIndex(e => new { e.RaceId, e.VersionNumber });
+            entity.HasOne(e => e.Race).WithMany(r => r.RaceResultRevisions).HasForeignKey(e => e.RaceId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Result).WithMany(r => r.Revisions).HasForeignKey(e => e.ResultId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.Registration).WithMany(r => r.RaceResultRevisions).HasForeignKey(e => e.RegistrationId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.ChangedByUser).WithMany(u => u.RaceResultRevisions).HasForeignKey(e => e.ChangedByUserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<TournamentStanding>(entity =>
+        {
+            entity.HasKey(e => e.TournamentStandingId);
+            entity.ToTable("tournament_standings");
+            entity.Property(e => e.TournamentStandingId).HasColumnName("tournament_standing_id");
+            entity.Property(e => e.TournamentId).HasColumnName("tournament_id");
+            entity.Property(e => e.HorseId).HasColumnName("horse_id");
+            entity.Property(e => e.OwnerId).HasColumnName("owner_id");
+            entity.Property(e => e.JockeyId).HasColumnName("jockey_id");
+            entity.Property(e => e.TotalPoints).HasColumnName("total_points");
+            entity.Property(e => e.Wins).HasColumnName("wins");
+            entity.Property(e => e.SecondPlaces).HasColumnName("second_places");
+            entity.Property(e => e.ThirdPlaces).HasColumnName("third_places");
+            entity.Property(e => e.CompletedRaces).HasColumnName("completed_races");
+            entity.Property(e => e.TotalFinishTimeSeconds).HasColumnType("decimal(18,3)").HasColumnName("total_finish_time_seconds");
+            entity.Property(e => e.FinalRank).HasColumnName("final_rank");
+            entity.Property(e => e.IsFinal).HasColumnName("is_final");
+            entity.Property(e => e.CalculatedAt).HasColumnName("calculated_at");
+            entity.Property(e => e.FinalizedAt).HasColumnName("finalized_at");
+            entity.HasIndex(e => new { e.TournamentId, e.HorseId }).IsUnique();
+            entity.HasIndex(e => new { e.TournamentId, e.FinalRank }).IsUnique();
+            entity.HasOne(e => e.Tournament).WithMany(t => t.TournamentStandings).HasForeignKey(e => e.TournamentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Horse).WithMany(h => h.TournamentStandings).HasForeignKey(e => e.HorseId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.Owner).WithMany(o => o.TournamentStandings).HasForeignKey(e => e.OwnerId).OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.Jockey).WithMany(j => j.TournamentStandings).HasForeignKey(e => e.JockeyId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<RewardItem>(entity =>
+        {
+            entity.HasKey(e => e.RewardItemId);
+            entity.ToTable("reward_items", table =>
+            {
+                table.HasCheckConstraint("CK_reward_items_quantities", "[stock_quantity] >= 0 AND [reserved_quantity] >= 0 AND [delivered_quantity] >= 0 AND [reserved_quantity] + [delivered_quantity] <= [stock_quantity]");
+            });
+            entity.Property(e => e.RewardItemId).HasColumnName("reward_item_id");
+            entity.Property(e => e.Name).HasMaxLength(200).HasColumnName("name");
+            entity.Property(e => e.Description).HasMaxLength(1000).HasColumnName("description");
+            entity.Property(e => e.ImageUrl).HasMaxLength(500).HasColumnName("image_url");
+            entity.Property(e => e.Sku).HasMaxLength(80).IsUnicode(false).HasColumnName("sku");
+            entity.Property(e => e.StockQuantity).HasColumnName("stock_quantity");
+            entity.Property(e => e.ReservedQuantity).HasColumnName("reserved_quantity");
+            entity.Property(e => e.DeliveredQuantity).HasColumnName("delivered_quantity");
+            entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken().HasColumnName("row_version");
+            entity.HasIndex(e => e.Sku).IsUnique();
+        });
+
+        modelBuilder.Entity<RewardInventoryTransaction>(entity =>
+        {
+            entity.HasKey(e => e.RewardInventoryTransactionId);
+            entity.ToTable("reward_inventory_transactions");
+            entity.Property(e => e.RewardInventoryTransactionId).HasColumnName("reward_inventory_transaction_id");
+            entity.Property(e => e.RewardItemId).HasColumnName("reward_item_id");
+            entity.Property(e => e.QuantityDelta).HasColumnName("quantity_delta");
+            entity.Property(e => e.ReservedDelta).HasColumnName("reserved_delta");
+            entity.Property(e => e.DeliveredDelta).HasColumnName("delivered_delta");
+            entity.Property(e => e.TransactionType).HasMaxLength(40).IsUnicode(false).HasColumnName("transaction_type");
+            entity.Property(e => e.ReferenceType).HasMaxLength(50).IsUnicode(false).HasColumnName("reference_type");
+            entity.Property(e => e.ReferenceId).HasColumnName("reference_id");
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(180).IsUnicode(false).HasColumnName("idempotency_key");
+            entity.Property(e => e.Note).HasMaxLength(500).HasColumnName("note");
+            entity.Property(e => e.CreatedByUserId).HasColumnName("created_by_user_id");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(e => e.IdempotencyKey).IsUnique();
+            entity.HasOne(e => e.RewardItem).WithMany(r => r.InventoryTransactions).HasForeignKey(e => e.RewardItemId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.CreatedByUser).WithMany(u => u.RewardInventoryTransactions).HasForeignKey(e => e.CreatedByUserId).OnDelete(DeleteBehavior.NoAction);
+        });
+
+        modelBuilder.Entity<PasswordResetToken>(entity =>
+        {
+            entity.HasKey(e => e.PasswordResetTokenId);
+            entity.ToTable("password_reset_tokens");
+            entity.Property(e => e.PasswordResetTokenId).HasColumnName("password_reset_token_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.TokenHash).HasMaxLength(128).IsUnicode(false).HasColumnName("token_hash");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.IsUsed).HasColumnName("is_used");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at");
+            entity.Property(e => e.UsedAt).HasColumnName("used_at");
+            entity.Property(e => e.RequestedIp).HasMaxLength(64).IsUnicode(false).HasColumnName("requested_ip");
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.HasIndex(e => new { e.UserId, e.IsUsed, e.ExpiresAt });
+            entity.HasOne(e => e.User).WithMany(u => u.PasswordResetTokens).HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
 
@@ -1228,6 +1410,10 @@ public partial class EliteRacingLeagueContext : DbContext
                 .IsUnicode(false)
                 .HasColumnName("role");
             entity.Property(e => e.BettingPoints).HasColumnName("betting_points");
+            entity.Property(e => e.TokenVersion).HasDefaultValue(0).HasColumnName("token_version");
+            entity.Property(e => e.LastLoginAt).HasColumnName("last_login_at");
+            entity.Property(e => e.FailedLoginAttempts).HasDefaultValue(0).HasColumnName("failed_login_attempts");
+            entity.Property(e => e.LockoutEndAt).HasColumnName("lockout_end_at");
             entity.Property(e => e.Status)
                 .HasMaxLength(30)
                 .IsUnicode(false)
