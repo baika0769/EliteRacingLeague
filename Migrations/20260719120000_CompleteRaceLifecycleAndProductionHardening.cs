@@ -15,17 +15,91 @@ public partial class CompleteRaceLifecycleAndProductionHardening : Migration
         migrationBuilder.Sql("""
         SET XACT_ABORT ON;
 
-        /* One tournament may contain multiple races. Remove any legacy unique index. */
+        /* One tournament may contain multiple races.
+           Remove only the legacy single-column UNIQUE constraint/index on tournament_id.
+           A UNIQUE constraint must be removed with ALTER TABLE DROP CONSTRAINT;
+           a standalone UNIQUE index must be removed with DROP INDEX. */
+        DECLARE @raceObjectId int = OBJECT_ID(N'dbo.races');
+        DECLARE @raceConstraint sysname;
         DECLARE @raceIndex sysname;
-        SELECT TOP (1) @raceIndex = i.name
-        FROM sys.indexes i
-        JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
-        JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-        WHERE i.object_id = OBJECT_ID(N'dbo.races')
-          AND i.is_unique = 1
-          AND c.name = N'tournament_id';
-        IF @raceIndex IS NOT NULL EXEC(N'DROP INDEX [' + @raceIndex + N'] ON [dbo].[races]');
-        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.races') AND name = N'IX_races_tournament_id')
+        DECLARE @dropSql nvarchar(max);
+
+        /* Drop a legacy UNIQUE KEY constraint on races(tournament_id), if present. */
+        SELECT TOP (1) @raceConstraint = kc.name
+        FROM sys.key_constraints kc
+        JOIN sys.indexes i
+          ON i.object_id = kc.parent_object_id
+         AND i.index_id = kc.unique_index_id
+        WHERE kc.parent_object_id = @raceObjectId
+          AND kc.[type] = N'UQ'
+          AND 1 = (
+              SELECT COUNT(*)
+              FROM sys.index_columns ic
+              WHERE ic.object_id = i.object_id
+                AND ic.index_id = i.index_id
+                AND ic.key_ordinal > 0
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM sys.index_columns ic
+              JOIN sys.columns c
+                ON c.object_id = ic.object_id
+               AND c.column_id = ic.column_id
+              WHERE ic.object_id = i.object_id
+                AND ic.index_id = i.index_id
+                AND ic.key_ordinal = 1
+                AND c.name = N'tournament_id'
+          );
+
+        IF @raceConstraint IS NOT NULL
+        BEGIN
+            SET @dropSql = N'ALTER TABLE [dbo].[races] DROP CONSTRAINT ' + QUOTENAME(@raceConstraint) + N';';
+            EXEC sys.sp_executesql @dropSql;
+        END;
+
+        /* Drop standalone legacy UNIQUE indexes on races(tournament_id), if present. */
+        WHILE 1 = 1
+        BEGIN
+            SET @raceIndex = NULL;
+
+            SELECT TOP (1) @raceIndex = i.name
+            FROM sys.indexes i
+            WHERE i.object_id = @raceObjectId
+              AND i.is_unique = 1
+              AND i.is_primary_key = 0
+              AND i.is_unique_constraint = 0
+              AND 1 = (
+                  SELECT COUNT(*)
+                  FROM sys.index_columns ic
+                  WHERE ic.object_id = i.object_id
+                    AND ic.index_id = i.index_id
+                    AND ic.key_ordinal > 0
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM sys.index_columns ic
+                  JOIN sys.columns c
+                    ON c.object_id = ic.object_id
+                   AND c.column_id = ic.column_id
+                  WHERE ic.object_id = i.object_id
+                    AND ic.index_id = i.index_id
+                    AND ic.key_ordinal = 1
+                    AND c.name = N'tournament_id'
+              );
+
+            IF @raceIndex IS NULL BREAK;
+
+            SET @dropSql = N'DROP INDEX ' + QUOTENAME(@raceIndex) + N' ON [dbo].[races];';
+            EXEC sys.sp_executesql @dropSql;
+        END;
+
+        /* Keep a normal non-unique lookup index for tournament -> races. */
+        IF NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE object_id = @raceObjectId
+              AND name = N'IX_races_tournament_id'
+        )
             CREATE INDEX IX_races_tournament_id ON dbo.races(tournament_id);
 
         IF COL_LENGTH('dbo.races','original_race_date') IS NULL ALTER TABLE dbo.races ADD original_race_date datetime2 NULL;
@@ -35,7 +109,7 @@ public partial class CompleteRaceLifecycleAndProductionHardening : Migration
         IF COL_LENGTH('dbo.races','cancellation_reason') IS NULL ALTER TABLE dbo.races ADD cancellation_reason nvarchar(1000) NULL;
         IF COL_LENGTH('dbo.races','lifecycle_version') IS NULL ALTER TABLE dbo.races ADD lifecycle_version int NOT NULL CONSTRAINT DF_races_lifecycle_version DEFAULT(0);
         IF COL_LENGTH('dbo.races','row_version') IS NULL ALTER TABLE dbo.races ADD row_version rowversion NOT NULL;
-        UPDATE dbo.races SET original_race_date = race_date WHERE original_race_date IS NULL;
+        EXEC sys.sp_executesql N'UPDATE dbo.races SET original_race_date = race_date WHERE original_race_date IS NULL;';
 
         IF COL_LENGTH('dbo.race_results','outcome_status') IS NULL ALTER TABLE dbo.race_results ADD outcome_status varchar(30) NOT NULL CONSTRAINT DF_race_results_outcome DEFAULT('Finished');
         IF COL_LENGTH('dbo.race_results','revision_number') IS NULL ALTER TABLE dbo.race_results ADD revision_number int NOT NULL CONSTRAINT DF_race_results_revision DEFAULT(0);
@@ -46,7 +120,7 @@ public partial class CompleteRaceLifecycleAndProductionHardening : Migration
         IF COL_LENGTH('dbo.race_registrations','withdrawn_by_user_id') IS NULL ALTER TABLE dbo.race_registrations ADD withdrawn_by_user_id int NULL;
         IF COL_LENGTH('dbo.race_registrations','row_version') IS NULL ALTER TABLE dbo.race_registrations ADD row_version rowversion NOT NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_race_registrations_withdrawn_by')
-            ALTER TABLE dbo.race_registrations ADD CONSTRAINT FK_race_registrations_withdrawn_by FOREIGN KEY(withdrawn_by_user_id) REFERENCES dbo.users(user_id);
+            EXEC sys.sp_executesql N'ALTER TABLE dbo.race_registrations ADD CONSTRAINT FK_race_registrations_withdrawn_by FOREIGN KEY(withdrawn_by_user_id) REFERENCES dbo.users(user_id);';
 
         IF COL_LENGTH('dbo.jockey_invitations','expires_at') IS NULL ALTER TABLE dbo.jockey_invitations ADD expires_at datetime2 NULL;
         IF COL_LENGTH('dbo.jockey_invitations','response_note') IS NULL ALTER TABLE dbo.jockey_invitations ADD response_note nvarchar(500) NULL;
@@ -195,17 +269,18 @@ public partial class CompleteRaceLifecycleAndProductionHardening : Migration
         END;
 
         IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_reward_rules_items')
-            ALTER TABLE dbo.season_reward_rules ADD CONSTRAINT FK_reward_rules_items FOREIGN KEY(reward_item_id) REFERENCES dbo.reward_items(reward_item_id) ON DELETE SET NULL;
+            EXEC sys.sp_executesql N'ALTER TABLE dbo.season_reward_rules ADD CONSTRAINT FK_reward_rules_items FOREIGN KEY(reward_item_id) REFERENCES dbo.reward_items(reward_item_id) ON DELETE SET NULL;';
         IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name=N'FK_season_rewards_items')
-            ALTER TABLE dbo.season_rewards ADD CONSTRAINT FK_season_rewards_items FOREIGN KEY(reward_item_id) REFERENCES dbo.reward_items(reward_item_id) ON DELETE SET NULL;
+            EXEC sys.sp_executesql N'ALTER TABLE dbo.season_rewards ADD CONSTRAINT FK_season_rewards_items FOREIGN KEY(reward_item_id) REFERENCES dbo.reward_items(reward_item_id) ON DELETE SET NULL;';
 
+        EXEC sys.sp_executesql N'
         UPDATE rr
-        SET outcome_status = 'Disqualified', finish_position = NULL, finish_time_seconds = NULL
+        SET outcome_status = ''Disqualified'', finish_position = NULL, finish_time_seconds = NULL
         FROM dbo.race_results rr
         WHERE EXISTS (
             SELECT 1 FROM dbo.race_violations rv
-            WHERE rv.registration_id = rr.registration_id AND LOWER(ISNULL(rv.action,'')) LIKE '%disqual%'
-        );
+            WHERE rv.registration_id = rr.registration_id AND LOWER(ISNULL(rv.action,'''')) LIKE ''%disqual%''
+        );';
         """);
     }
 
