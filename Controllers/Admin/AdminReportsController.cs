@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
 using Eliteracingleague.API.Extensions;
@@ -56,7 +56,9 @@ namespace Eliteracingleague.API.Controllers.Admin
                     CanApprove = r.ReportType == RefereeReportTypes.PostRace &&
                         r.Status == RefereeReportStatuses.Submitted,
                     CanReturn = r.ReportType == RefereeReportTypes.PostRace &&
-                        r.Status == RefereeReportStatuses.Submitted,
+                        (r.Status == RefereeReportStatuses.Submitted ||
+                         (r.Status == RefereeReportStatuses.Approved &&
+                          r.Race.Status != RaceStatuses.Published)),
 
                     RaceId = r.RaceId,
                     RaceName = r.Race.RaceName,
@@ -344,72 +346,135 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (report.Race.Status is not RaceStatuses.Finished and not RaceStatuses.ResultPending)
+            if (report.Race.Status is RaceStatuses.Published or RaceStatuses.Cancelled)
             {
                 return Conflict(new AdminActionResponse
                 {
-                    Message = "The final report can only be returned before race results are published or the race is cancelled.",
+                    Message = "Published or cancelled race results cannot be returned through this workflow.",
                     Id = id,
                     Status = report.Race.Status
                 });
             }
 
-            if (report.Status != RefereeReportStatuses.Submitted)
+            if (report.Status == RefereeReportStatuses.Returned)
+            {
+                return Ok(new
+                {
+                    message = "This submission has already been returned to the referee.",
+                    reportId = report.ReportId,
+                    status = report.Status,
+                    canEditByReferee = true
+                });
+            }
+
+            if (report.Status is not RefereeReportStatuses.Submitted and
+                not RefereeReportStatuses.Approved)
             {
                 return Conflict(new AdminActionResponse
                 {
-                    Message = report.Status == RefereeReportStatuses.Returned
-                        ? "This report has already been returned and is waiting for the referee to resubmit it."
-                        : "Only a submitted report can be returned for revision.",
+                    Message = "Only a submitted report can be returned for revision.",
                     Id = id,
                     Status = report.Status
                 });
             }
 
-            var now = _dateTimeProvider.UtcNow;
-            var oldStatus = report.Status;
+            var results = await _context.RaceResults
+                .Where(r => r.RaceId == report.RaceId)
+                .ToListAsync(cancellationToken);
 
-            report.Status = RefereeReportStatuses.Returned;
-            report.ReturnReasonCategory = category;
-            report.ReturnReason = reason;
-            report.ReviewedByAdminId = adminId;
-            report.ReviewedAt = now;
-            report.UpdatedAt = now;
+            var lockedResult = results.FirstOrDefault(r =>
+                r.Status is RaceResultStatuses.AdminApproved or RaceResultStatuses.Published);
 
-            await _auditService.WriteAsync(
-                adminId,
-                AuditActionTypes.Reject,
-                "RefereeReport",
-                report.ReportId.ToString(),
-                new { Status = oldStatus, report.RevisionNumber },
-                new
+            if (lockedResult != null)
+            {
+                return Conflict(new
                 {
-                    Status = report.Status,
-                    report.ReturnReasonCategory,
-                    report.ReturnReason,
-                    report.RevisionNumber
-                },
-                reason,
-                cancellationToken);
+                    code = "PUBLISHED_RESULT_REQUIRES_CORRECTION_WORKFLOW",
+                    message = "This race already has an admin-approved or published result. Use the result-correction workflow instead.",
+                    resultId = lockedResult.ResultId,
+                    resultStatus = lockedResult.Status
+                });
+            }
 
-            await _notificationService.CreateForUserAsync(
-                report.RefereeId,
-                "Final report returned for revision",
-                $"Your final report for race {report.Race.RaceName} was returned. Reason: {reason}",
-                "PostRaceReportReturned",
-                $"/referee/races/post-race?raceId={report.RaceId}&reportId={report.ReportId}",
-                "RefereeReport",
-                report.ReportId,
-                cancellationToken,
-                preventDuplicates: false);
+            var now = _dateTimeProvider.UtcNow;
+            var oldReportStatus = report.Status;
+            var oldRaceStatus = report.Race.Status;
+            var oldResultStatuses = results
+                .Select(r => new { r.ResultId, r.Status })
+                .ToList();
 
-            await _context.SaveChangesAsync(cancellationToken);
+            await using var transaction = await _context.Database
+                .BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                report.Status = RefereeReportStatuses.Returned;
+                report.ReturnReasonCategory = category;
+                report.ReturnReason = reason;
+                report.ReviewedByAdminId = adminId;
+                report.ReviewedAt = now;
+                report.UpdatedAt = now;
+
+                foreach (var result in results)
+                {
+                    result.Status = RaceResultStatuses.Returned;
+                    result.AdminConfirmedBy = null;
+                    result.PublishedAt = null;
+                    result.UpdatedAt = now;
+                }
+
+                report.Race.Status = RaceStatuses.Finished;
+                report.Race.UpdatedAt = now;
+
+                await _auditService.WriteAsync(
+                    adminId,
+                    AuditActionTypes.Reject,
+                    "RefereeReport",
+                    report.ReportId.ToString(),
+                    new
+                    {
+                        ReportStatus = oldReportStatus,
+                        RaceStatus = oldRaceStatus,
+                        ResultStatuses = oldResultStatuses
+                    },
+                    new
+                    {
+                        ReportStatus = report.Status,
+                        RaceStatus = report.Race.Status,
+                        ReturnedResults = results.Count,
+                        report.ReturnReasonCategory,
+                        report.ReturnReason
+                    },
+                    reason,
+                    cancellationToken);
+
+                await _notificationService.CreateForUserAsync(
+                    report.RefereeId,
+                    "Post-race submission returned for revision",
+                    $"Your final report and race results for {report.Race.RaceName} were returned. Reason: {reason}",
+                    "PostRaceReportReturned",
+                    $"/referee/races/post-race?raceId={report.RaceId}&reportId={report.ReportId}",
+                    "RefereeReport",
+                    report.ReportId,
+                    cancellationToken,
+                    preventDuplicates: false);
+
+                await _context.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
 
             return Ok(new
             {
-                message = "The final report was returned to the referee for revision.",
+                message = "The final report and all race results were returned to the referee for revision.",
                 reportId = report.ReportId,
                 status = report.Status,
+                raceStatus = report.Race.Status,
+                returnedResults = results.Count,
                 returnReasonCategory = report.ReturnReasonCategory,
                 returnReason = report.ReturnReason,
                 reviewedAt = report.ReviewedAt,
@@ -422,12 +487,13 @@ namespace Eliteracingleague.API.Controllers.Admin
             int id,
             CancellationToken cancellationToken)
         {
-            if (!User.TryGetUserId(out var adminId))
+            if (!User.TryGetUserId(out _))
             {
                 return Unauthorized();
             }
 
             var report = await _context.RefereeReports
+                .AsNoTracking()
                 .Include(r => r.Race)
                 .FirstOrDefaultAsync(r => r.ReportId == id, cancellationToken);
 
@@ -450,65 +516,82 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (report.Race.Status is not RaceStatuses.Finished and not RaceStatuses.ResultPending)
+            if (report.Status == RefereeReportStatuses.Returned)
             {
                 return Conflict(new AdminActionResponse
                 {
-                    Message = "The final report can only be approved before race results are published or the race is cancelled.",
-                    Id = id,
-                    Status = report.Race.Status
-                });
-            }
-
-            if (report.Status != RefereeReportStatuses.Submitted)
-            {
-                return Conflict(new AdminActionResponse
-                {
-                    Message = report.Status == RefereeReportStatuses.Returned
-                        ? "The referee must resubmit the returned report before it can be approved."
-                        : "Only a submitted report can be approved.",
+                    Message = "The referee must resubmit the returned report before approval.",
                     Id = id,
                     Status = report.Status
                 });
             }
 
-            var now = _dateTimeProvider.UtcNow;
-            var oldStatus = report.Status;
+            if (report.Race.Status == RaceStatuses.Published &&
+                report.Status == RefereeReportStatuses.Approved)
+            {
+                return Ok(new
+                {
+                    message = "This final report and its race results were already approved.",
+                    reportId = report.ReportId,
+                    raceId = report.RaceId,
+                    status = report.Status,
+                    alreadyCompleted = true
+                });
+            }
 
-            report.Status = RefereeReportStatuses.Approved;
-            report.ReviewedByAdminId = adminId;
-            report.ReviewedAt = now;
-            report.UpdatedAt = now;
+            if (report.Race.Status != RaceStatuses.ResultPending)
+            {
+                return Conflict(new AdminActionResponse
+                {
+                    Message = "The race must be ResultPending before its final submission can be approved.",
+                    Id = id,
+                    Status = report.Race.Status
+                });
+            }
 
-            await _auditService.WriteAsync(
-                adminId,
-                AuditActionTypes.Approve,
-                "RefereeReport",
-                report.ReportId.ToString(),
-                new { Status = oldStatus, report.RevisionNumber },
-                new { Status = report.Status, report.RevisionNumber },
-                "Final referee report approved",
-                cancellationToken);
+            if (report.Status is not RefereeReportStatuses.Submitted and
+                not RefereeReportStatuses.Approved)
+            {
+                return Conflict(new AdminActionResponse
+                {
+                    Message = "The final report is not ready for approval.",
+                    Id = id,
+                    Status = report.Status
+                });
+            }
 
-            await _notificationService.CreateForUserAsync(
-                report.RefereeId,
-                "Final report approved",
-                $"Your final report for race {report.Race.RaceName} was approved by the admin.",
-                "PostRaceReportApproved",
-                $"/referee/races/post-race?raceId={report.RaceId}&reportId={report.ReportId}",
-                "RefereeReport",
-                report.ReportId,
-                cancellationToken);
+            var resultCount = await _context.RaceResults
+                .AsNoTracking()
+                .CountAsync(r =>
+                    r.RaceId == report.RaceId &&
+                    (r.Status == RaceResultStatuses.RefereeConfirmed ||
+                     r.Status == RaceResultStatuses.AdminApproved),
+                    cancellationToken);
 
-            await _context.SaveChangesAsync(cancellationToken);
+            if (resultCount == 0)
+            {
+                return Conflict(new
+                {
+                    code = "NO_REFEREE_CONFIRMED_RESULTS",
+                    message = "No referee-confirmed results are ready for approval.",
+                    reportId = report.ReportId,
+                    raceId = report.RaceId
+                });
+            }
 
+            // Compatibility endpoint:
+            // Do not approve the report separately. The FE may still call this
+            // endpoint before approve-all. The actual report approval, result
+            // publication, race/tournament update and prize creation are all
+            // committed atomically by PUT /api/admin/results/race/{raceId}/approve-all.
             return Ok(new
             {
-                message = "The final report was approved successfully.",
+                message = "Final report validation passed. Complete approval will run atomically with all race results.",
                 reportId = report.ReportId,
+                raceId = report.RaceId,
                 status = report.Status,
-                reviewedAt = report.ReviewedAt,
-                canEditByReferee = false
+                deferredToAtomicApproval = true,
+                endpoint = $"PUT /api/admin/results/race/{report.RaceId}/approve-all"
             });
         }
 

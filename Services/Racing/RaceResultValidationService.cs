@@ -50,9 +50,13 @@ public class RaceResultValidationService
                 if (!result.FinishTimeSeconds.HasValue || result.FinishTimeSeconds <= 0)
                     errors.Add($"Finished result #{result.ResultId} requires a positive finish time.");
             }
-            else if (result.FinishPosition.HasValue)
+            else
             {
-                errors.Add($"Outcome {result.OutcomeStatus} for result #{result.ResultId} must not have a finish position.");
+                if (result.FinishPosition.HasValue)
+                    errors.Add($"Outcome {result.OutcomeStatus} for result #{result.ResultId} must not have a finish position.");
+
+                if (result.FinishTimeSeconds.HasValue)
+                    errors.Add($"Outcome {result.OutcomeStatus} for result #{result.ResultId} must not have a finish time.");
             }
 
             if (result.Status is not RaceResultStatuses.RefereeConfirmed and not RaceResultStatuses.AdminApproved)
@@ -69,13 +73,47 @@ public class RaceResultValidationService
             errors.Add($"Duplicate finish positions: {string.Join(", ", duplicatePositions)}.");
 
         if (rankable.Count == 0)
+        {
             errors.Add("At least one participant must finish the race.");
-        else if (rankable.Count(r => r.FinishPosition == 1) != 1)
-            errors.Add("Exactly one finished participant must hold position 1.");
+        }
+        else
+        {
+            if (rankable.Count(r => r.FinishPosition == 1) != 1)
+                errors.Add("Exactly one finished participant must hold position 1.");
+
+            var actualPositions = rankable
+                .Where(r => r.FinishPosition.HasValue)
+                .Select(r => r.FinishPosition!.Value)
+                .OrderBy(position => position)
+                .ToArray();
+
+            var expectedPositions = Enumerable
+                .Range(1, rankable.Count)
+                .ToArray();
+
+            if (!actualPositions.SequenceEqual(expectedPositions))
+            {
+                errors.Add(
+                    $"Finished positions must be continuous from 1 to {rankable.Count}. " +
+                    $"Received: {string.Join(", ", actualPositions)}.");
+            }
+        }
 
         return errors;
     }
 
-    public static string NormalizeOutcome(string? outcome) =>
-        RaceOutcomeStatuses.IsValid(outcome) ? outcome! : RaceOutcomeStatuses.Finished;
+    public static string NormalizeOutcome(string? outcome)
+    {
+        var value = (outcome ?? string.Empty).Trim();
+
+        return value.ToUpperInvariant() switch
+        {
+            "FINISHED" => RaceOutcomeStatuses.Finished,
+            "DNS" or "DIDNOTSTART" or "DID NOT START" => RaceOutcomeStatuses.DidNotStart,
+            "DNF" or "DIDNOTFINISH" or "DID NOT FINISH" => RaceOutcomeStatuses.DidNotFinish,
+            "DSQ" or "DISQUALIFIED" => RaceOutcomeStatuses.Disqualified,
+            "WITHDRAWN" => RaceOutcomeStatuses.Withdrawn,
+            _ => value
+        };
+    }
 }

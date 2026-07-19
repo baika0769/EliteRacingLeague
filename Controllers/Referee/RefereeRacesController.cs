@@ -713,21 +713,50 @@ public class RefereeRacesController : ControllerBase
             return BadRequest("Race results can only be entered when race status is Finished.");
         }
 
+        var lockedFinalReportStatus = await _context.RefereeReports
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.ReportType == RefereeReportTypes.PostRace)
+            .Select(r => r.Status)
+            .FirstOrDefaultAsync();
+
+        if (lockedFinalReportStatus is RefereeReportStatuses.Submitted or RefereeReportStatuses.Approved)
+        {
+            return Conflict(new
+            {
+                code = "POST_RACE_SUBMISSION_LOCKED",
+                message = "Race results are locked while the final report is waiting for admin review or has already been approved.",
+                reportStatus = lockedFinalReportStatus
+            });
+        }
+
         var outcomeStatus = RaceResultValidationService.NormalizeOutcome(request.OutcomeStatus);
+
+        if (!RaceOutcomeStatuses.IsValid(outcomeStatus))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid race outcome.",
+                receivedOutcome = request.OutcomeStatus,
+                allowedOutcomes = RaceOutcomeStatuses.All
+            });
+        }
+
+        var normalizedFinishPosition = outcomeStatus == RaceOutcomeStatuses.Finished
+            ? request.FinishPosition
+            : null;
+        var normalizedFinishTimeSeconds = outcomeStatus == RaceOutcomeStatuses.Finished
+            ? request.FinishTimeSeconds
+            : null;
 
         if (outcomeStatus == RaceOutcomeStatuses.Finished)
         {
-            if (!request.FinishPosition.HasValue || request.FinishPosition.Value <= 0)
+            if (!normalizedFinishPosition.HasValue || normalizedFinishPosition.Value <= 0)
                 return BadRequest("Finished outcome requires a finish position greater than 0.");
-            if (!request.FinishTimeSeconds.HasValue || request.FinishTimeSeconds.Value <= 0)
+            if (!normalizedFinishTimeSeconds.HasValue || normalizedFinishTimeSeconds.Value <= 0)
                 return BadRequest("Finished outcome requires a finish time greater than 0.");
-        }
-        else
-        {
-            if (request.FinishPosition.HasValue)
-                return BadRequest($"Outcome {outcomeStatus} must not have a finish position.");
-            if (request.FinishTimeSeconds.HasValue && request.FinishTimeSeconds.Value <= 0)
-                return BadRequest("Finish time must be greater than 0 when provided.");
         }
 
         if (request.Score.HasValue && request.Score.Value < 0)
@@ -792,17 +821,17 @@ public class RefereeRacesController : ControllerBase
             }
         }
 
-        if (outcomeStatus == RaceOutcomeStatuses.Finished && request.FinishPosition.HasValue)
+        if (outcomeStatus == RaceOutcomeStatuses.Finished && normalizedFinishPosition.HasValue)
         {
             var duplicatePosition = await _context.RaceResults
                 .AnyAsync(r =>
                     r.RaceId == raceId &&
-                    r.FinishPosition == request.FinishPosition.Value &&
+                    r.FinishPosition == normalizedFinishPosition.Value &&
                     (result == null || r.ResultId != result.ResultId));
 
             if (duplicatePosition)
             {
-                return BadRequest(request.FinishPosition.Value == 1
+                return BadRequest(normalizedFinishPosition.Value == 1
                     ? "Race can only have one winner."
                     : "Finish position already exists for this race.");
             }
@@ -814,8 +843,8 @@ public class RefereeRacesController : ControllerBase
             {
                 RaceId = raceId,
                 RegistrationId = request.RegistrationId,
-                FinishTimeSeconds = request.FinishTimeSeconds,
-                FinishPosition = request.FinishPosition,
+                FinishTimeSeconds = normalizedFinishTimeSeconds,
+                FinishPosition = normalizedFinishPosition,
                 Score = request.Score,
                 OutcomeStatus = outcomeStatus,
                 Status = RaceResultStatuses.Draft,
@@ -828,11 +857,14 @@ public class RefereeRacesController : ControllerBase
         }
         else
         {
-            result.FinishTimeSeconds = request.FinishTimeSeconds;
-            result.FinishPosition = request.FinishPosition;
+            result.FinishTimeSeconds = normalizedFinishTimeSeconds;
+            result.FinishPosition = normalizedFinishPosition;
             result.Score = request.Score;
             result.OutcomeStatus = outcomeStatus;
             result.Note = request.Note;
+            result.Status = RaceResultStatuses.Draft;
+            result.AdminConfirmedBy = null;
+            result.PublishedAt = null;
             result.UpdatedAt = _dateTimeProvider.UtcNow;
         }
 
@@ -915,16 +947,16 @@ public class RefereeRacesController : ControllerBase
     }
 
     [HttpPut("{raceId}/results/confirm-all")]
-    public async Task<IActionResult> ConfirmAllResults(int raceId)
+    public async Task<IActionResult> ConfirmAllResults(
+        int raceId,
+        CancellationToken cancellationToken)
     {
         if (!TryGetRefereeId(out var refereeId))
         {
             return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
         }
 
-        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
-
-        if (!assigned)
+        if (!await IsAssignedToActiveRaceAsync(raceId, refereeId))
         {
             return Forbid();
         }
@@ -933,16 +965,43 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.Status != RaceStatuses.Cancelled &&
-                r.Tournament.Status != TournamentStatuses.Cancelled);
+                r.Tournament.Status != TournamentStatuses.Cancelled,
+                cancellationToken);
 
         if (race == null)
         {
             return NotFound("Race not found or has been cancelled.");
         }
 
-        if (race.Status != RaceStatuses.Finished)
+        if (race.Status is not RaceStatuses.Finished and not RaceStatuses.ResultPending)
         {
-            return BadRequest(new { message = "All results can only be confirmed when race status is Finished." });
+            return BadRequest(new
+            {
+                message = "All results can only be confirmed when race status is Finished.",
+                raceStatus = race.Status
+            });
+        }
+
+        var lockedFinalReport = await _context.RefereeReports
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.ReportType == RefereeReportTypes.PostRace &&
+                (r.Status == RefereeReportStatuses.Submitted ||
+                 r.Status == RefereeReportStatuses.Approved))
+            .Select(r => new { r.ReportId, r.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (lockedFinalReport != null)
+        {
+            return Conflict(new
+            {
+                code = "POST_RACE_SUBMISSION_LOCKED",
+                message = "The final report has already been submitted. Admin must return the submission before results can be edited or confirmed again.",
+                reportId = lockedFinalReport.ReportId,
+                reportStatus = lockedFinalReport.Status
+            });
         }
 
         var activeRegistrationIds = await _context.RaceRegistrations
@@ -951,87 +1010,143 @@ public class RefereeRacesController : ControllerBase
                 r.RaceId == raceId &&
                 ActiveRegistrationStatuses.Contains(r.Status))
             .Select(r => r.RegistrationId)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
-        var failedRegistrationIds = await _context.PreRaceInspections
-            .AsNoTracking()
-            .Where(i =>
-                i.RaceId == raceId &&
-                i.Status == PreRaceInspectionStatuses.Failed &&
-                activeRegistrationIds.Contains(i.RegistrationId))
-            .Select(i => i.RegistrationId)
-            .ToListAsync();
-
-        var eligibleRegistrationIds = activeRegistrationIds
-            .Except(failedRegistrationIds)
-            .ToList();
-
-        if (eligibleRegistrationIds.Count == 0)
+        if (activeRegistrationIds.Count == 0)
         {
             return BadRequest(new { message = "No eligible registrations found." });
         }
 
+        var registrationIdSet = activeRegistrationIds.ToHashSet();
         var results = await _context.RaceResults
             .Where(r =>
                 r.RaceId == raceId &&
-                r.EnteredByRefereeId == refereeId &&
-                eligibleRegistrationIds.Contains(r.RegistrationId))
-            .ToListAsync();
+                registrationIdSet.Contains(r.RegistrationId))
+            .ToListAsync(cancellationToken);
 
-        if (results.Count(r => r.Status == RaceResultStatuses.Draft) == 0)
+        var missingRegistrationIds = registrationIdSet
+            .Except(results.Select(r => r.RegistrationId))
+            .OrderBy(id => id)
+            .ToList();
+
+        if (missingRegistrationIds.Count > 0)
         {
-            return BadRequest(new { message = "There are no draft results to confirm." });
+            return BadRequest(new
+            {
+                code = "MISSING_RACE_RESULTS",
+                message = "Every ReadyToRace registration must have a result, including DNS, DNF, DSQ, or Withdrawn participants.",
+                missingRegistrationIds
+            });
         }
 
-        if (results.Count < eligibleRegistrationIds.Count)
+        if (results.Any(r => r.EnteredByRefereeId != refereeId))
         {
-            return BadRequest(new { message = "All eligible registrations must have a result before confirmation." });
+            return Forbid();
         }
 
-        var disqualifiedIds = (await _context.RaceViolations.AsNoTracking()
-            .Where(v => v.RaceId == raceId &&
-                        v.Action == RaceViolationActions.Disqualified &&
-                        eligibleRegistrationIds.Contains(v.RegistrationId))
+        if (results.Any(r =>
+                r.Status is RaceResultStatuses.AdminApproved or RaceResultStatuses.Published))
+        {
+            return Conflict(new
+            {
+                message = "Admin-approved or published results cannot be confirmed by the referee."
+            });
+        }
+
+        var failedInspectionIds = (await _context.PreRaceInspections
+            .AsNoTracking()
+            .Where(i =>
+                i.RaceId == raceId &&
+                i.Status == PreRaceInspectionStatuses.Failed &&
+                registrationIdSet.Contains(i.RegistrationId))
+            .Select(i => i.RegistrationId)
+            .Distinct()
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var disqualifiedIds = (await _context.RaceViolations
+            .AsNoTracking()
+            .Where(v =>
+                v.RaceId == raceId &&
+                v.Action == RaceViolationActions.Disqualified &&
+                registrationIdSet.Contains(v.RegistrationId))
             .Select(v => v.RegistrationId)
             .Distinct()
-            .ToListAsync()).ToHashSet();
+            .ToListAsync(cancellationToken))
+            .ToHashSet();
 
-        foreach (var result in results.Where(r => disqualifiedIds.Contains(r.RegistrationId)))
+        foreach (var result in results)
         {
-            result.OutcomeStatus = RaceOutcomeStatuses.Disqualified;
-            result.FinishPosition = null;
+            if (disqualifiedIds.Contains(result.RegistrationId))
+            {
+                result.OutcomeStatus = RaceOutcomeStatuses.Disqualified;
+                result.FinishPosition = null;
+                result.FinishTimeSeconds = null;
+            }
+
+            if (result.Status is RaceResultStatuses.Draft or RaceResultStatuses.Returned)
+            {
+                result.Status = RaceResultStatuses.RefereeConfirmed;
+                result.AdminConfirmedBy = null;
+                result.PublishedAt = null;
+                result.UpdatedAt = _dateTimeProvider.UtcNow;
+            }
         }
 
-        var validationErrors = _resultValidationService.ValidateForPublication(
-            results,
-            eligibleRegistrationIds.ToHashSet(),
-            disqualifiedIds);
+        var failedInspectionErrors = results
+            .Where(r =>
+                failedInspectionIds.Contains(r.RegistrationId) &&
+                r.OutcomeStatus != RaceOutcomeStatuses.DidNotStart &&
+                r.OutcomeStatus != RaceOutcomeStatuses.Disqualified &&
+                r.OutcomeStatus != RaceOutcomeStatuses.Withdrawn)
+            .Select(r => $"Registration #{r.RegistrationId} failed pre-race inspection and must use DNS, DSQ, or Withdrawn.")
+            .ToList();
+
+        var validationErrors = _resultValidationService
+            .ValidateForPublication(results, registrationIdSet, disqualifiedIds)
+            .Concat(failedInspectionErrors)
+            .Distinct()
+            .ToList();
+
         if (validationErrors.Count > 0)
-            return BadRequest(new { message = "Race results are incomplete or invalid.", errors = validationErrors });
-
-        if (results.Any(r => r.Status is RaceResultStatuses.AdminApproved or RaceResultStatuses.Published))
         {
-            return BadRequest(new { message = "Admin-approved or published results cannot be confirmed by referee." });
+            return BadRequest(new
+            {
+                code = "INVALID_RACE_RESULTS",
+                message = "Race results are incomplete or invalid.",
+                errors = validationErrors
+            });
         }
 
-        foreach (var result in results.Where(r => r.Status == RaceResultStatuses.Draft))
-        {
-            result.Status = RaceResultStatuses.RefereeConfirmed;
-            result.UpdatedAt = _dateTimeProvider.UtcNow;
-        }
-
+        var wasAlreadyPending = race.Status == RaceStatuses.ResultPending;
         race.Status = RaceStatuses.ResultPending;
         race.UpdatedAt = _dateTimeProvider.UtcNow;
 
-        await _notificationService.CreateForAdminsAsync(
-            "Race Result Submitted",
-            $"Referee submitted results for {race.RaceName}. Please validate.",
-            "RaceResultValidation",
-            "/admin/validate-results",
-            "Race",
-            raceId);
+        await using var transaction = await _context.Database
+            .BeginTransactionAsync(cancellationToken);
 
-        await _context.SaveChangesAsync();
+        try
+        {
+            if (!wasAlreadyPending)
+            {
+                await _notificationService.CreateForAdminsAsync(
+                    "Race Result Submitted",
+                    $"Referee submitted all results for {race.RaceName}. Please validate.",
+                    "RaceResultValidation",
+                    "/admin/validate-results",
+                    "Race",
+                    raceId,
+                    cancellationToken);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return Ok(await _lifecycleService.GetLifecycleAsync(raceId, refereeId));
     }
@@ -1408,6 +1523,64 @@ public class RefereeRacesController : ControllerBase
             });
         }
 
+        if (request.ReportType == RefereeReportTypes.PostRace)
+        {
+            if (race.Status != RaceStatuses.ResultPending)
+            {
+                return Conflict(new
+                {
+                    code = "RESULTS_NOT_CONFIRMED",
+                    message = "Confirm all race results before submitting the final post-race report.",
+                    raceStatus = race.Status
+                });
+            }
+
+            var activeRegistrationIds = await _context.RaceRegistrations
+                .AsNoTracking()
+                .Where(r =>
+                    r.RaceId == raceId &&
+                    ActiveRegistrationStatuses.Contains(r.Status))
+                .Select(r => r.RegistrationId)
+                .ToListAsync(cancellationToken);
+
+            var confirmedResults = await _context.RaceResults
+                .AsNoTracking()
+                .Where(r =>
+                    r.RaceId == raceId &&
+                    activeRegistrationIds.Contains(r.RegistrationId))
+                .Select(r => new
+                {
+                    r.RegistrationId,
+                    r.Status
+                })
+                .ToListAsync(cancellationToken);
+
+            var missingRegistrationIds = activeRegistrationIds
+                .Except(confirmedResults.Select(r => r.RegistrationId))
+                .OrderBy(id => id)
+                .ToList();
+            var unconfirmedResultIds = confirmedResults
+                .Where(r => r.Status != RaceResultStatuses.RefereeConfirmed)
+                .Select(r => r.RegistrationId)
+                .OrderBy(id => id)
+                .ToList();
+
+            if (activeRegistrationIds.Count == 0 ||
+                missingRegistrationIds.Count > 0 ||
+                unconfirmedResultIds.Count > 0)
+            {
+                return Conflict(new
+                {
+                    code = "RESULTS_NOT_CONFIRMED",
+                    message = "The final report can only be submitted after every ReadyToRace registration has a referee-confirmed result.",
+                    expectedResults = activeRegistrationIds.Count,
+                    actualResults = confirmedResults.Count,
+                    missingRegistrationIds,
+                    unconfirmedRegistrationIds = unconfirmedResultIds
+                });
+            }
+        }
+
         var existingReport = await _context.RefereeReports
             .AsNoTracking()
             .Where(r =>
@@ -1661,6 +1834,44 @@ public class RefereeRacesController : ControllerBase
                 message = reportStageError,
                 reportType = report.ReportType,
                 raceStatus = report.Race.Status
+            });
+        }
+
+        if (report.Race.Status != RaceStatuses.ResultPending)
+        {
+            return Conflict(new
+            {
+                code = "RESULTS_NOT_RECONFIRMED",
+                message = "Correct and confirm all returned race results before resubmitting the final report.",
+                raceStatus = report.Race.Status
+            });
+        }
+
+        var activeRegistrationIds = await _context.RaceRegistrations
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                ActiveRegistrationStatuses.Contains(r.Status))
+            .Select(r => r.RegistrationId)
+            .ToListAsync(cancellationToken);
+
+        var confirmedResultCount = await _context.RaceResults
+            .AsNoTracking()
+            .CountAsync(r =>
+                r.RaceId == raceId &&
+                activeRegistrationIds.Contains(r.RegistrationId) &&
+                r.Status == RaceResultStatuses.RefereeConfirmed,
+                cancellationToken);
+
+        if (activeRegistrationIds.Count == 0 ||
+            confirmedResultCount != activeRegistrationIds.Count)
+        {
+            return Conflict(new
+            {
+                code = "RESULTS_NOT_RECONFIRMED",
+                message = "Every ReadyToRace registration must be referee-confirmed before the final report is resubmitted.",
+                expectedResults = activeRegistrationIds.Count,
+                confirmedResults = confirmedResultCount
             });
         }
 

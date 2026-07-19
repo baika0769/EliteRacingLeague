@@ -538,7 +538,12 @@ public partial class EliteRacingLeagueContext : DbContext
         {
             entity.HasKey(e => e.PrizeAwardId).HasName("PK__prize_aw__14E95D184DD587F4");
 
-            entity.ToTable("prize_awards");
+            entity.ToTable("prize_awards", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_prize_awards_status",
+                    "[status] IN ('ReadyToClaim', 'UnderReview', 'Paid', 'Rejected')");
+            });
 
             entity.HasIndex(e => new { e.RaceId, e.RankPosition }, "UQ_prize_awards_race_rank").IsUnique();
 
