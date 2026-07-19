@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -165,4 +165,164 @@ public class AdminRewardsController : ControllerBase
             status = reward.Status
         });
     }
+
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetRewardSummary(CancellationToken cancellationToken)
+    {
+        var prizePayments = await _context.PrizeAwards
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                ReadyToClaim = group.Count(item => item.Status == PrizeAwardStatuses.ReadyToClaim),
+                UnderReview = group.Count(item => item.Status == PrizeAwardStatuses.UnderReview),
+                Paid = group.Count(item => item.Status == PrizeAwardStatuses.Paid),
+                Rejected = group.Count(item => item.Status == PrizeAwardStatuses.Rejected),
+                TotalAmount = group.Sum(item => item.PrizeAmount),
+                PaidAmount = group.Where(item => item.Status == PrizeAwardStatuses.Paid)
+                    .Sum(item => (decimal?)item.PrizeAmount) ?? 0m
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var seasonRewards = await _context.SeasonRewards
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Eligible = group.Count(item => item.Status == SeasonRewardStatuses.Eligible),
+                Claimed = group.Count(item => item.Status == SeasonRewardStatuses.Claimed),
+                Approved = group.Count(item => item.Status == SeasonRewardStatuses.Approved),
+                Preparing = group.Count(item => item.Status == SeasonRewardStatuses.Preparing),
+                Delivered = group.Count(item => item.Status == SeasonRewardStatuses.Delivered),
+                Rejected = group.Count(item => item.Status == SeasonRewardStatuses.Rejected),
+                Expired = group.Count(item => item.Status == SeasonRewardStatuses.Expired)
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(new
+        {
+            prizePayments = prizePayments ?? new
+            {
+                Total = 0,
+                ReadyToClaim = 0,
+                UnderReview = 0,
+                Paid = 0,
+                Rejected = 0,
+                TotalAmount = 0m,
+                PaidAmount = 0m
+            },
+            seasonRewards = seasonRewards ?? new
+            {
+                Total = 0,
+                Eligible = 0,
+                Claimed = 0,
+                Approved = 0,
+                Preparing = 0,
+                Delivered = 0,
+                Rejected = 0,
+                Expired = 0
+            }
+        });
+    }
+
+    [HttpGet("season-rewards")]
+    public async Task<IActionResult> GetSeasonRewards(
+        [FromQuery] int? seasonId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.IsNullOrWhiteSpace(status) && !SeasonRewardStatuses.IsValid(status))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid season reward status.",
+                allowedValues = SeasonRewardStatuses.All
+            });
+        }
+
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 200);
+
+        var query = _context.SeasonRewards
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (seasonId.HasValue)
+            query = query.Where(item => item.SeasonId == seasonId.Value);
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(item => item.Status == status);
+
+        var normalizedSearch = string.IsNullOrWhiteSpace(search)
+            ? null
+            : search.Trim();
+
+        if (normalizedSearch != null)
+        {
+            query = query.Where(item =>
+                item.RewardName.Contains(normalizedSearch) ||
+                item.Season.SeasonName.Contains(normalizedSearch) ||
+                item.Spectator.FullName.Contains(normalizedSearch) ||
+                item.Spectator.Email.Contains(normalizedSearch) ||
+                (item.RewardItem != null && item.RewardItem.Name.Contains(normalizedSearch)));
+        }
+
+        var totalItems = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(item => item.AwardedAt)
+            .ThenBy(item => item.RankPosition)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(item => new
+            {
+                item.SeasonRewardId,
+                item.SeasonId,
+                item.Season.SeasonName,
+                item.SpectatorId,
+                SpectatorName = item.Spectator.FullName,
+                SpectatorEmail = item.Spectator.Email,
+                item.RankPosition,
+                item.FinalPoints,
+                item.RewardName,
+                item.RewardDescription,
+                item.BonusPoints,
+                item.RewardItemId,
+                RewardItemName = item.RewardItem == null ? null : item.RewardItem.Name,
+                RewardItemSku = item.RewardItem == null ? null : item.RewardItem.Sku,
+                item.Quantity,
+                item.InventoryReserved,
+                item.IsBonusApplied,
+                item.AppliedToSeasonId,
+                item.AppliedAt,
+                item.Status,
+                item.AwardedAt,
+                item.ClaimDeadline,
+                item.ClaimedAt,
+                item.ApprovedAt,
+                item.PreparingAt,
+                item.DeliveredAt,
+                item.RejectedAt,
+                item.ReceiverName,
+                item.ReceiverPhone,
+                item.DeliveryAddress,
+                item.AdminNote
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new
+        {
+            page,
+            pageSize,
+            totalItems,
+            totalPages = totalItems == 0 ? 0 : (int)Math.Ceiling(totalItems / (double)pageSize),
+            items
+        });
+    }
+
 }

@@ -112,7 +112,15 @@ public class AdminSeasonsController : ControllerBase
                         r.RankPosition,
                         r.RewardName,
                         r.RewardDescription,
-                        r.BonusPoints
+                        r.BonusPoints,
+                        r.RewardItemId,
+                        RewardItemName = r.RewardItem == null ? null : r.RewardItem.Name,
+                        RewardItemSku = r.RewardItem == null ? null : r.RewardItem.Sku,
+                        RewardItemIsActive = r.RewardItem == null ? (bool?)null : r.RewardItem.IsActive,
+                        RewardItemAvailableQuantity = r.RewardItem == null
+                            ? (int?)null
+                            : r.RewardItem.StockQuantity - r.RewardItem.ReservedQuantity - r.RewardItem.DeliveredQuantity,
+                        r.Quantity
                     }),
                 Rewards = s.SeasonRewards
                     .OrderBy(r => r.RankPosition)
@@ -498,7 +506,15 @@ public class AdminSeasonsController : ControllerBase
                         r.RankPosition,
                         r.RewardName,
                         r.RewardDescription,
-                        r.BonusPoints
+                        r.BonusPoints,
+                        r.RewardItemId,
+                        RewardItemName = r.RewardItem == null ? null : r.RewardItem.Name,
+                        RewardItemSku = r.RewardItem == null ? null : r.RewardItem.Sku,
+                        RewardItemIsActive = r.RewardItem == null ? (bool?)null : r.RewardItem.IsActive,
+                        RewardItemAvailableQuantity = r.RewardItem == null
+                            ? (int?)null
+                            : r.RewardItem.StockQuantity - r.RewardItem.ReservedQuantity - r.RewardItem.DeliveredQuantity,
+                        r.Quantity
                     })
             })
             .FirstOrDefaultAsync();
@@ -1229,6 +1245,7 @@ public class AdminSeasonsController : ControllerBase
                 r.Quantity,
                 r.InventoryReserved,
                 RewardItemName = r.RewardItem == null ? null : r.RewardItem.Name,
+                RewardItemSku = r.RewardItem == null ? null : r.RewardItem.Sku,
                 r.IsBonusApplied,
                 r.AppliedToSeasonId,
                 r.AppliedAt,

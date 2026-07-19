@@ -51,7 +51,10 @@ public class AdminRacesController : ControllerBase
                 RegisteredCount = r.RaceRegistrations.Count(x =>
                     x.Status != RaceRegistrationStatuses.Rejected &&
                     x.Status != RaceRegistrationStatuses.Cancelled &&
-                    x.Status != RaceRegistrationStatuses.Withdrawn)
+                    x.Status != RaceRegistrationStatuses.Withdrawn),
+                PrizeRuleCount = r.PrizeRules.Count,
+                TotalPrizeAmount = r.PrizeRules.Sum(rule => (decimal?)rule.PrizeAmount) ?? 0m,
+                HasGeneratedPrizeAwards = r.PrizeAwards.Any()
             })
             .ToListAsync(cancellationToken);
         return Ok(races.Select(x => new
@@ -73,6 +76,13 @@ public class AdminRacesController : ControllerBase
             x.Race.CancellationReason,
             x.Race.LifecycleVersion,
             x.RegisteredCount,
+            x.PrizeRuleCount,
+            x.TotalPrizeAmount,
+            x.HasGeneratedPrizeAwards,
+            CanEditPrizeRules = x.Race.Status is RaceStatuses.Scheduled
+                or RaceStatuses.AssignedReferee
+                or RaceStatuses.RefereeReady
+                or RaceStatuses.Postponed,
             RowVersion = Convert.ToBase64String(x.Race.RowVersion)
         }));
     }
