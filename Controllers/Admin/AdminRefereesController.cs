@@ -16,13 +16,34 @@ namespace Eliteracingleague.API.Controllers.Admin;
 [Route("api/admin/referees")]
 public class AdminRefereesController : ControllerBase
 {
+    // Prevent regular-expression denial-of-service by limiting every regex execution.
+    private static readonly TimeSpan RegexTimeout =
+        TimeSpan.FromMilliseconds(500);
+
     private static readonly Regex FullNameRegex = new(
         @"^[\p{L}\p{M}][\p{L}\p{M}\s'.-]*$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
 
     private static readonly Regex LicenseRegex = new(
         @"^[A-Z0-9][A-Z0-9./-]{2,99}$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    private static readonly Regex PhoneValidationRegex = new(
+        @"^\+?\d{9,15}$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    private static readonly Regex WhitespaceRegex = new(
+        @"\s+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    private static readonly Regex PhoneInputRegex = new(
+        @"^\+?[0-9\s().-]+$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        RegexTimeout);
 
     private readonly EliteRacingLeagueContext _context;
     private readonly PasswordHasher<User> _passwordHasher;
@@ -393,7 +414,7 @@ public class AdminRefereesController : ControllerBase
         }
 
         if (phone != null &&
-            (!Regex.IsMatch(phone, @"^\+?\d{9,15}$") ||
+            (!IsSafeMatch(PhoneValidationRegex, phone) ||
              phone.Length > 16))
         {
             return "Phone must contain 9 to 15 digits and may start with +.";
@@ -437,7 +458,17 @@ public class AdminRefereesController : ControllerBase
 
     private static string NormalizeWhitespace(string value)
     {
-        return Regex.Replace(value.Trim(), @"\s+", " ");
+        var trimmed = value.Trim();
+
+        try
+        {
+            return WhitespaceRegex.Replace(trimmed, " ");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Keep validation deterministic even for unexpectedly large input.
+            return trimmed;
+        }
     }
 
     private static string? NormalizePhone(string? value)
@@ -449,7 +480,7 @@ public class AdminRefereesController : ControllerBase
 
         var trimmed = value.Trim();
 
-        if (!Regex.IsMatch(trimmed, @"^\+?[0-9\s().-]+$"))
+        if (!IsSafeMatch(PhoneInputRegex, trimmed))
         {
             return trimmed;
         }
@@ -458,6 +489,18 @@ public class AdminRefereesController : ControllerBase
         var digits = new string(trimmed.Where(char.IsDigit).ToArray());
 
         return prefix + digits;
+    }
+
+    private static bool IsSafeMatch(Regex regex, string value)
+    {
+        try
+        {
+            return regex.IsMatch(value);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
     }
 
     private static string? NormalizeLicense(string? value)
