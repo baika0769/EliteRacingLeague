@@ -34,7 +34,15 @@ builder.Services.AddCors(options =>
 
     var origins = configuredOrigins.Length > 0
         ? configuredOrigins
-        : new[] { "http://localhost:5173", "https://localhost:5173", "http://localhost:5174", "https://localhost:5174" };
+        : new[]
+        {
+            "http://localhost:5173",
+            "https://localhost:5173",
+            "http://localhost:5174",
+            "https://localhost:5174",
+            "http://localhost:5175",
+            "https://localhost:5175"
+        };
 
     options.AddPolicy("AllowFrontend", policy =>
     {
@@ -246,7 +254,12 @@ if (app.Environment.IsDevelopment())
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
-app.UseHttpsRedirection();
+// Do not redirect HTTP preflight requests while running locally in Development.
+// Production and other non-Development environments still enforce HTTPS.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseStaticFiles();
 
