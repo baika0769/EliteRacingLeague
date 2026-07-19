@@ -7,6 +7,7 @@ using Eliteracingleague.API.Extensions;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Rewards;
+using Eliteracingleague.API.Services.Email;
 using Eliteracingleague.API.Services.Auditing;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
@@ -31,6 +32,7 @@ public class AdminSeasonsController : ControllerBase
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly RewardInventoryService _rewardInventoryService;
     private readonly IAuditService _auditService;
+    private readonly SeasonRewardEmailService _rewardEmailService;
 
     public AdminSeasonsController(
         EliteRacingLeagueContext context,
@@ -38,7 +40,8 @@ public class AdminSeasonsController : ControllerBase
         SpectatorWalletService spectatorWalletService,
         IDateTimeProvider dateTimeProvider,
         RewardInventoryService rewardInventoryService,
-        IAuditService auditService)
+        IAuditService auditService,
+        SeasonRewardEmailService rewardEmailService)
     {
         _context = context;
         _leaderboardService = leaderboardService;
@@ -46,6 +49,7 @@ public class AdminSeasonsController : ControllerBase
         _dateTimeProvider = dateTimeProvider;
         _rewardInventoryService = rewardInventoryService;
         _auditService = auditService;
+        _rewardEmailService = rewardEmailService;
     }
 
     [HttpGet]
@@ -1028,6 +1032,7 @@ public class AdminSeasonsController : ControllerBase
 
             var leaderboardByRank = leaderboard.ToDictionary(item => item.Rank);
             var rewardCount = 0;
+            var generatedRewards = new List<SeasonReward>();
 
             foreach (var rule in rewardRules)
             {
@@ -1055,6 +1060,7 @@ public class AdminSeasonsController : ControllerBase
                     ClaimDeadline = now.AddDays(30)
                 };
                 _context.SeasonRewards.Add(seasonReward);
+                generatedRewards.Add(seasonReward);
 
                 if (rule.RewardItem != null)
                 {
@@ -1090,9 +1096,18 @@ public class AdminSeasonsController : ControllerBase
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
 
+            var rewardEmailSentCount = 0;
+            foreach (var generatedReward in generatedRewards)
+            {
+                if (await _rewardEmailService.TrySendAwardedAsync(generatedReward.SeasonRewardId))
+                {
+                    rewardEmailSentCount++;
+                }
+            }
+
             return Ok(new
             {
-                message = "Season closed successfully. Wallets were frozen and rewards were generated once.",
+                message = "Season closed successfully. Wallets were frozen, rewards were generated, and congratulation emails were attempted.",
                 seasonId = season.SeasonId,
                 seasonName = season.SeasonName,
                 status = season.Status,
@@ -1100,6 +1115,8 @@ public class AdminSeasonsController : ControllerBase
                 settledWalletCount = wallets.Count,
                 configuredRewardRuleCount = rewardRules.Count,
                 rewardCount,
+                rewardEmailSentCount,
+                rewardEmailFailedCount = rewardCount - rewardEmailSentCount,
                 claimDeadlineDays = 30
             });
         }
@@ -1326,6 +1343,7 @@ public class AdminSeasonsController : ControllerBase
             "SeasonReward", reward.SeasonRewardId.ToString(), null,
             new { reward.Status, reward.InventoryReserved }, reward.AdminNote);
         await _context.SaveChangesAsync();
+        var emailSent = await _rewardEmailService.TrySendStatusUpdatedAsync(reward.SeasonRewardId);
 
         return Ok(new
         {
@@ -1336,7 +1354,46 @@ public class AdminSeasonsController : ControllerBase
             reward.ApprovedAt,
             reward.PreparingAt,
             reward.DeliveredAt,
-            reward.RejectedAt
+            reward.RejectedAt,
+            emailSent
+        });
+    }
+
+    [HttpPost("rewards/{rewardId:int}/resend-email")]
+    public async Task<IActionResult> ResendSeasonRewardEmail(int rewardId)
+    {
+        var rewardState = await _context.SeasonRewards
+            .AsNoTracking()
+            .Where(item => item.SeasonRewardId == rewardId)
+            .Select(item => item.Status)
+            .FirstOrDefaultAsync();
+
+        if (rewardState == null)
+        {
+            return NotFound(new { message = "Season reward not found.", rewardId });
+        }
+
+        var emailSent = rewardState switch
+        {
+            SeasonRewardStatuses.Eligible => await _rewardEmailService.TrySendAwardedAsync(rewardId),
+            SeasonRewardStatuses.Claimed => await _rewardEmailService.TrySendClaimReceivedAsync(rewardId),
+            _ => await _rewardEmailService.TrySendStatusUpdatedAsync(rewardId)
+        };
+        if (!emailSent)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message = "Reward email could not be sent. Check SMTP configuration and application logs.",
+                rewardId,
+                emailSent = false
+            });
+        }
+
+        return Ok(new
+        {
+            message = "Reward email sent successfully.",
+            rewardId,
+            emailSent = true
         });
     }
 

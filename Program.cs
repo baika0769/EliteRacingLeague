@@ -50,6 +50,7 @@ builder.Services.AddDbContext<EliteRacingLeagueContext>(options =>
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IEmailService, SmtpEmailService>();
+builder.Services.AddScoped<SeasonRewardEmailService>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<RaceSchedulingValidationService>();
 builder.Services.AddScoped<RacePredictionSettlementService>();

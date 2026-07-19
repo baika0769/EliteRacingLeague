@@ -5,6 +5,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Rewards;
+using Eliteracingleague.API.Services.Email;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -21,17 +22,20 @@ public class SpectatorRewardsController : ControllerBase
     private readonly SpectatorLeaderboardService _leaderboardService;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly RewardInventoryService _rewardInventoryService;
+    private readonly SeasonRewardEmailService _rewardEmailService;
 
     public SpectatorRewardsController(
         EliteRacingLeagueContext context,
         SpectatorLeaderboardService leaderboardService,
         IDateTimeProvider dateTimeProvider,
-        RewardInventoryService rewardInventoryService)
+        RewardInventoryService rewardInventoryService,
+        SeasonRewardEmailService rewardEmailService)
     {
         _context = context;
         _leaderboardService = leaderboardService;
         _dateTimeProvider = dateTimeProvider;
         _rewardInventoryService = rewardInventoryService;
+        _rewardEmailService = rewardEmailService;
     }
 
     private int GetUserId()
@@ -269,13 +273,15 @@ public class SpectatorRewardsController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+        var confirmationEmailSent = await _rewardEmailService.TrySendClaimReceivedAsync(reward.SeasonRewardId);
 
         return Ok(new
         {
             message = "Reward claim submitted successfully.",
             rewardId = reward.SeasonRewardId,
             reward.Status,
-            reward.ClaimedAt
+            reward.ClaimedAt,
+            confirmationEmailSent
         });
     }
 }
