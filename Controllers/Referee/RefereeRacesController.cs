@@ -600,6 +600,7 @@ public class RefereeRacesController : ControllerBase
 
         var race = await _context.Races
             .AsNoTracking()
+            .Include(r => r.Tournament)
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.Status != RaceStatuses.Cancelled &&
@@ -610,9 +611,23 @@ public class RefereeRacesController : ControllerBase
             return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
+        if (race.Tournament.Status != TournamentStatuses.ClosedRegistration &&
+            race.Tournament.Status != TournamentStatuses.Ongoing)
+        {
+            return BadRequest(new
+            {
+                message = "Pre-race inspection is only available after registration is closed.",
+                tournamentStatus = race.Tournament.Status
+            });
+        }
+
         if (race.Status != RaceStatuses.AssignedReferee)
         {
-            return BadRequest(new { message = "Pre-race inspection can only be updated when race status is AssignedReferee." });
+            return BadRequest(new
+            {
+                message = "Pre-race inspection can only be updated when race status is AssignedReferee.",
+                raceStatus = race.Status
+            });
         }
 
         var registration = await _context.RaceRegistrations

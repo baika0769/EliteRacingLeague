@@ -362,7 +362,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                         AssignedAt = now
                     });
 
-                    race.Status = RaceStatuses.AssignedReferee;
+                    // Assigning a referee does not open the pre-race stage early.
+                    // The race becomes AssignedReferee only after registration closes.
                     race.UpdatedAt = now;
 
                     await _notificationService.CreateForUserAsync(
@@ -635,6 +636,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         {
             var tournament = await _context.Tournaments
                 .Include(t => t.Races)
+                    .ThenInclude(r => r.RefereeAssignments)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -693,6 +695,15 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             foreach (var race in tournament.Races)
             {
+                var hasActiveRefereeAssignment = race.RefereeAssignments.Any(a =>
+                    a.Status == RefereeAssignmentStatuses.Assigned);
+
+                if (race.Status == RaceStatuses.Scheduled &&
+                    hasActiveRefereeAssignment)
+                {
+                    race.Status = RaceStatuses.AssignedReferee;
+                }
+
                 race.UpdatedAt = now;
             }
 
@@ -1163,9 +1174,20 @@ namespace Eliteracingleague.API.Controllers.Admin
                     });
                 }
 
-                if (race.Status == RaceStatuses.Scheduled)
+                var registrationIsClosed =
+                    race.Tournament.Status == TournamentStatuses.ClosedRegistration ||
+                    race.Tournament.Status == TournamentStatuses.Ongoing;
+
+                if (race.Status == RaceStatuses.Scheduled && registrationIsClosed)
                 {
                     race.Status = RaceStatuses.AssignedReferee;
+                }
+                else if (race.Status == RaceStatuses.AssignedReferee &&
+                         !registrationIsClosed)
+                {
+                    // Referee may be assigned in advance, but inspections must wait
+                    // until registration is closed.
+                    race.Status = RaceStatuses.Scheduled;
                 }
 
                 race.UpdatedAt = now;

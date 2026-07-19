@@ -221,10 +221,12 @@ public class RefereeRaceLifecycleService
         {
             CanInspect = seasonIsActive &&
                 tournamentIsOperational &&
+                registrationIsClosed &&
                 raceStatus == RaceStatuses.AssignedReferee,
 
             CanSubmitPreRaceReport = seasonIsActive &&
                 tournamentIsOperational &&
+                registrationIsClosed &&
                 raceStatus == RaceStatuses.AssignedReferee &&
                 inspectionsComplete,
 
@@ -360,6 +362,13 @@ public class RefereeRaceLifecycleService
                 RaceStatuses.RefereeReady)
         {
             return $"Season is {seasonStatus}. Pre-race actions are unavailable.";
+        }
+
+        if (raceStatus == RaceStatuses.AssignedReferee &&
+            tournamentStatus != TournamentStatuses.ClosedRegistration &&
+            tournamentStatus != TournamentStatuses.Ongoing)
+        {
+            return "Registration must be closed before pre-race inspections can begin.";
         }
 
         if (raceStatus == RaceStatuses.RefereeReady &&

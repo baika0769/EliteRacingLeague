@@ -230,7 +230,9 @@ public class AdminRacesController : ControllerBase
     public async Task<IActionResult> ResumeRace(int raceId, CancellationToken cancellationToken)
     {
         if (!User.TryGetUserId(out var adminId)) return Unauthorized();
-        var race = await _context.Races.Include(r => r.RefereeAssignments)
+        var race = await _context.Races
+            .Include(r => r.RefereeAssignments)
+            .Include(r => r.Tournament)
             .FirstOrDefaultAsync(r => r.RaceId == raceId, cancellationToken);
         if (race == null) return NotFound(new { message = "Race not found." });
         if (race.Status != RaceStatuses.Postponed)
@@ -238,7 +240,13 @@ public class AdminRacesController : ControllerBase
         if (race.RaceDate <= DateTime.UtcNow)
             return BadRequest(new { message = "Race date must be moved to the future before resuming." });
 
-        race.Status = race.RefereeAssignments.Any(x => x.Status == RefereeAssignmentStatuses.Assigned)
+        var registrationIsClosed =
+            race.Tournament.Status == TournamentStatuses.ClosedRegistration ||
+            race.Tournament.Status == TournamentStatuses.Ongoing;
+        var hasActiveRefereeAssignment = race.RefereeAssignments.Any(x =>
+            x.Status == RefereeAssignmentStatuses.Assigned);
+
+        race.Status = registrationIsClosed && hasActiveRefereeAssignment
             ? RaceStatuses.AssignedReferee
             : RaceStatuses.Scheduled;
         race.LifecycleVersion++;
@@ -367,7 +375,26 @@ public class AdminRacesController : ControllerBase
             Status = RefereeAssignmentStatuses.Assigned,
             AssignedAt = DateTime.UtcNow
         });
-        race.Status = RaceStatuses.AssignedReferee;
+        var tournamentStatus = race.Tournament is not null
+            ? race.Tournament.Status
+            : await _context.Tournaments
+                .Where(t => t.TournamentId == race.TournamentId)
+                .Select(t => t.Status)
+                .FirstAsync(cancellationToken);
+
+        if (race.Status == RaceStatuses.Scheduled &&
+            (tournamentStatus == TournamentStatuses.ClosedRegistration ||
+             tournamentStatus == TournamentStatuses.Ongoing))
+        {
+            race.Status = RaceStatuses.AssignedReferee;
+        }
+        else if (race.Status == RaceStatuses.AssignedReferee &&
+                 tournamentStatus != TournamentStatuses.ClosedRegistration &&
+                 tournamentStatus != TournamentStatuses.Ongoing)
+        {
+            race.Status = RaceStatuses.Scheduled;
+        }
+
         await _notifications.CreateForUserAsync(refereeId, "Race Assigned",
             $"You were assigned to {race.RaceName}.", "RefereeRaceAssignment",
             "/referee/races", "Race", race.RaceId, cancellationToken);
