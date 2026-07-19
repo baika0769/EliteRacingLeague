@@ -33,6 +33,7 @@ public class RefereeNotificationsController : ControllerBase
         }
 
         var notifications = await _context.Notifications
+            .AsNoTracking()
             .Where(n => n.UserId == userId)
             .OrderByDescending(n => n.CreatedAt)
             .Select(n => new
@@ -41,7 +42,11 @@ public class RefereeNotificationsController : ControllerBase
                 title = n.Title,
                 message = n.Message,
                 isRead = n.IsRead,
-                createdAt = n.CreatedAt
+                createdAt = n.CreatedAt,
+                actionType = n.ActionType,
+                actionUrl = n.ActionUrl,
+                relatedType = n.RelatedType,
+                relatedId = n.RelatedId
             })
             .ToListAsync();
 
@@ -82,7 +87,8 @@ public class RefereeNotificationsController : ControllerBase
         return Ok(new
         {
             message = "Notification marked as read",
-            notificationId = notification.NotificationId
+            notificationId = notification.NotificationId,
+            actionUrl = notification.ActionUrl
         });
     }
 

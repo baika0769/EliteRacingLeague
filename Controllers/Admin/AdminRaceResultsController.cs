@@ -105,6 +105,46 @@ public class AdminRaceResultsController : ControllerBase
         if (race.Tournament.Status == TournamentStatuses.Cancelled)
             return BadRequest(new AdminActionResponse { Message = "A cancelled tournament cannot publish results.", Id = raceId });
 
+        var postRaceReports = await _context.RefereeReports
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.ReportType == RefereeReportTypes.PostRace)
+            .Select(r => new
+            {
+                r.ReportId,
+                r.Status,
+                r.RefereeId
+            })
+            .ToListAsync(cancellationToken);
+
+        if (postRaceReports.Count == 0)
+        {
+            return BadRequest(new
+            {
+                code = "POST_RACE_REPORT_MISSING",
+                message = "The final referee report must be submitted and approved before publishing race results.",
+                raceId
+            });
+        }
+
+        var unapprovedReport = postRaceReports.FirstOrDefault(r =>
+            r.Status != RefereeReportStatuses.Approved);
+
+        if (unapprovedReport != null)
+        {
+            return Conflict(new
+            {
+                code = "POST_RACE_REPORT_NOT_APPROVED",
+                message = unapprovedReport.Status == RefereeReportStatuses.Returned
+                    ? "The final referee report was returned and must be revised and resubmitted before publishing race results."
+                    : "The final referee report is still waiting for admin approval.",
+                raceId,
+                reportId = unapprovedReport.ReportId,
+                reportStatus = unapprovedReport.Status
+            });
+        }
+
         var registrations = await _context.RaceRegistrations
             .Where(r => r.RaceId == raceId &&
                         r.Status != RaceRegistrationStatuses.Cancelled &&

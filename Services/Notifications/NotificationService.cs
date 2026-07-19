@@ -22,9 +22,11 @@ public class NotificationService : INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
     {
-        if (await NotificationExistsAsync(userId, actionType, relatedType, relatedId, cancellationToken))
+        if (preventDuplicates &&
+            await NotificationExistsAsync(userId, actionType, relatedType, relatedId, cancellationToken))
         {
             return;
         }
@@ -51,7 +53,8 @@ public class NotificationService : INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
     {
         var userIds = await _context.Users
             .AsNoTracking()
@@ -69,7 +72,8 @@ public class NotificationService : INotificationService
                 actionUrl,
                 relatedType,
                 relatedId,
-                cancellationToken);
+                cancellationToken,
+                preventDuplicates);
         }
     }
 
@@ -80,7 +84,8 @@ public class NotificationService : INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
     {
         return CreateForRoleAsync(
             UserRoles.Admin,
@@ -90,7 +95,8 @@ public class NotificationService : INotificationService
             actionUrl,
             relatedType,
             relatedId,
-            cancellationToken);
+            cancellationToken,
+            preventDuplicates);
     }
 
     private async Task<bool> NotificationExistsAsync(

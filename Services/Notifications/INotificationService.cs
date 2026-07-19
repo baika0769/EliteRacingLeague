@@ -10,7 +10,8 @@ public interface INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true);
 
     Task CreateForRoleAsync(
         string role,
@@ -20,7 +21,8 @@ public interface INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true);
 
     Task CreateForAdminsAsync(
         string title,
@@ -29,5 +31,6 @@ public interface INotificationService
         string? actionUrl = null,
         string? relatedType = null,
         int? relatedId = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true);
 }

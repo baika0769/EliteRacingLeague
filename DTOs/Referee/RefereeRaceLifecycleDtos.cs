@@ -12,6 +12,7 @@ public class RefereeRaceLifecycleResponse
     public string? NextStage { get; set; }
     public RefereeAllowedActionsResponse AllowedActions { get; set; } = new();
     public RefereeLifecycleCountsResponse Counts { get; set; } = new();
+    public RefereePostRaceReportStateResponse? PostRaceReport { get; set; }
     public string? BlockingReason { get; set; }
 }
 
@@ -25,6 +26,7 @@ public class RefereeAllowedActionsResponse
     public bool CanEnterResults { get; set; }
     public bool CanConfirmResults { get; set; }
     public bool CanSubmitPostRaceReport { get; set; }
+    public bool CanResubmitPostRaceReport { get; set; }
     public bool CanReportViolation { get; set; }
 }
 
@@ -37,4 +39,18 @@ public class RefereeLifecycleCountsResponse
     public int DraftResults { get; set; }
     public int RefereeConfirmedResults { get; set; }
     public int AdminApprovedResults { get; set; }
+}
+
+public class RefereePostRaceReportStateResponse
+{
+    public int ReportId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public int RevisionNumber { get; set; }
+    public string? ReturnReasonCategory { get; set; }
+    public string? ReturnReason { get; set; }
+    public DateTime SubmittedAt { get; set; }
+    public DateTime? ResubmittedAt { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public bool CanEdit { get; set; }
+    public bool IsLocked { get; set; }
 }

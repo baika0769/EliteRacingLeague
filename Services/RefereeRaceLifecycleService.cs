@@ -107,6 +107,28 @@ public class RefereeRaceLifecycleService
             .Select(r => r.Status)
             .ToListAsync();
 
+        var postRaceReport = await _context.RefereeReports
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.ReportType == RefereeReportTypes.PostRace)
+            .OrderByDescending(r => r.ReportId)
+            .Select(r => new RefereePostRaceReportStateResponse
+            {
+                ReportId = r.ReportId,
+                Status = r.Status,
+                RevisionNumber = r.RevisionNumber,
+                ReturnReasonCategory = r.ReturnReasonCategory,
+                ReturnReason = r.ReturnReason,
+                SubmittedAt = r.SubmittedAt,
+                ResubmittedAt = r.ResubmittedAt,
+                ReviewedAt = r.ReviewedAt,
+                CanEdit = r.Status == RefereeReportStatuses.Returned,
+                IsLocked = r.Status != RefereeReportStatuses.Returned
+            })
+            .FirstOrDefaultAsync();
+
         var counts = new RefereeLifecycleCountsResponse
         {
             TotalRegistrations = totalRegistrations,
@@ -135,7 +157,8 @@ public class RefereeRaceLifecycleService
             race.RaceDate,
             localNow,
             counts,
-            eligibleRegistrations);
+            eligibleRegistrations,
+            postRaceReport);
 
         return new RefereeRaceLifecycleResponse
         {
@@ -145,10 +168,11 @@ public class RefereeRaceLifecycleService
             RaceStatus = race.Status,
             TournamentStatus = race.TournamentStatus,
             SeasonStatus = race.SeasonStatus,
-            CurrentStage = GetCurrentStage(race.Status),
+            CurrentStage = GetCurrentStage(race.Status, postRaceReport),
             NextStage = GetNextStage(race.Status),
             AllowedActions = actions,
             Counts = counts,
+            PostRaceReport = postRaceReport,
             BlockingReason = GetBlockingReason(
                 race.Status,
                 race.TournamentStatus,
@@ -156,7 +180,8 @@ public class RefereeRaceLifecycleService
                 race.RaceDate,
                 localNow,
                 counts,
-                eligibleRegistrations)
+                eligibleRegistrations,
+                postRaceReport)
         };
     }
 
@@ -177,7 +202,8 @@ public class RefereeRaceLifecycleService
         DateTime raceDate,
         DateTime localNow,
         RefereeLifecycleCountsResponse counts,
-        int eligibleRegistrations)
+        int eligibleRegistrations,
+        RefereePostRaceReportStateResponse? postRaceReport)
     {
         var hasRegistrations = counts.TotalRegistrations > 0;
         var inspectionsComplete = hasRegistrations &&
@@ -189,6 +215,7 @@ public class RefereeRaceLifecycleService
         var registrationIsClosed = tournamentStatus == TournamentStatuses.ClosedRegistration ||
             tournamentStatus == TournamentStatuses.Ongoing;
         var scheduledTimeReached = localNow >= raceDate;
+        var isPostRaceStage = raceStatus is RaceStatuses.Finished or RaceStatuses.ResultPending;
 
         return new RefereeAllowedActionsResponse
         {
@@ -216,8 +243,6 @@ public class RefereeRaceLifecycleService
                 inspectionsComplete &&
                 hasEligibleRegistrations,
 
-            // Once a race has started, the referee must still be able to finish it
-            // even if the surrounding season data later becomes inconsistent.
             CanFinishRace = raceStatus == RaceStatuses.Ongoing,
 
             CanEnterResults = raceStatus == RaceStatuses.Finished,
@@ -227,15 +252,36 @@ public class RefereeRaceLifecycleService
                 counts.DraftResults + counts.RefereeConfirmedResults >= eligibleRegistrations &&
                 hasEligibleRegistrations,
 
-            CanSubmitPostRaceReport = raceStatus is RaceStatuses.Finished or
-                RaceStatuses.ResultPending,
+            CanSubmitPostRaceReport = isPostRaceStage && postRaceReport == null,
+
+            CanResubmitPostRaceReport = isPostRaceStage &&
+                postRaceReport?.Status == RefereeReportStatuses.Returned,
 
             CanReportViolation = ViolationAllowedRaceStatuses.Contains(raceStatus)
         };
     }
 
-    private static string GetCurrentStage(string raceStatus)
+    private static string GetCurrentStage(
+        string raceStatus,
+        RefereePostRaceReportStateResponse? postRaceReport)
     {
+        if (postRaceReport?.Status == RefereeReportStatuses.Returned)
+        {
+            return "PostRaceReportRevisionRequired";
+        }
+
+        if (postRaceReport?.Status == RefereeReportStatuses.Submitted &&
+            raceStatus is RaceStatuses.Finished or RaceStatuses.ResultPending)
+        {
+            return "WaitingPostRaceReportReview";
+        }
+
+        if (postRaceReport?.Status == RefereeReportStatuses.Approved &&
+            raceStatus == RaceStatuses.ResultPending)
+        {
+            return "WaitingResultPublication";
+        }
+
         return raceStatus switch
         {
             RaceStatuses.Scheduled => "Setup",
@@ -273,7 +319,8 @@ public class RefereeRaceLifecycleService
         DateTime raceDate,
         DateTime localNow,
         RefereeLifecycleCountsResponse counts,
-        int eligibleRegistrations)
+        int eligibleRegistrations,
+        RefereePostRaceReportStateResponse? postRaceReport)
     {
         if (raceStatus == RaceStatuses.Cancelled ||
             tournamentStatus == TournamentStatuses.Cancelled)
@@ -281,9 +328,24 @@ public class RefereeRaceLifecycleService
             return "Race or tournament is cancelled.";
         }
 
+        if (postRaceReport?.Status == RefereeReportStatuses.Returned)
+        {
+            return string.IsNullOrWhiteSpace(postRaceReport.ReturnReason)
+                ? "The final report was returned by the admin and must be revised."
+                : $"The final report must be revised. Admin reason: {postRaceReport.ReturnReason}";
+        }
+
+        if (postRaceReport?.Status == RefereeReportStatuses.Submitted &&
+            raceStatus is RaceStatuses.Finished or RaceStatuses.ResultPending)
+        {
+            return "The final report was submitted and is locked while waiting for admin review.";
+        }
+
         if (raceStatus == RaceStatuses.ResultPending)
         {
-            return "Race is waiting for admin approval.";
+            return postRaceReport?.Status == RefereeReportStatuses.Approved
+                ? "The final report is approved. Race results are waiting for admin publication."
+                : "Race is waiting for admin approval.";
         }
 
         if (raceStatus == RaceStatuses.Published ||

@@ -7,6 +7,17 @@
 
         public string Type { get; set; } = string.Empty;
         public string? ReportType { get; set; }
+        public string? Status { get; set; }
+        public int? RevisionNumber { get; set; }
+        public string? ReturnReasonCategory { get; set; }
+        public string? ReturnReason { get; set; }
+        public int? ReviewedByAdminId { get; set; }
+        public string? ReviewedByAdminName { get; set; }
+        public DateTime? ReviewedAt { get; set; }
+        public DateTime? ResubmittedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+        public bool CanApprove { get; set; }
+        public bool CanReturn { get; set; }
 
         public int RaceId { get; set; }
         public string? RaceName { get; set; }

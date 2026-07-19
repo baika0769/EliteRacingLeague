@@ -1256,11 +1256,53 @@ namespace Eliteracingleague.API.Migrations
                         .HasColumnType("varchar(30)")
                         .HasColumnName("report_type");
 
+                    b.Property<DateTime?>("ResubmittedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("resubmitted_at");
+
+                    b.Property<string>("ReturnReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("return_reason");
+
+                    b.Property<string>("ReturnReasonCategory")
+                        .HasMaxLength(50)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("return_reason_category");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("reviewed_at");
+
+                    b.Property<int?>("ReviewedByAdminId")
+                        .HasColumnType("int")
+                        .HasColumnName("reviewed_by_admin_id");
+
+                    b.Property<int>("RevisionNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("revision_number")
+                        .HasDefaultValue(1);
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(30)")
+                        .HasColumnName("status")
+                        .HasDefaultValue("Submitted");
+
                     b.Property<DateTime>("SubmittedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
                         .HasColumnName("submitted_at")
                         .HasDefaultValueSql("(sysutcdatetime())");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
 
                     b.HasKey("ReportId")
                         .HasName("PK__referee___779B7C58B711E616");
@@ -1269,7 +1311,16 @@ namespace Eliteracingleague.API.Migrations
 
                     b.HasIndex("RefereeId");
 
-                    b.ToTable("referee_reports", (string)null);
+                    b.HasIndex("ReviewedByAdminId", "IX_referee_reports_reviewed_by_admin_id");
+
+                    b.HasIndex("Status", "IX_referee_reports_status");
+
+                    b.ToTable("referee_reports", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_referee_reports_revision_number", "[revision_number] >= 1");
+
+                            t.HasCheckConstraint("CK_referee_reports_status", "[status] IN ('Submitted', 'Returned', 'Approved')");
+                        });
                 });
 
             modelBuilder.Entity("Eliteracingleague.API.Models.Season", b =>
@@ -2269,9 +2320,17 @@ namespace Eliteracingleague.API.Migrations
                         .IsRequired()
                         .HasConstraintName("FK_referee_reports_referees");
 
+                    b.HasOne("Eliteracingleague.API.Models.User", "ReviewedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("ReviewedByAdminId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("FK_referee_reports_reviewed_by_admin");
+
                     b.Navigation("Race");
 
                     b.Navigation("Referee");
+
+                    b.Navigation("ReviewedByAdmin");
                 });
 
             modelBuilder.Entity("Eliteracingleague.API.Models.SeasonReward", b =>

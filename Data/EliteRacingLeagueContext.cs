@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -939,7 +940,15 @@ public partial class EliteRacingLeagueContext : DbContext
         {
             entity.HasKey(e => e.ReportId).HasName("PK__referee___779B7C58B711E616");
 
-            entity.ToTable("referee_reports");
+            entity.ToTable("referee_reports", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_referee_reports_status",
+                    "[status] IN ('Submitted', 'Returned', 'Approved')");
+                table.HasCheckConstraint(
+                    "CK_referee_reports_revision_number",
+                    "[revision_number] >= 1");
+            });
 
             entity.Property(e => e.ReportId).HasColumnName("report_id");
             entity.Property(e => e.RaceId).HasColumnName("race_id");
@@ -949,10 +958,35 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasMaxLength(30)
                 .IsUnicode(false)
                 .HasColumnName("report_type");
+            entity.Property(e => e.Status)
+                .HasMaxLength(30)
+                .IsUnicode(false)
+                .HasDefaultValue(RefereeReportStatuses.Submitted)
+                .HasColumnName("status");
+            entity.Property(e => e.ReturnReasonCategory)
+                .HasMaxLength(50)
+                .IsUnicode(false)
+                .HasColumnName("return_reason_category");
+            entity.Property(e => e.ReturnReason)
+                .HasMaxLength(1000)
+                .HasColumnName("return_reason");
+            entity.Property(e => e.ReviewedByAdminId)
+                .HasColumnName("reviewed_by_admin_id");
+            entity.Property(e => e.ReviewedAt)
+                .HasColumnName("reviewed_at");
+            entity.Property(e => e.RevisionNumber)
+                .HasDefaultValue(1)
+                .HasColumnName("revision_number");
+            entity.Property(e => e.ResubmittedAt)
+                .HasColumnName("resubmitted_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnName("updated_at");
             entity.Property(e => e.SubmittedAt)
                 .HasDefaultValueSql("(sysutcdatetime())")
                 .HasColumnName("submitted_at");
-            entity.Property(e => e.ReportType).HasColumnName("report_type");
+
+            entity.HasIndex(e => e.Status, "IX_referee_reports_status");
+            entity.HasIndex(e => e.ReviewedByAdminId, "IX_referee_reports_reviewed_by_admin_id");
 
             entity.HasOne(d => d.Race).WithMany(p => p.RefereeReports)
                 .HasForeignKey(d => d.RaceId)
@@ -963,6 +997,12 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasForeignKey(d => d.RefereeId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_referee_reports_referees");
+
+            entity.HasOne(d => d.ReviewedByAdmin)
+                .WithMany()
+                .HasForeignKey(d => d.ReviewedByAdminId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_referee_reports_reviewed_by_admin");
         });
 
         modelBuilder.Entity<Season>(entity =>

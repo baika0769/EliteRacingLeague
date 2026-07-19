@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
 
@@ -15,8 +14,27 @@ public partial class RefereeReport
 
     public DateTime SubmittedAt { get; set; }
 
+    public string ReportType { get; set; } = null!;
+
+    public string Status { get; set; } = null!;
+
+    public string? ReturnReasonCategory { get; set; }
+
+    public string? ReturnReason { get; set; }
+
+    public int? ReviewedByAdminId { get; set; }
+
+    public DateTime? ReviewedAt { get; set; }
+
+    public int RevisionNumber { get; set; }
+
+    public DateTime? ResubmittedAt { get; set; }
+
+    public DateTime? UpdatedAt { get; set; }
+
     public virtual Race Race { get; set; } = null!;
 
     public virtual RaceReferee Referee { get; set; } = null!;
-    public string ReportType { get; set; } = null!;
+
+    public virtual User? ReviewedByAdmin { get; set; }
 }

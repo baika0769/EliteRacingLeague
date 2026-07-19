@@ -1345,8 +1345,9 @@ public class RefereeRacesController : ControllerBase
 
     [HttpPost("{raceId}/reports")]
     public async Task<IActionResult> CreateReport(
-    int raceId,
-    CreateRefereeReportRequest request)
+        int raceId,
+        CreateRefereeReportRequest request,
+        CancellationToken cancellationToken)
     {
         if (!TryGetRefereeId(out var refereeId))
         {
@@ -1355,16 +1356,15 @@ public class RefereeRacesController : ControllerBase
 
         if (!RefereeReportTypes.IsValid(request.ReportType))
         {
-            return BadRequest("Invalid report type.");
+            return BadRequest(new { message = "Invalid report type." });
         }
 
         if (string.IsNullOrWhiteSpace(request.ReportContent))
         {
-            return BadRequest("Report content is required.");
+            return BadRequest(new { message = "Report content is required." });
         }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
-
         if (!assigned)
         {
             return Forbid();
@@ -1374,11 +1374,12 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.Status != RaceStatuses.Cancelled &&
-                r.Tournament.Status != TournamentStatuses.Cancelled);
+                r.Tournament.Status != TournamentStatuses.Cancelled,
+                cancellationToken);
 
         if (race == null)
         {
-            return NotFound("Race not found or has been cancelled.");
+            return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
         var reportStageError = ValidateReportStage(request.ReportType, race.Status);
@@ -1392,51 +1393,81 @@ public class RefereeRacesController : ControllerBase
             });
         }
 
-        var duplicateReportExists = await _context.RefereeReports
+        var existingReport = await _context.RefereeReports
             .AsNoTracking()
-            .AnyAsync(r =>
+            .Where(r =>
                 r.RaceId == raceId &&
                 r.RefereeId == refereeId &&
-                r.ReportType == request.ReportType);
+                r.ReportType == request.ReportType)
+            .Select(r => new { r.ReportId, r.Status })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (duplicateReportExists)
+        if (existingReport != null)
         {
             return Conflict(new
             {
-                message = "This referee already submitted this report type for the race. Update the existing report instead of creating a duplicate.",
+                message = request.ReportType == RefereeReportTypes.PostRace &&
+                    existingReport.Status == RefereeReportStatuses.Returned
+                        ? "The final report was returned. Use the resubmit endpoint to revise and send it again."
+                        : "This referee already submitted this report type for the race.",
+                reportId = existingReport.ReportId,
+                status = existingReport.Status,
                 reportType = request.ReportType
             });
         }
 
+        var now = _dateTimeProvider.UtcNow;
         var report = new RefereeReport
         {
             RaceId = raceId,
             RefereeId = refereeId,
             ReportContent = request.ReportContent.Trim(),
             ReportType = request.ReportType,
-            SubmittedAt = _dateTimeProvider.UtcNow
+            Status = RefereeReportStatuses.Submitted,
+            RevisionNumber = 1,
+            SubmittedAt = now,
+            UpdatedAt = now
         };
 
-        _context.RefereeReports.Add(report);
-
-        if (request.ReportType == RefereeReportTypes.PostRace)
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
         {
-            await _notificationService.CreateForAdminsAsync(
-                "Post-race Report Submitted",
-                $"Referee submitted a post-race report for {race.RaceName}.",
-                "PostRaceReport",
-                "/admin/referee-reports",
-                "RefereeReport",
-                report.ReportId);
-        }
+            _context.RefereeReports.Add(report);
+            await _context.SaveChangesAsync(cancellationToken);
 
-        await _context.SaveChangesAsync();
+            if (request.ReportType == RefereeReportTypes.PostRace)
+            {
+                await _notificationService.CreateForAdminsAsync(
+                    "Final referee report submitted",
+                    $"A referee submitted the final report for race {race.RaceName}.",
+                    "PostRaceReportSubmitted",
+                    $"/admin/results?raceId={report.RaceId}&reportId={report.ReportId}",
+                    "RefereeReport",
+                    report.ReportId,
+                    cancellationToken);
+
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return Ok(new
         {
-            message = "Referee report submitted successfully",
+            message = request.ReportType == RefereeReportTypes.PostRace
+                ? "Final report submitted successfully. The report is now locked while waiting for admin review."
+                : "Referee report submitted successfully.",
             reportId = report.ReportId,
-            reportType = report.ReportType
+            reportType = report.ReportType,
+            status = report.Status,
+            revisionNumber = report.RevisionNumber,
+            canEdit = false,
+            isLocked = true
         });
     }
 
@@ -1444,7 +1475,8 @@ public class RefereeRacesController : ControllerBase
     public async Task<IActionResult> UpdateReport(
         int raceId,
         int reportId,
-        CreateRefereeReportRequest request)
+        CreateRefereeReportRequest request,
+        CancellationToken cancellationToken)
     {
         if (!TryGetRefereeId(out var refereeId))
         {
@@ -1453,16 +1485,15 @@ public class RefereeRacesController : ControllerBase
 
         if (!RefereeReportTypes.IsValid(request.ReportType))
         {
-            return BadRequest("Invalid report type.");
+            return BadRequest(new { message = "Invalid report type." });
         }
 
         if (string.IsNullOrWhiteSpace(request.ReportContent))
         {
-            return BadRequest("Report content is required.");
+            return BadRequest(new { message = "Report content is required." });
         }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
-
         if (!assigned)
         {
             return Forbid();
@@ -1472,7 +1503,8 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync(r =>
                 r.ReportId == reportId &&
                 r.RaceId == raceId &&
-                r.RefereeId == refereeId);
+                r.RefereeId == refereeId,
+                cancellationToken);
 
         if (report == null)
         {
@@ -1483,9 +1515,24 @@ public class RefereeRacesController : ControllerBase
         {
             return BadRequest(new
             {
-                message = "Report type cannot be changed. Create/update the correct report type instead.",
+                message = "Report type cannot be changed.",
                 currentReportType = report.ReportType,
                 requestedReportType = request.ReportType
+            });
+        }
+
+        if (report.ReportType == RefereeReportTypes.PostRace)
+        {
+            return Conflict(new
+            {
+                code = "FINAL_REPORT_LOCKED",
+                message = report.Status == RefereeReportStatuses.Returned
+                    ? "The final report can only be edited through the resubmit endpoint after it is returned by the admin."
+                    : "The final report is locked and cannot be edited while it is waiting for review or after approval.",
+                reportId = report.ReportId,
+                status = report.Status,
+                canEdit = report.Status == RefereeReportStatuses.Returned,
+                resubmitUrl = $"/api/referee/races/{raceId}/reports/{reportId}/resubmit"
             });
         }
 
@@ -1493,11 +1540,12 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.Status != RaceStatuses.Cancelled &&
-                r.Tournament.Status != TournamentStatuses.Cancelled);
+                r.Tournament.Status != TournamentStatuses.Cancelled,
+                cancellationToken);
 
         if (race == null)
         {
-            return NotFound("Race not found or has been cancelled.");
+            return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
         var reportStageError = ValidateReportStage(report.ReportType, race.Status);
@@ -1512,15 +1560,125 @@ public class RefereeRacesController : ControllerBase
         }
 
         report.ReportContent = request.ReportContent.Trim();
-        report.SubmittedAt = _dateTimeProvider.UtcNow;
+        report.UpdatedAt = _dateTimeProvider.UtcNow;
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return Ok(new
         {
-            message = "Referee report updated successfully",
+            message = "Pre-race report updated successfully.",
             reportId = report.ReportId,
-            reportType = report.ReportType
+            reportType = report.ReportType,
+            status = report.Status
+        });
+    }
+
+    [HttpPut("{raceId}/reports/{reportId:int}/resubmit")]
+    public async Task<IActionResult> ResubmitFinalReport(
+        int raceId,
+        int reportId,
+        CreateRefereeReportRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ReportContent))
+        {
+            return BadRequest(new { message = "Report content is required." });
+        }
+
+        if (!string.Equals(
+                request.ReportType,
+                RefereeReportTypes.PostRace,
+                StringComparison.Ordinal))
+        {
+            return BadRequest(new
+            {
+                message = "The resubmit endpoint only supports the final post-race report.",
+                requiredReportType = RefereeReportTypes.PostRace
+            });
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var report = await _context.RefereeReports
+            .Include(r => r.Race)
+            .FirstOrDefaultAsync(r =>
+                r.ReportId == reportId &&
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId,
+                cancellationToken);
+
+        if (report == null)
+        {
+            return NotFound(new { message = "Report not found or you do not have permission to resubmit it." });
+        }
+
+        if (report.ReportType != RefereeReportTypes.PostRace)
+        {
+            return BadRequest(new { message = "Only a final post-race report can be resubmitted." });
+        }
+
+        if (report.Status != RefereeReportStatuses.Returned)
+        {
+            return Conflict(new
+            {
+                code = "REPORT_NOT_RETURNED",
+                message = "Only a report returned by the admin can be revised and resubmitted.",
+                reportId = report.ReportId,
+                status = report.Status,
+                canEdit = false
+            });
+        }
+
+        var reportStageError = ValidateReportStage(report.ReportType, report.Race.Status);
+        if (reportStageError != null)
+        {
+            return BadRequest(new
+            {
+                message = reportStageError,
+                reportType = report.ReportType,
+                raceStatus = report.Race.Status
+            });
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+        report.ReportContent = request.ReportContent.Trim();
+        report.Status = RefereeReportStatuses.Submitted;
+        report.RevisionNumber += 1;
+        report.SubmittedAt = now;
+        report.ResubmittedAt = now;
+        report.UpdatedAt = now;
+
+        await _notificationService.CreateForAdminsAsync(
+            "Final referee report resubmitted",
+            $"The referee revised and resubmitted the final report for race {report.Race.RaceName} (revision {report.RevisionNumber}).",
+            "PostRaceReportResubmitted",
+            $"/admin/results?raceId={report.RaceId}&reportId={report.ReportId}",
+            "RefereeReport",
+            report.ReportId,
+            cancellationToken,
+            preventDuplicates: false);
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return Ok(new
+        {
+            message = "Final report resubmitted successfully. The report is locked again while waiting for admin review.",
+            reportId = report.ReportId,
+            reportType = report.ReportType,
+            status = report.Status,
+            revisionNumber = report.RevisionNumber,
+            submittedAt = report.SubmittedAt,
+            canEdit = false,
+            isLocked = true
         });
     }
 
@@ -1615,7 +1773,6 @@ public class RefereeRacesController : ControllerBase
         }
 
         var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
-
         if (!assigned)
         {
             return Forbid();
@@ -1629,17 +1786,78 @@ public class RefereeRacesController : ControllerBase
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderByDescending(r => r.SubmittedAt)
-            .Select(r => new
+            .Select(r => new RefereeReportResponse
             {
-                reportId = r.ReportId,
-                raceId = r.RaceId,
-                reportContent = r.ReportContent,
-                reportType = r.ReportType,
-                submittedAt = r.SubmittedAt
+                ReportId = r.ReportId,
+                RaceId = r.RaceId,
+                ReportContent = r.ReportContent,
+                ReportType = r.ReportType,
+                Status = r.Status,
+                RevisionNumber = r.RevisionNumber,
+                ReturnReasonCategory = r.ReturnReasonCategory,
+                ReturnReason = r.ReturnReason,
+                SubmittedAt = r.SubmittedAt,
+                ResubmittedAt = r.ResubmittedAt,
+                ReviewedAt = r.ReviewedAt,
+                UpdatedAt = r.UpdatedAt,
+                CanEdit = r.ReportType == RefereeReportTypes.PostRace
+                    ? r.Status == RefereeReportStatuses.Returned
+                    : true,
+                IsLocked = r.ReportType == RefereeReportTypes.PostRace &&
+                    r.Status != RefereeReportStatuses.Returned
             })
             .ToListAsync();
 
         return Ok(reports);
+    }
+
+    [HttpGet("{raceId}/reports/{reportId:int}")]
+    public async Task<IActionResult> GetReportById(int raceId, int reportId)
+    {
+        if (!TryGetRefereeId(out var refereeId))
+        {
+            return Unauthorized(new { message = "Token không hợp lệ hoặc thiếu UserId." });
+        }
+
+        var assigned = await IsAssignedToActiveRaceAsync(raceId, refereeId);
+        if (!assigned)
+        {
+            return Forbid();
+        }
+
+        var report = await _context.RefereeReports
+            .AsNoTracking()
+            .Where(r =>
+                r.ReportId == reportId &&
+                r.RaceId == raceId &&
+                r.RefereeId == refereeId &&
+                r.Race.Status != RaceStatuses.Cancelled &&
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(r => new RefereeReportResponse
+            {
+                ReportId = r.ReportId,
+                RaceId = r.RaceId,
+                ReportContent = r.ReportContent,
+                ReportType = r.ReportType,
+                Status = r.Status,
+                RevisionNumber = r.RevisionNumber,
+                ReturnReasonCategory = r.ReturnReasonCategory,
+                ReturnReason = r.ReturnReason,
+                SubmittedAt = r.SubmittedAt,
+                ResubmittedAt = r.ResubmittedAt,
+                ReviewedAt = r.ReviewedAt,
+                UpdatedAt = r.UpdatedAt,
+                CanEdit = r.ReportType == RefereeReportTypes.PostRace
+                    ? r.Status == RefereeReportStatuses.Returned
+                    : true,
+                IsLocked = r.ReportType == RefereeReportTypes.PostRace &&
+                    r.Status != RefereeReportStatuses.Returned
+            })
+            .FirstOrDefaultAsync();
+
+        return report == null
+            ? NotFound(new { message = "Report not found." })
+            : Ok(report);
     }
 
     private static string? ValidateReportStage(string reportType, string raceStatus)
