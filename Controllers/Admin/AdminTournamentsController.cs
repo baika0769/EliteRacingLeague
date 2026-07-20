@@ -8,6 +8,7 @@ using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Models;
 using System.Security.Claims;
 using Eliteracingleague.API.Services.Notifications;
+using Eliteracingleague.API.Services.Racing;
 using Eliteracingleague.API.Services.SystemTime;
 using System.Globalization;
 
@@ -706,6 +707,11 @@ namespace Eliteracingleague.API.Controllers.Admin
 
                 race.UpdatedAt = now;
             }
+
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { tournament.TournamentId },
+                now);
 
             await _context.SaveChangesAsync();
 

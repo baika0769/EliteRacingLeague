@@ -60,6 +60,29 @@ public class JockeyInvitationsController : ControllerBase
             .Include(j => j.JockeyBreedExperiences)
             .FirstAsync(j => j.JockeyId == jockeyId.Value);
 
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
+        var closedTournamentIds = await _context.JockeyInvitations
+            .AsNoTracking()
+            .Where(invitation =>
+                invitation.JockeyId == jockeyId.Value &&
+                invitation.Status == InvitationStatuses.Pending &&
+                (invitation.Registration.Race.Tournament.Status == TournamentStatuses.ClosedRegistration ||
+                 invitation.Registration.Race.Tournament.Status == TournamentStatuses.Ongoing ||
+                 invitation.Registration.Race.Tournament.StartDate < localToday))
+            .Select(invitation => invitation.Registration.Race.TournamentId)
+            .Distinct()
+            .ToListAsync();
+
+        if (closedTournamentIds.Count > 0)
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                closedTournamentIds,
+                _dateTimeProvider.UtcNow);
+            await _context.SaveChangesAsync();
+        }
+
         var invitations = await _context.JockeyInvitations
             .AsNoTracking()
             .Include(i => i.Registration)
@@ -98,7 +121,8 @@ public class JockeyInvitationsController : ControllerBase
                 Location = i.Registration.Race.Location ?? i.Registration.Race.Tournament.Location,
                 DistanceMeters = i.Registration.Race.DistanceMeters,
                 SurfaceType = null,
-                JockeySelectionDeadline = i.Registration.Race.JockeySelectionDeadline,
+                JockeySelectionDeadline = RegistrationClosureHelper.GetRegistrationCloseLocal(
+                    i.Registration.Race.Tournament.StartDate),
                 HorseId = i.Registration.HorseId,
                 HorseName = i.Registration.Horse.HorseName,
                 HorseImageUrl = i.Registration.Horse.ImageUrl,
@@ -164,6 +188,24 @@ public class JockeyInvitationsController : ControllerBase
             return NotFound(new { message = "Invitation not found or race has been cancelled." });
         }
 
+        var detailLocalNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        if (invitation.Status == InvitationStatuses.Pending &&
+            RegistrationClosureHelper.IsRegistrationClosed(
+                invitation.Registration.Race.Tournament,
+                detailLocalNow))
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { invitation.Registration.Race.TournamentId },
+                _dateTimeProvider.UtcNow);
+            await _context.SaveChangesAsync();
+
+            return BadRequest(new
+            {
+                message = "Registration is closed. This jockey invitation has expired."
+            });
+        }
+
         var registration = invitation.Registration;
         var race = registration.Race;
         var horse = registration.Horse;
@@ -185,7 +227,8 @@ public class JockeyInvitationsController : ControllerBase
                 Location = race.Location ?? race.Tournament.Location,
                 DistanceMeters = race.DistanceMeters,
                 SurfaceType = null,
-                JockeySelectionDeadline = race.JockeySelectionDeadline
+                JockeySelectionDeadline = RegistrationClosureHelper.GetRegistrationCloseLocal(
+                    race.Tournament.StartDate)
             },
             Tournament = new JockeyInvitationTournamentResponse
             {
@@ -260,18 +303,23 @@ public class JockeyInvitationsController : ControllerBase
         }
 
         var now = _dateTimeProvider.UtcNow;
-        var deadline = invitation.ExpiresAt ?? invitation.Registration.Race.JockeySelectionDeadline;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
 
-        if (deadline.HasValue && now > deadline.Value)
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            invitation.Registration.Race.Tournament,
+            localNow))
         {
-            if (invitation.Status == InvitationStatuses.Pending)
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { invitation.Registration.Race.TournamentId },
+                now);
+            await _context.SaveChangesAsync();
+
+            return BadRequest(new
             {
-                invitation.Status = InvitationStatuses.Expired;
-                invitation.RespondedAt = now;
-                invitation.ResponseNote = "Invitation expired before response.";
-                await _context.SaveChangesAsync();
-            }
-            return BadRequest(new { message = "The jockey selection deadline has passed.", status = invitation.Status });
+                message = "Registration is closed. This jockey invitation has expired.",
+                status = invitation.Status
+            });
         }
 
         if (invitation.Status != InvitationStatuses.Pending)
@@ -344,6 +392,26 @@ public class JockeyInvitationsController : ControllerBase
             return NotFound(new { message = "Không tìm thấy lời mời hoặc race đã bị hủy." });
         }
 
+        var now = _dateTimeProvider.UtcNow;
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            invitation.Registration.Race.Tournament,
+            localNow))
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { invitation.Registration.Race.TournamentId },
+                now);
+            await _context.SaveChangesAsync();
+
+            return BadRequest(new
+            {
+                message = "Registration is closed. This jockey invitation has expired.",
+                status = invitation.Status
+            });
+        }
+
         if (invitation.Status != InvitationStatuses.Pending)
         {
             return BadRequest(new
@@ -354,7 +422,7 @@ public class JockeyInvitationsController : ControllerBase
         }
 
         invitation.Status = InvitationStatuses.Rejected;
-        invitation.RespondedAt = DateTime.UtcNow;
+        invitation.RespondedAt = now;
         invitation.ResponseNote = "Rejected by jockey.";
 
         var hasOtherActiveInvitation = await _context.JockeyInvitations.AnyAsync(i =>

@@ -1,7 +1,9 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Racing;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,8 +21,13 @@ public class OwnerRacesController : OwnerBaseController
         RaceRegistrationStatuses.Completed
     };
 
-    public OwnerRacesController(EliteRacingLeagueContext context) : base(context)
+    private readonly IDateTimeProvider _dateTimeProvider;
+
+    public OwnerRacesController(
+        EliteRacingLeagueContext context,
+        IDateTimeProvider dateTimeProvider) : base(context)
     {
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet("{raceId:int}")]
@@ -175,6 +182,7 @@ public class OwnerRacesController : OwnerBaseController
 
         var registration = await _context.RaceRegistrations
             .Include(r => r.Race)
+                .ThenInclude(race => race.Tournament)
             .FirstOrDefaultAsync(r =>
                 r.RegistrationId == registrationId &&
                 r.OwnerId == ownerId.Value);
@@ -184,6 +192,24 @@ public class OwnerRacesController : OwnerBaseController
             return NotFound(new
             {
                 message = "Không tìm thấy đăng ký race hoặc bạn không có quyền mời jockey."
+            });
+        }
+
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            registration.Race.Tournament,
+            localNow))
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { registration.Race.TournamentId },
+                _dateTimeProvider.UtcNow);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return BadRequest(new
+            {
+                message = "Registration is closed. Jockey invitations are no longer allowed."
             });
         }
 
@@ -312,7 +338,7 @@ public class OwnerRacesController : OwnerBaseController
             .Select(u => u.FullName)
             .FirstAsync();
 
-        var now = DateTime.UtcNow;
+        var now = _dateTimeProvider.UtcNow;
         var invitation = new JockeyInvitation
         {
             RegistrationId = registrationId,
@@ -321,7 +347,9 @@ public class OwnerRacesController : OwnerBaseController
             Status = InvitationStatuses.Pending,
             FeeAmount = request.FeeAmount,
             Message = string.IsNullOrWhiteSpace(request.Message) ? null : request.Message.Trim(),
-            SentAt = now
+            SentAt = now,
+            ExpiresAt = RegistrationClosureHelper.GetRegistrationCloseLocal(
+                registration.Race.Tournament.StartDate)
         };
 
         _context.JockeyInvitations.Add(invitation);

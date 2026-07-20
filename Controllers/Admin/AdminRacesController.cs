@@ -103,6 +103,20 @@ public class AdminRacesController : ControllerBase
         if (tournament.Season.Status is SeasonStatuses.Closed or SeasonStatuses.Cancelled or SeasonStatuses.Settling)
             return BadRequest(new { message = "The tournament season does not allow race creation." });
 
+        var alreadyHasRace = await _context.Races
+            .AsNoTracking()
+            .AnyAsync(r => r.TournamentId == tournamentId, cancellationToken);
+
+        if (alreadyHasRace)
+        {
+            return Conflict(new
+            {
+                code = "TOURNAMENT_ALREADY_HAS_RACE",
+                message = "Each tournament can contain only one race. Edit the existing race instead of creating another one.",
+                tournamentId
+            });
+        }
+
         await _validation.ValidateRaceDatesAsync(tournament, request.RaceDate,
             request.JockeySelectionDeadline, request.PredictionDeadline, null, cancellationToken);
 

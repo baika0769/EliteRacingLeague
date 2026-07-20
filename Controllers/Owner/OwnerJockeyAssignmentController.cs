@@ -3,6 +3,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Owner;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services.Racing;
+using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -34,12 +35,15 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
     };
 
     private readonly RaceSchedulingValidationService _schedulingValidation;
+    private readonly IDateTimeProvider _dateTimeProvider;
 
     public OwnerJockeyAssignmentController(
         EliteRacingLeagueContext context,
-        RaceSchedulingValidationService schedulingValidation) : base(context)
+        RaceSchedulingValidationService schedulingValidation,
+        IDateTimeProvider dateTimeProvider) : base(context)
     {
         _schedulingValidation = schedulingValidation;
+        _dateTimeProvider = dateTimeProvider;
     }
 
     [HttpGet("registrations")]
@@ -59,11 +63,17 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return ownerProfileError;
         }
 
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        var localToday = DateOnly.FromDateTime(localNow);
+
         var registrations = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
                 r.OwnerId == ownerId.Value &&
-                AvailableRegistrationStatuses.Contains(r.Status))
+                AvailableRegistrationStatuses.Contains(r.Status) &&
+                (r.JockeyId.HasValue ||
+                 (r.Race.Tournament.Status == TournamentStatuses.OpenRegistration &&
+                  r.Race.Tournament.StartDate >= localToday)))
             .OrderBy(r => r.Race.RaceDate)
             .Select(r => new OwnerJockeyAssignmentRegistrationResponse
             {
@@ -352,6 +362,24 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            registration.Race.Tournament,
+            localNow))
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { registration.Race.TournamentId },
+                _dateTimeProvider.UtcNow);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return BadRequest(new
+            {
+                message = "Registration is closed. Jockey invitations are no longer allowed."
+            });
+        }
+
         if (HasOfficialJockey(registration.JockeyId))
         {
             return BadRequest(new
@@ -450,10 +478,9 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             .Select(u => u.FullName)
             .FirstAsync();
 
-        var now = DateTime.UtcNow;
-        var expiresAt = registration.Race.JockeySelectionDeadline ?? registration.Race.RaceDate.AddHours(-1);
-        if (expiresAt <= now)
-            return BadRequest(new { message = "The jockey selection deadline has passed." });
+        var now = _dateTimeProvider.UtcNow;
+        var expiresAt = RegistrationClosureHelper.GetRegistrationCloseLocal(
+            registration.Race.Tournament.StartDate);
 
         var invitation = existingInvitation ?? new JockeyInvitation
         {
@@ -684,6 +711,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
         var registration = await _context.RaceRegistrations
             .Include(r => r.Race)
+                .ThenInclude(race => race.Tournament)
             .FirstOrDefaultAsync(r =>
                 r.RegistrationId == registrationId &&
                 r.OwnerId == ownerId.Value);
@@ -693,6 +721,24 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             return NotFound(new
             {
                 message = "Registration not found or you do not have permission to update it."
+            });
+        }
+
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            registration.Race.Tournament,
+            localNow))
+        {
+            await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                new[] { registration.Race.TournamentId },
+                _dateTimeProvider.UtcNow);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            return BadRequest(new
+            {
+                message = "Registration is closed. An official jockey can no longer be selected."
             });
         }
 
@@ -801,7 +847,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             });
         }
 
-        var now = DateTime.UtcNow;
+        var now = _dateTimeProvider.UtcNow;
         registration.JockeyId = invitation.JockeyId;
         registration.Status = RaceRegistrationStatuses.ReadyToRace;
         registration.JockeyConfirmedAt = now;
@@ -842,6 +888,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
                 TournamentId = r.Race.TournamentId,
                 TournamentName = r.Race.Tournament.TournamentName,
                 TournamentStatus = r.Race.Tournament.Status,
+                RegistrationDeadline = r.Race.Tournament.StartDate,
                 RaceId = r.RaceId,
                 RaceName = r.Race.RaceName,
                 RaceDate = r.Race.RaceDate,
@@ -864,7 +911,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
             .FirstOrDefaultAsync();
     }
 
-    private static bool CanOpenAssignmentPage(AssignmentRegistrationData data)
+    private bool CanOpenAssignmentPage(AssignmentRegistrationData data)
     {
         if (HasOfficialJockey(data.AssignedJockeyId))
         {
@@ -873,10 +920,11 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
 
         return AssignableRegistrationStatuses.Contains(data.RegistrationStatus) &&
             data.AssignedJockeyId == null &&
+            !IsAssignmentClosed(data) &&
             !RaceStatuses.IsClosedForJockeyAssignment(data.RaceStatus);
     }
 
-    private static string? ValidateCanAssignJockey(AssignmentRegistrationData data)
+    private string? ValidateCanAssignJockey(AssignmentRegistrationData data)
     {
         if (data.AssignedJockeyId != null &&
             data.RegistrationStatus == RaceRegistrationStatuses.ReadyToRace)
@@ -887,6 +935,11 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         if (data.AssignedJockeyId != null)
         {
             return "Đăng ký race đã có jockey.";
+        }
+
+        if (IsAssignmentClosed(data))
+        {
+            return "Registration is closed. Jockey invitations are no longer allowed.";
         }
 
         if (!AssignableRegistrationStatuses.Contains(data.RegistrationStatus))
@@ -902,7 +955,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         return null;
     }
 
-    private static string? ValidateCanAssignJockey(RaceRegistration registration)
+    private string? ValidateCanAssignJockey(RaceRegistration registration)
     {
         if (registration.JockeyId != null &&
             registration.Status == RaceRegistrationStatuses.ReadyToRace)
@@ -913,6 +966,14 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         if (registration.JockeyId != null)
         {
             return "Đăng ký race đã có jockey.";
+        }
+
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+        if (RegistrationClosureHelper.IsRegistrationClosed(
+            registration.Race.Tournament,
+            localNow))
+        {
+            return "Registration is closed. Jockey invitations are no longer allowed.";
         }
 
         if (!AssignableRegistrationStatuses.Contains(registration.Status))
@@ -926,6 +987,23 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         }
 
         return null;
+    }
+
+    private bool IsAssignmentClosed(AssignmentRegistrationData data)
+    {
+        var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+
+        if (data.TournamentStatus is
+            TournamentStatuses.ClosedRegistration or
+            TournamentStatuses.Ongoing or
+            TournamentStatuses.Completed or
+            TournamentStatuses.Cancelled)
+        {
+            return true;
+        }
+
+        return localNow > RegistrationClosureHelper.GetRegistrationCloseLocal(
+            data.RegistrationDeadline);
     }
 
     private static OwnerJockeyCandidateResponse BuildCandidateResponse(
@@ -1165,6 +1243,7 @@ public class OwnerJockeyAssignmentController : OwnerBaseController
         public int TournamentId { get; set; }
         public string TournamentName { get; set; } = null!;
         public string TournamentStatus { get; set; } = null!;
+        public DateOnly RegistrationDeadline { get; set; }
         public int RaceId { get; set; }
         public string RaceName { get; set; } = null!;
         public DateTime RaceDate { get; set; }

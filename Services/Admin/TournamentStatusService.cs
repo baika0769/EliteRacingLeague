@@ -1,5 +1,6 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
+using Eliteracingleague.API.Services.Racing;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,18 +34,26 @@ namespace Eliteracingleague.API.Services
             var localToday = DateOnly.FromDateTime(localNow);
 
             var tournaments = await _context.Tournaments
-                .Include(t => t.Races)
-                    .ThenInclude(r => r.RefereeAssignments)
-                .Where(t =>
-                    (t.Status == TournamentStatuses.OpenRegistration &&
-                     t.StartDate < localToday) ||
-                    (RegistrationClosedTournamentStatuses.Contains(t.Status) &&
-                     t.Races.Any(r =>
-                         r.Status == RaceStatuses.Scheduled &&
-                         r.RefereeAssignments.Any(a =>
-                             a.Status == RefereeAssignmentStatuses.Assigned))))
+                .Include(tournament => tournament.Races)
+                    .ThenInclude(race => race.RefereeAssignments)
+                .Where(tournament =>
+                    (tournament.Status == TournamentStatuses.OpenRegistration &&
+                     tournament.StartDate < localToday) ||
+                    (RegistrationClosedTournamentStatuses.Contains(tournament.Status) &&
+                     tournament.Races.Any(race =>
+                         race.Status == RaceStatuses.Scheduled &&
+                         race.RefereeAssignments.Any(assignment =>
+                             assignment.Status == RefereeAssignmentStatuses.Assigned))))
                 .ToListAsync(cancellationToken);
 
+            var alreadyClosedTournamentIds = await _context.Tournaments
+                .AsNoTracking()
+                .Where(tournament =>
+                    RegistrationClosedTournamentStatuses.Contains(tournament.Status))
+                .Select(tournament => tournament.TournamentId)
+                .ToListAsync(cancellationToken);
+
+            var closedTournamentIds = new HashSet<int>(alreadyClosedTournamentIds);
             var hasChanges = false;
 
             foreach (var tournament in tournaments)
@@ -62,10 +71,12 @@ namespace Eliteracingleague.API.Services
                     continue;
                 }
 
+                closedTournamentIds.Add(tournament.TournamentId);
+
                 foreach (var race in tournament.Races)
                 {
-                    var hasActiveRefereeAssignment = race.RefereeAssignments.Any(a =>
-                        a.Status == RefereeAssignmentStatuses.Assigned);
+                    var hasActiveRefereeAssignment = race.RefereeAssignments.Any(assignment =>
+                        assignment.Status == RefereeAssignmentStatuses.Assigned);
 
                     if (race.Status == RaceStatuses.Scheduled &&
                         hasActiveRefereeAssignment)
@@ -77,7 +88,13 @@ namespace Eliteracingleague.API.Services
                 }
             }
 
-            if (hasChanges)
+            var closureResult = await RegistrationClosureHelper.ApplyAsync(
+                _context,
+                closedTournamentIds,
+                effectiveUtcNow,
+                cancellationToken);
+
+            if (hasChanges || closureResult.HasChanges)
             {
                 await _context.SaveChangesAsync(cancellationToken);
             }

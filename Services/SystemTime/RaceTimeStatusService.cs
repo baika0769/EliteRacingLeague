@@ -1,7 +1,7 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
-using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Racing;
 using Microsoft.EntityFrameworkCore;
 
 namespace Eliteracingleague.API.Services.SystemTime;
@@ -33,41 +33,13 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             _dateTimeProvider.TimeZoneId);
         var localToday = DateOnly.FromDateTime(localNow);
 
-        var expiredInvitations = await _context.JockeyInvitations
-            .Include(i => i.Registration)
-                .ThenInclude(r => r.Race)
-            .Include(i => i.Registration)
-                .ThenInclude(r => r.JockeyInvitations)
-            .Where(i =>
-                i.Status == InvitationStatuses.Pending &&
-                ((i.ExpiresAt.HasValue && i.ExpiresAt.Value <= localNow) ||
-                 (i.Registration.Race.JockeySelectionDeadline.HasValue &&
-                  i.Registration.Race.JockeySelectionDeadline.Value <= localNow)))
-            .ToListAsync(cancellationToken);
-
-        foreach (var invitation in expiredInvitations)
-        {
-            invitation.Status = InvitationStatuses.Expired;
-            invitation.RespondedAt = effectiveUtcNow;
-            invitation.ResponseNote = "Invitation expired automatically.";
-
-            var registration = invitation.Registration;
-            if (registration.Status == RaceRegistrationStatuses.JockeyInvited &&
-                !registration.JockeyInvitations.Any(other =>
-                    other.InvitationId != invitation.InvitationId &&
-                    other.Status == InvitationStatuses.Pending))
-            {
-                registration.Status = RaceRegistrationStatuses.Approved;
-            }
-        }
-
         var predictionsToLock = await _context.RacePredictions
-            .Where(p =>
-                p.Status == RacePredictionStatuses.Pending &&
-                p.Race.PredictionDeadline.HasValue &&
-                p.Race.PredictionDeadline.Value <= localNow &&
-                p.Race.Status != RaceStatuses.Cancelled &&
-                p.Race.Tournament.Status != TournamentStatuses.Cancelled)
+            .Where(prediction =>
+                prediction.Status == RacePredictionStatuses.Pending &&
+                prediction.Race.PredictionDeadline.HasValue &&
+                prediction.Race.PredictionDeadline.Value <= localNow &&
+                prediction.Race.Status != RaceStatuses.Cancelled &&
+                prediction.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .ToListAsync(cancellationToken);
 
         foreach (var prediction in predictionsToLock)
@@ -79,24 +51,34 @@ public class RaceTimeStatusService : IRaceTimeStatusService
 
         /*
          * Registration lifecycle:
-         * - Registration is allowed through the whole deadline date.
-         * - From the following day, OpenRegistration becomes ClosedRegistration.
-         * - A Scheduled race only becomes AssignedReferee after registration is closed
+         * - Registration and jockey selection are allowed through the deadline date.
+         * - From the following day, the tournament becomes ClosedRegistration.
+         * - Closing registration expires all pending jockey invitations and cancels
+         *   registrations that never confirmed an official jockey.
+         * - A Scheduled race becomes AssignedReferee only after registration closes
          *   and an active referee assignment exists.
          */
         var tournamentsToSynchronize = await _context.Tournaments
-            .Include(t => t.Races)
-                .ThenInclude(r => r.RefereeAssignments)
-            .Where(t =>
-                (t.Status == TournamentStatuses.OpenRegistration &&
-                 t.StartDate < localToday) ||
-                (RegistrationClosedTournamentStatuses.Contains(t.Status) &&
-                 t.Races.Any(r =>
-                     r.Status == RaceStatuses.Scheduled &&
-                     r.RefereeAssignments.Any(a =>
-                         a.Status == RefereeAssignmentStatuses.Assigned))))
+            .Include(tournament => tournament.Races)
+                .ThenInclude(race => race.RefereeAssignments)
+            .Where(tournament =>
+                (tournament.Status == TournamentStatuses.OpenRegistration &&
+                 tournament.StartDate < localToday) ||
+                (RegistrationClosedTournamentStatuses.Contains(tournament.Status) &&
+                 tournament.Races.Any(race =>
+                     race.Status == RaceStatuses.Scheduled &&
+                     race.RefereeAssignments.Any(assignment =>
+                         assignment.Status == RefereeAssignmentStatuses.Assigned))))
             .ToListAsync(cancellationToken);
 
+        var alreadyClosedTournamentIds = await _context.Tournaments
+            .AsNoTracking()
+            .Where(tournament =>
+                RegistrationClosedTournamentStatuses.Contains(tournament.Status))
+            .Select(tournament => tournament.TournamentId)
+            .ToListAsync(cancellationToken);
+
+        var closedTournamentIds = new HashSet<int>(alreadyClosedTournamentIds);
         var updatedTournaments = 0;
         var updatedRaces = 0;
 
@@ -115,10 +97,12 @@ public class RaceTimeStatusService : IRaceTimeStatusService
                 continue;
             }
 
+            closedTournamentIds.Add(tournament.TournamentId);
+
             foreach (var race in tournament.Races)
             {
-                var hasActiveRefereeAssignment = race.RefereeAssignments.Any(a =>
-                    a.Status == RefereeAssignmentStatuses.Assigned);
+                var hasActiveRefereeAssignment = race.RefereeAssignments.Any(assignment =>
+                    assignment.Status == RefereeAssignmentStatuses.Assigned);
 
                 if (race.Status == RaceStatuses.Scheduled &&
                     hasActiveRefereeAssignment)
@@ -130,7 +114,13 @@ public class RaceTimeStatusService : IRaceTimeStatusService
             }
         }
 
-        if (expiredInvitations.Count > 0 ||
+        var closureResult = await RegistrationClosureHelper.ApplyAsync(
+            _context,
+            closedTournamentIds,
+            effectiveUtcNow,
+            cancellationToken);
+
+        if (closureResult.HasChanges ||
             predictionsToLock.Count > 0 ||
             updatedTournaments > 0 ||
             updatedRaces > 0)
@@ -142,7 +132,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         {
             Message = "Time statuses synchronized.",
             EffectiveUtcNow = effectiveUtcNow,
-            ExpiredInvitations = expiredInvitations.Count,
+            ExpiredInvitations = closureResult.ExpiredInvitations,
             UpdatedRaces = updatedRaces,
             UpdatedTournaments = updatedTournaments
         };
@@ -157,23 +147,29 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         var localToday = DateOnly.FromDateTime(localNow);
 
         var tournaments = await _context.Tournaments
-            .Include(t => t.Races)
-                .ThenInclude(r => r.RefereeAssignments)
-            .Include(t => t.Races)
-                .ThenInclude(r => r.PreRaceInspections)
-            .Where(t =>
-                t.Status == TournamentStatuses.OpenRegistration ||
-                t.Status == TournamentStatuses.ClosedRegistration)
+            .Include(tournament => tournament.Races)
+                .ThenInclude(race => race.RefereeAssignments)
+            .Include(tournament => tournament.Races)
+                .ThenInclude(race => race.PreRaceInspections)
+            .Where(tournament =>
+                tournament.Status == TournamentStatuses.OpenRegistration ||
+                tournament.Status == TournamentStatuses.ClosedRegistration)
             .ToListAsync(cancellationToken);
 
         var updatedTournaments = 0;
         var updatedRaces = 0;
+        var closedTournamentIds = new HashSet<int>();
 
         foreach (var tournament in tournaments)
         {
-            var desiredTournamentStatus = tournament.StartDate < localToday
-                ? TournamentStatuses.ClosedRegistration
-                : TournamentStatuses.OpenRegistration;
+            // Registration closure is one-way because it expires invitations and
+            // cancels incomplete registrations. Moving the clock backward must not
+            // reopen a tournament that has already been closed.
+            var desiredTournamentStatus =
+                tournament.Status == TournamentStatuses.ClosedRegistration ||
+                tournament.StartDate < localToday
+                    ? TournamentStatuses.ClosedRegistration
+                    : TournamentStatuses.OpenRegistration;
 
             if (tournament.Status != desiredTournamentStatus)
             {
@@ -182,10 +178,15 @@ public class RaceTimeStatusService : IRaceTimeStatusService
                 updatedTournaments++;
             }
 
+            if (desiredTournamentStatus == TournamentStatuses.ClosedRegistration)
+            {
+                closedTournamentIds.Add(tournament.TournamentId);
+            }
+
             foreach (var race in tournament.Races)
             {
-                var hasActiveRefereeAssignment = race.RefereeAssignments.Any(a =>
-                    a.Status == RefereeAssignmentStatuses.Assigned);
+                var hasActiveRefereeAssignment = race.RefereeAssignments.Any(assignment =>
+                    assignment.Status == RefereeAssignmentStatuses.Assigned);
 
                 if (desiredTournamentStatus == TournamentStatuses.ClosedRegistration &&
                     race.Status == RaceStatuses.Scheduled &&
@@ -196,21 +197,18 @@ public class RaceTimeStatusService : IRaceTimeStatusService
                     updatedRaces++;
                     continue;
                 }
-
-                // Clear Override may move the clock back before the deadline.
-                // Only safely revert an untouched pre-race state.
-                if (desiredTournamentStatus == TournamentStatuses.OpenRegistration &&
-                    race.Status == RaceStatuses.AssignedReferee &&
-                    race.PreRaceInspections.Count == 0)
-                {
-                    race.Status = RaceStatuses.Scheduled;
-                    race.UpdatedAt = effectiveUtcNow;
-                    updatedRaces++;
-                }
             }
         }
 
-        if (updatedTournaments > 0 || updatedRaces > 0)
+        var closureResult = await RegistrationClosureHelper.ApplyAsync(
+            _context,
+            closedTournamentIds,
+            effectiveUtcNow,
+            cancellationToken);
+
+        if (closureResult.HasChanges ||
+            updatedTournaments > 0 ||
+            updatedRaces > 0)
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
@@ -219,7 +217,7 @@ public class RaceTimeStatusService : IRaceTimeStatusService
         {
             Message = "Tournament and race statuses recalculated using current real time.",
             EffectiveUtcNow = effectiveUtcNow,
-            ExpiredInvitations = 0,
+            ExpiredInvitations = closureResult.ExpiredInvitations,
             UpdatedRaces = updatedRaces,
             UpdatedTournaments = updatedTournaments
         };
