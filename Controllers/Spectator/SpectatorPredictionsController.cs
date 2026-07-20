@@ -98,8 +98,9 @@ public class SpectatorPredictionsController : ControllerBase
                     item.TransactionType == PointTransactionTypes.NextSeasonBonus)
                 .SumAsync(item => (int?)item.Amount) ?? 0;
 
-        var baseOpeningPoints = wallet?.OpeningBettingPoints
-            ?? SpectatorBettingRules.InitialBettingPoints;
+        // Never fall back to users.betting_points here. The season wallet is the
+        // source of truth; a missing wallet must display 0 instead of a stale old balance.
+        var baseOpeningPoints = wallet?.OpeningBettingPoints ?? 0;
 
         var predictionQuery = _context.RacePredictions
             .AsNoTracking()
@@ -119,8 +120,8 @@ public class SpectatorPredictionsController : ControllerBase
             activeSeason.SeasonId,
             activeSeason.SeasonName,
             hasActiveSeason = true,
-            bettingPoints = wallet?.CurrentBettingPoints ?? spectator.BettingPoints,
-            seasonScore = wallet?.SeasonScore ?? totalPayoutPoints,
+            bettingPoints = wallet?.CurrentBettingPoints ?? 0,
+            seasonScore = wallet?.SeasonScore ?? 0,
             initialBettingPoints = baseOpeningPoints,
             baseOpeningPoints,
             carriedBonusPoints,
@@ -362,6 +363,8 @@ public class SpectatorPredictionsController : ControllerBase
             .Select(p => new
             {
                 predictionId = p.PredictionId,
+                seasonId = p.Race.Tournament.SeasonId,
+                seasonName = p.Race.Tournament.Season.SeasonName,
                 tournamentId = p.Race.TournamentId,
                 tournamentName = p.Race.Tournament.TournamentName,
                 tournamentStatus = p.Race.Tournament.Status,
@@ -379,9 +382,11 @@ public class SpectatorPredictionsController : ControllerBase
                 stakePoints = p.StakePoints,
                 payoutPoints = p.PointsAwarded,
                 pointsAwarded = p.PointsAwarded,
-                netPoints = p.Status == RacePredictionStatuses.Evaluated
-                    ? p.PointsAwarded - p.StakePoints
-                    : -p.StakePoints,
+                netPoints = p.Status == RacePredictionStatuses.Cancelled
+                    ? 0
+                    : p.Status == RacePredictionStatuses.Evaluated
+                        ? p.PointsAwarded - p.StakePoints
+                        : -p.StakePoints,
                 rewardAmount = p.RewardAmount,
                 rewardStatus = p.RewardStatus,
                 predictedAt = p.PredictedAt,

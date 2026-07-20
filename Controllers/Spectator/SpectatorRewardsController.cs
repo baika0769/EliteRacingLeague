@@ -51,6 +51,36 @@ public class SpectatorRewardsController : ControllerBase
         var myRank = await _leaderboardService.GetMyRankAsync(userId);
         var totalDays = await _leaderboardService.GetActiveSeasonTotalDaysAsync();
 
+        // The wallet cards always describe the active season. History may still show the
+        // latest settled season when there is no active season, so the page does not look
+        // empty immediately after Close Season.
+        int? historySeasonId = activeSeason?.SeasonId;
+        string? historySeasonName = activeSeason?.SeasonName;
+        string? historySeasonStatus = activeSeason?.Status;
+
+        if (!historySeasonId.HasValue)
+        {
+            var latestWalletSeason = await _context.SpectatorSeasonWallets
+                .AsNoTracking()
+                .Where(item => item.SpectatorId == userId)
+                .OrderByDescending(item => item.Season.EndDate)
+                .ThenByDescending(item => item.SeasonId)
+                .Select(item => new
+                {
+                    item.SeasonId,
+                    item.Season.SeasonName,
+                    item.Season.Status
+                })
+                .FirstOrDefaultAsync();
+
+            if (latestWalletSeason != null)
+            {
+                historySeasonId = latestWalletSeason.SeasonId;
+                historySeasonName = latestWalletSeason.SeasonName;
+                historySeasonStatus = latestWalletSeason.Status;
+            }
+        }
+
         var pointHistoryQuery = _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
@@ -58,15 +88,9 @@ public class SpectatorRewardsController : ControllerBase
                 p.Status != RacePredictionStatuses.Cancelled &&
                 (p.StakePoints > 0 || p.PointsAwarded > 0));
 
-        if (activeSeason != null)
-        {
-            pointHistoryQuery = pointHistoryQuery.Where(p =>
-                p.Race.Tournament.SeasonId == activeSeason.SeasonId);
-        }
-        else
-        {
-            pointHistoryQuery = pointHistoryQuery.Where(_ => false);
-        }
+        pointHistoryQuery = historySeasonId.HasValue
+            ? pointHistoryQuery.Where(p => p.Race.Tournament.SeasonId == historySeasonId.Value)
+            : pointHistoryQuery.Where(_ => false);
 
         var pointHistory = await pointHistoryQuery
             .OrderByDescending(p => p.EvaluatedAt ?? p.UpdatedAt ?? p.CreatedAt)
@@ -87,9 +111,11 @@ public class SpectatorRewardsController : ControllerBase
                 stakePoints = p.StakePoints,
                 payoutPoints = p.PointsAwarded,
                 points = p.PointsAwarded,
-                netPoints = p.Status == RacePredictionStatuses.Evaluated
-                    ? p.PointsAwarded - p.StakePoints
-                    : -p.StakePoints,
+                netPoints = p.Status == RacePredictionStatuses.Cancelled
+                    ? 0
+                    : p.Status == RacePredictionStatuses.Evaluated
+                        ? p.PointsAwarded - p.StakePoints
+                        : -p.StakePoints,
                 rewardAmount = p.RewardAmount,
                 rewardStatus = p.RewardStatus,
                 evaluatedAt = p.EvaluatedAt,
@@ -152,18 +178,19 @@ public class SpectatorRewardsController : ControllerBase
             })
             .ToListAsync();
 
-        var walletTransactions = activeSeason == null
-            ? new List<WalletTransactionResponse>()
-            : await _context.PointTransactions
+        var walletTransactions = historySeasonId.HasValue
+            ? await _context.PointTransactions
                 .AsNoTracking()
                 .Where(item =>
-                    item.SpectatorSeasonWallet.SeasonId == activeSeason.SeasonId &&
+                    item.SpectatorSeasonWallet.SeasonId == historySeasonId.Value &&
                     item.SpectatorSeasonWallet.SpectatorId == userId)
                 .OrderByDescending(item => item.CreatedAt)
                 .Take(100)
                 .Select(item => new WalletTransactionResponse
                 {
                     PointTransactionId = item.PointTransactionId,
+                    SeasonId = item.SpectatorSeasonWallet.SeasonId,
+                    SeasonName = item.SpectatorSeasonWallet.Season.SeasonName,
                     TransactionType = item.TransactionType,
                     Amount = item.Amount,
                     ScoreDelta = item.ScoreDelta,
@@ -174,7 +201,8 @@ public class SpectatorRewardsController : ControllerBase
                     Description = item.Description,
                     CreatedAt = item.CreatedAt
                 })
-                .ToListAsync();
+                .ToListAsync()
+            : new List<WalletTransactionResponse>();
 
         return Ok(new
         {
@@ -195,6 +223,9 @@ public class SpectatorRewardsController : ControllerBase
             predictionAccuracy = rewardSummary.PredictionAccuracy,
             myRank,
             totalDays,
+            historySeasonId,
+            historySeasonName,
+            historySeasonStatus,
             activeRewardRules,
             mySeasonRewards,
             pointHistory,
@@ -319,6 +350,8 @@ public class ActiveSeasonRewardRuleResponse
 public class WalletTransactionResponse
 {
     public int PointTransactionId { get; set; }
+    public int SeasonId { get; set; }
+    public string SeasonName { get; set; } = string.Empty;
     public string TransactionType { get; set; } = string.Empty;
     public int Amount { get; set; }
     public int ScoreDelta { get; set; }

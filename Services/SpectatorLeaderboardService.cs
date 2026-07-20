@@ -104,12 +104,6 @@ public class SpectatorLeaderboardService
     {
         var season = await GetActiveSeasonAsync();
 
-        var userBalance = await _context.Users
-            .AsNoTracking()
-            .Where(u => u.UserId == spectatorId)
-            .Select(u => (int?)u.BettingPoints)
-            .FirstOrDefaultAsync() ?? 0;
-
         if (season == null)
         {
             return new SpectatorRewardSummary
@@ -152,8 +146,9 @@ public class SpectatorLeaderboardService
                     item.TransactionType == PointTransactionTypes.NextSeasonBonus)
                 .SumAsync(item => (int?)item.Amount) ?? 0;
 
-        var baseOpeningPoints = wallet?.OpeningBettingPoints
-            ?? SpectatorBettingRules.InitialBettingPoints;
+        // The season wallet is the source of truth. users.betting_points is only a
+        // convenience mirror and must never resurrect a stale balance from an old season.
+        var baseOpeningPoints = wallet?.OpeningBettingPoints ?? 0;
 
         var rows = await _context.RacePredictions
             .AsNoTracking()
@@ -179,8 +174,8 @@ public class SpectatorLeaderboardService
         return new SpectatorRewardSummary
         {
             HasActiveSeason = true,
-            RewardPoints = wallet?.SeasonScore ?? totalPayoutPoints,
-            BettingPoints = wallet?.CurrentBettingPoints ?? userBalance,
+            RewardPoints = wallet?.SeasonScore ?? 0,
+            BettingPoints = wallet?.CurrentBettingPoints ?? 0,
             BaseOpeningPoints = baseOpeningPoints,
             CarriedBonusPoints = carriedBonusPoints,
             OpeningTotalPoints = checked(baseOpeningPoints + carriedBonusPoints),

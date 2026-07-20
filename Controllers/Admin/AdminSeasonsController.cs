@@ -794,16 +794,76 @@ public class AdminSeasonsController : ControllerBase
                 .Select(item => new { item.SeasonId, item.SeasonName })
                 .FirstOrDefaultAsync();
 
-            var bonusRewards = previousClosedSeason == null
+            // Normalize bonus flags before opening the new season.
+            // Older databases could contain a reward marked as applied to a season that
+            // was later removed manually. Such an orphan must become pending again;
+            // otherwise the bonus can never be carried into a future season.
+            var previousSeasonRewards = previousClosedSeason == null
                 ? new List<SeasonReward>()
                 : await _context.SeasonRewards
-                    .Where(item =>
-                        item.SeasonId == previousClosedSeason.SeasonId &&
-                        item.BonusPoints > 0 &&
-                        !item.IsBonusApplied &&
-                        item.AppliedToSeasonId == null)
+                    .Where(item => item.SeasonId == previousClosedSeason.SeasonId)
                     .OrderBy(item => item.SeasonRewardId)
                     .ToListAsync();
+
+            var appliedTargetSeasonIds = previousSeasonRewards
+                .Where(item => item.AppliedToSeasonId.HasValue)
+                .Select(item => item.AppliedToSeasonId!.Value)
+                .Distinct()
+                .ToArray();
+
+            var existingAppliedTargetSeasonIds = appliedTargetSeasonIds.Length == 0
+                ? new HashSet<int>()
+                : (await _context.Seasons
+                    .AsNoTracking()
+                    .Where(item => appliedTargetSeasonIds.Contains(item.SeasonId))
+                    .Select(item => item.SeasonId)
+                    .ToListAsync())
+                    .ToHashSet();
+
+            var repairedOrphanBonusCount = 0;
+            var normalizedAppliedBonusCount = 0;
+
+            foreach (var reward in previousSeasonRewards)
+            {
+                if (reward.AppliedToSeasonId.HasValue)
+                {
+                    if (existingAppliedTargetSeasonIds.Contains(reward.AppliedToSeasonId.Value))
+                    {
+                        // The target season still exists, so the reward is already consumed.
+                        if (!reward.IsBonusApplied)
+                        {
+                            reward.IsBonusApplied = true;
+                            normalizedAppliedBonusCount++;
+                        }
+
+                        continue;
+                    }
+
+                    // The recorded target season no longer exists. Restore this reward so
+                    // the next activation can apply it exactly once using the idempotency key.
+                    reward.IsBonusApplied = false;
+                    reward.AppliedToSeasonId = null;
+                    reward.AppliedAt = null;
+                    repairedOrphanBonusCount++;
+                    continue;
+                }
+
+                if (reward.IsBonusApplied)
+                {
+                    // An applied flag without a target season is also inconsistent.
+                    reward.IsBonusApplied = false;
+                    reward.AppliedAt = null;
+                    repairedOrphanBonusCount++;
+                }
+            }
+
+            var bonusRewards = previousSeasonRewards
+                .Where(item =>
+                    item.BonusPoints > 0 &&
+                    !item.IsBonusApplied &&
+                    item.AppliedToSeasonId == null)
+                .OrderBy(item => item.SeasonRewardId)
+                .ToList();
 
             var rewardsBySpectator = bonusRewards
                 .GroupBy(item => item.SpectatorId)
@@ -874,7 +934,9 @@ public class AdminSeasonsController : ControllerBase
                 previousSeasonId = previousClosedSeason?.SeasonId,
                 previousSeasonName = previousClosedSeason?.SeasonName,
                 appliedBonusRewardCount,
-                totalBonusPoints
+                totalBonusPoints,
+                repairedOrphanBonusCount,
+                normalizedAppliedBonusCount
             });
         }
         catch
