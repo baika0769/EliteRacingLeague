@@ -114,8 +114,13 @@ public class SpectatorLeaderboardService
         {
             return new SpectatorRewardSummary
             {
+                HasActiveSeason = false,
                 RewardPoints = 0,
-                BettingPoints = userBalance,
+                BettingPoints = 0,
+                BaseOpeningPoints = 0,
+                CarriedBonusPoints = 0,
+                OpeningTotalPoints = 0,
+                WalletStatus = null,
                 TotalStakePoints = 0,
                 TotalPayoutPoints = 0,
                 NetPoints = 0,
@@ -130,10 +135,25 @@ public class SpectatorLeaderboardService
             .Where(item => item.SeasonId == season.SeasonId && item.SpectatorId == spectatorId)
             .Select(item => new
             {
+                item.SpectatorSeasonWalletId,
+                item.OpeningBettingPoints,
                 item.CurrentBettingPoints,
-                item.SeasonScore
+                item.SeasonScore,
+                item.Status
             })
             .FirstOrDefaultAsync();
+
+        var carriedBonusPoints = wallet == null
+            ? 0
+            : await _context.PointTransactions
+                .AsNoTracking()
+                .Where(item =>
+                    item.SpectatorSeasonWalletId == wallet.SpectatorSeasonWalletId &&
+                    item.TransactionType == PointTransactionTypes.NextSeasonBonus)
+                .SumAsync(item => (int?)item.Amount) ?? 0;
+
+        var baseOpeningPoints = wallet?.OpeningBettingPoints
+            ?? SpectatorBettingRules.InitialBettingPoints;
 
         var rows = await _context.RacePredictions
             .AsNoTracking()
@@ -158,8 +178,13 @@ public class SpectatorLeaderboardService
 
         return new SpectatorRewardSummary
         {
+            HasActiveSeason = true,
             RewardPoints = wallet?.SeasonScore ?? totalPayoutPoints,
             BettingPoints = wallet?.CurrentBettingPoints ?? userBalance,
+            BaseOpeningPoints = baseOpeningPoints,
+            CarriedBonusPoints = carriedBonusPoints,
+            OpeningTotalPoints = checked(baseOpeningPoints + carriedBonusPoints),
+            WalletStatus = wallet?.Status,
             TotalStakePoints = totalStakePoints,
             TotalPayoutPoints = totalPayoutPoints,
             NetPoints = netPoints,

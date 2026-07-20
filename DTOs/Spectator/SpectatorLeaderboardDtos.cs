@@ -112,8 +112,13 @@ public class SpectatorRaceRegistrationResponse : TournamentHorseItem
 
 public class SpectatorRewardSummary
 {
+    public bool HasActiveSeason { get; set; }
     public int RewardPoints { get; set; }
     public int BettingPoints { get; set; }
+    public int BaseOpeningPoints { get; set; }
+    public int CarriedBonusPoints { get; set; }
+    public int OpeningTotalPoints { get; set; }
+    public string? WalletStatus { get; set; }
     public int TotalStakePoints { get; set; }
     public int TotalPayoutPoints { get; set; }
     public int NetPoints { get; set; }

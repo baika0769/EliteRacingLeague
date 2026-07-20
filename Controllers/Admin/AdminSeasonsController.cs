@@ -788,8 +788,7 @@ public class AdminSeasonsController : ControllerBase
                 .AsNoTracking()
                 .Where(item =>
                     item.SeasonId != season.SeasonId &&
-                    item.Status == SeasonStatuses.Closed &&
-                    item.EndDate <= season.StartDate)
+                    item.Status == SeasonStatuses.Closed)
                 .OrderByDescending(item => item.EndDate)
                 .ThenByDescending(item => item.SeasonId)
                 .Select(item => new { item.SeasonId, item.SeasonName })
@@ -821,18 +820,11 @@ public class AdminSeasonsController : ControllerBase
 
             foreach (var spectator in spectators)
             {
-                var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                var wallet = await _spectatorWalletService.OpenWalletForSeasonAsync(
                     season.SeasonId,
                     spectator,
                     SpectatorBettingRules.InitialBettingPoints,
                     now);
-
-                wallet.Status = SeasonWalletStatuses.Active;
-                wallet.FinalBettingPoints = null;
-                wallet.FinalSeasonScore = null;
-                wallet.FinalRank = null;
-                wallet.FrozenAt = null;
-                wallet.SettledAt = null;
 
                 if (!rewardsBySpectator.TryGetValue(spectator.UserId, out var spectatorRewards))
                 {
@@ -1046,6 +1038,19 @@ public class AdminSeasonsController : ControllerBase
                 wallet.SettledAt = now;
             }
 
+            // users.betting_points is only the mirror of the currently active season wallet.
+            // Once a season is closed there is no spendable wallet, so the visible balance is 0.
+            // The closed season's real ending balance remains preserved in FinalBettingPoints.
+            var spectators = await _context.Users
+                .Where(item => item.Role == UserRoles.Spectator)
+                .ToListAsync();
+
+            foreach (var spectator in spectators)
+            {
+                spectator.BettingPoints = 0;
+                spectator.UpdatedAt = now;
+            }
+
             var leaderboardByRank = leaderboard.ToDictionary(item => item.Rank);
             var rewardCount = 0;
             var generatedRewards = new List<SeasonReward>();
@@ -1123,12 +1128,13 @@ public class AdminSeasonsController : ControllerBase
 
             return Ok(new
             {
-                message = "Season closed successfully. Wallets were frozen, rewards were generated, and congratulation emails were attempted.",
+                message = "Season closed successfully. Season wallets were settled, the current spendable balance was reset to 0, rewards were generated, and congratulation emails were attempted.",
                 seasonId = season.SeasonId,
                 seasonName = season.SeasonName,
                 status = season.Status,
                 participantCount = leaderboard.Count,
                 settledWalletCount = wallets.Count,
+                resetSpectatorBalanceCount = spectators.Count,
                 configuredRewardRuleCount = rewardRules.Count,
                 rewardCount,
                 rewardEmailSentCount,

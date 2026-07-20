@@ -99,7 +99,9 @@ public class AuthController : ControllerBase
                 Role = role,
                 Status = UserStatuses.Pending,
                 EmailVerified = false,
-                BettingPoints = role == UserRoles.Spectator ? SpectatorBettingRules.InitialBettingPoints : 0,
+                // A spectator only receives the 1,000-point opening balance when an
+                // active season wallet is created. Between seasons the visible balance is 0.
+                BettingPoints = 0,
                 CreatedAt = DateTime.UtcNow
             };
 

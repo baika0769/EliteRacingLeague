@@ -14,6 +14,103 @@ public class SpectatorWalletService
         _context = context;
     }
 
+
+
+    public async Task<SpectatorSeasonWallet> OpenWalletForSeasonAsync(
+        int seasonId,
+        User spectator,
+        int openingPoints,
+        DateTime now,
+        CancellationToken cancellationToken = default)
+    {
+        if (openingPoints < 0)
+            throw new InvalidOperationException("Opening points cannot be negative.");
+
+        var wallet = await _context.SpectatorSeasonWallets
+            .Include(item => item.PointTransactions)
+            .FirstOrDefaultAsync(
+                item => item.SeasonId == seasonId && item.SpectatorId == spectator.UserId,
+                cancellationToken);
+
+        if (wallet == null)
+        {
+            return await GetOrCreateWalletAsync(
+                seasonId,
+                spectator,
+                openingPoints,
+                now,
+                cancellationToken);
+        }
+
+        var hasPredictions = await _context.RacePredictions
+            .AsNoTracking()
+            .AnyAsync(item =>
+                item.SpectatorId == spectator.UserId &&
+                item.Race.Tournament.SeasonId == seasonId,
+                cancellationToken);
+
+        if (hasPredictions)
+        {
+            throw new InvalidOperationException(
+                "The season wallet cannot be reset because prediction activity already exists.");
+        }
+
+        var openingKey = $"SEASON_OPENING_{seasonId}_{spectator.UserId}";
+        var openingTransaction = wallet.PointTransactions
+            .FirstOrDefault(item =>
+                item.TransactionType == PointTransactionTypes.SeasonOpening &&
+                item.IdempotencyKey == openingKey);
+
+        var unexpectedTransactions = wallet.PointTransactions
+            .Where(item => item != openingTransaction)
+            .ToList();
+
+        if (unexpectedTransactions.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "The draft season wallet already contains point transactions and cannot be safely reset.");
+        }
+
+        if (openingTransaction == null)
+        {
+            openingTransaction = new PointTransaction
+            {
+                SpectatorSeasonWallet = wallet,
+                TransactionType = PointTransactionTypes.SeasonOpening,
+                IdempotencyKey = openingKey
+            };
+            _context.PointTransactions.Add(openingTransaction);
+        }
+
+        openingTransaction.RequestedAmount = openingPoints;
+        openingTransaction.Amount = openingPoints;
+        openingTransaction.ScoreDelta = 0;
+        openingTransaction.RecoveryDebtDelta = 0;
+        openingTransaction.BalanceBefore = 0;
+        openingTransaction.BalanceAfter = openingPoints;
+        openingTransaction.ReferenceType = "Season";
+        openingTransaction.ReferenceId = seasonId;
+        openingTransaction.Description = "Opening betting balance for the season.";
+        openingTransaction.CreatedAt = now;
+
+        wallet.OpeningBettingPoints = openingPoints;
+        wallet.CurrentBettingPoints = openingPoints;
+        wallet.SeasonScore = 0;
+        wallet.PendingRecoveryPoints = 0;
+        wallet.FinalBettingPoints = null;
+        wallet.FinalSeasonScore = null;
+        wallet.FinalRank = null;
+        wallet.Status = SeasonWalletStatuses.Active;
+        wallet.OpenedAt = now;
+        wallet.FrozenAt = null;
+        wallet.SettledAt = null;
+
+        spectator.BettingPoints = openingPoints;
+        spectator.UpdatedAt = now;
+
+        return wallet;
+    }
+
     public async Task<SpectatorSeasonWallet> GetOrCreateWalletAsync(
         int seasonId,
         User spectator,
@@ -159,10 +256,20 @@ public class SpectatorWalletService
             throw new InvalidOperationException("The season wallet is not active.");
     }
 
-    private async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken) =>
-        _context.PointTransactions.Local.Any(x => x.IdempotencyKey == key) ||
-        await _context.PointTransactions.AsNoTracking()
-            .AnyAsync(x => x.IdempotencyKey == key, cancellationToken);
+    private async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken)
+    {
+        var localTransaction = _context.PointTransactions.Local
+            .FirstOrDefault(item => item.IdempotencyKey == key);
+
+        if (localTransaction != null)
+        {
+            return _context.Entry(localTransaction).State != EntityState.Deleted;
+        }
+
+        return await _context.PointTransactions
+            .AsNoTracking()
+            .AnyAsync(item => item.IdempotencyKey == key, cancellationToken);
+    }
 
     private static WalletMutationResult Existing(SpectatorSeasonWallet wallet) =>
         new(wallet.CurrentBettingPoints, wallet.SeasonScore, wallet.PendingRecoveryPoints, true);

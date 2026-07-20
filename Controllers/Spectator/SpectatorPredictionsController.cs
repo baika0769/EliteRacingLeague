@@ -66,15 +66,20 @@ public class SpectatorPredictionsController : ControllerBase
             {
                 seasonId = (int?)null,
                 seasonName = (string?)null,
-                bettingPoints = spectator.BettingPoints,
+                hasActiveSeason = false,
+                bettingPoints = 0,
                 seasonScore = 0,
-                initialBettingPoints = SpectatorBettingRules.InitialBettingPoints,
+                initialBettingPoints = 0,
+                baseOpeningPoints = 0,
+                carriedBonusPoints = 0,
+                openingTotalPoints = 0,
+                walletStatus = (string?)null,
                 minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
                 totalStakePoints = 0,
                 totalPayoutPoints = 0,
                 pendingStakePoints = 0,
                 netPoints = 0,
-                message = "There is no active season."
+                message = "There is no active season. The spendable wallet balance is 0 until a new season is activated."
             });
         }
 
@@ -83,6 +88,18 @@ public class SpectatorPredictionsController : ControllerBase
             .FirstOrDefaultAsync(item =>
                 item.SeasonId == activeSeason.SeasonId &&
                 item.SpectatorId == spectatorId);
+
+        var carriedBonusPoints = wallet == null
+            ? 0
+            : await _context.PointTransactions
+                .AsNoTracking()
+                .Where(item =>
+                    item.SpectatorSeasonWalletId == wallet.SpectatorSeasonWalletId &&
+                    item.TransactionType == PointTransactionTypes.NextSeasonBonus)
+                .SumAsync(item => (int?)item.Amount) ?? 0;
+
+        var baseOpeningPoints = wallet?.OpeningBettingPoints
+            ?? SpectatorBettingRules.InitialBettingPoints;
 
         var predictionQuery = _context.RacePredictions
             .AsNoTracking()
@@ -101,9 +118,14 @@ public class SpectatorPredictionsController : ControllerBase
         {
             activeSeason.SeasonId,
             activeSeason.SeasonName,
+            hasActiveSeason = true,
             bettingPoints = wallet?.CurrentBettingPoints ?? spectator.BettingPoints,
             seasonScore = wallet?.SeasonScore ?? totalPayoutPoints,
-            initialBettingPoints = wallet?.OpeningBettingPoints ?? SpectatorBettingRules.InitialBettingPoints,
+            initialBettingPoints = baseOpeningPoints,
+            baseOpeningPoints,
+            carriedBonusPoints,
+            openingTotalPoints = checked(baseOpeningPoints + carriedBonusPoints),
+            walletStatus = wallet?.Status,
             minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
             totalStakePoints,
             totalPayoutPoints,
