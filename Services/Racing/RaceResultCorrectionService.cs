@@ -36,7 +36,7 @@ public class RaceResultCorrectionService
         var race = await _context.Races
             .Include(r => r.Tournament).ThenInclude(t => t.Season)
             .Include(r => r.RaceResults)
-            .Include(r => r.PrizeAwards)
+            .Include(r => r.PrizeAwards).ThenInclude(a => a.Payouts)
             .Include(r => r.RefereeReports)
             .Include(r => r.RefereeAssignments)
             .FirstOrDefaultAsync(r => r.RaceId == raceId, cancellationToken)
@@ -48,10 +48,11 @@ public class RaceResultCorrectionService
         if (race.Tournament.Season.Status != SeasonStatuses.Active)
             throw new InvalidOperationException("Published results cannot be reopened after season settlement starts.");
 
-        var lockedPrize = race.PrizeAwards.FirstOrDefault(a =>
-            a.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid);
-        if (lockedPrize != null)
-            throw new InvalidOperationException("A prize is under review or paid. Resolve the prize before reopening results.");
+        var lockedPayout = race.PrizeAwards
+            .SelectMany(a => a.Payouts)
+            .FirstOrDefault(p => p.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid);
+        if (lockedPayout != null)
+            throw new InvalidOperationException("An owner or jockey payout is under review or paid. Resolve it before reopening results.");
 
         if (race.RaceResults.Count == 0)
             throw new InvalidOperationException("The race has no result to reopen.");

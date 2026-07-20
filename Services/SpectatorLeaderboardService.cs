@@ -299,7 +299,7 @@ public class SpectatorLeaderboardService
             .Where(item => item.SeasonId == seasonId && spectatorIds.Contains(item.SpectatorId))
             .ToDictionaryAsync(item => item.SpectatorId, item => item.SeasonScore);
 
-        var ranked = rows
+        var ordered = rows
             .Select(r => new PredictorLeaderboardItem
             {
                 SpectatorId = r.SpectatorId,
@@ -315,16 +315,40 @@ public class SpectatorLeaderboardService
             .ThenByDescending(r => r.CorrectPredictions)
             .ThenByDescending(r => r.Accuracy)
             .ThenByDescending(r => r.TotalPredictions)
+            // SpectatorId only stabilizes display order. It must never break a real tie.
             .ThenBy(r => r.SpectatorId)
-            .Take(limit)
             .ToList();
 
-        for (var i = 0; i < ranked.Count; i++)
+        for (var index = 0; index < ordered.Count; index++)
         {
-            ranked[i].Rank = i + 1;
+            if (index == 0 || !HasSamePredictorScore(ordered[index], ordered[index - 1]))
+            {
+                // Competition ranking: 1, 1, 3. The next rank skips the tied positions.
+                ordered[index].Rank = index + 1;
+            }
+            else
+            {
+                ordered[index].Rank = ordered[index - 1].Rank;
+            }
         }
 
-        return ranked;
+        if (limit <= 0 || ordered.Count <= limit)
+            return ordered;
+
+        // Do not cut a tied group at the requested limit boundary.
+        var boundaryRank = ordered[limit - 1].Rank;
+        return ordered.Where(item => item.Rank <= boundaryRank).ToList();
     }
+
+    private static bool HasSamePredictorScore(
+        PredictorLeaderboardItem left,
+        PredictorLeaderboardItem right)
+    {
+        return left.Points == right.Points &&
+               left.CorrectPredictions == right.CorrectPredictions &&
+               left.Accuracy == right.Accuracy &&
+               left.TotalPredictions == right.TotalPredictions;
+    }
+
 
 }

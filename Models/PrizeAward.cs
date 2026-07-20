@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Eliteracingleague.API.Models;
@@ -32,4 +32,6 @@ public partial class PrizeAward
     public virtual Race Race { get; set; } = null!;
 
     public virtual RaceRegistration Registration { get; set; } = null!;
+
+    public virtual ICollection<PrizePayout> Payouts { get; set; } = new List<PrizePayout>();
 }

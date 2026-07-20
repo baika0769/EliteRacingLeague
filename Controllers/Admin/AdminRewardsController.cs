@@ -1,9 +1,11 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
+using Eliteracingleague.API.Services.Rewards;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 
 namespace Eliteracingleague.API.Controllers.Admin;
 
@@ -20,156 +22,225 @@ public class AdminRewardsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetRewards([FromQuery] string? status = null)
+    public async Task<IActionResult> GetRewards(
+        [FromQuery] string? status = null,
+        [FromQuery] string? recipientType = null,
+        CancellationToken cancellationToken = default)
     {
-        var query = _context.PrizeAwards
-            .AsNoTracking()
-            .AsQueryable();
+        if (!string.IsNullOrWhiteSpace(status) && !PrizeAwardStatuses.IsValid(status))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid payout status.",
+                allowedValues = PrizeAwardStatuses.All
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(recipientType) &&
+            !PrizePayoutRecipientTypes.IsValid(recipientType))
+        {
+            return BadRequest(new
+            {
+                message = "Invalid recipient type.",
+                allowedValues = PrizePayoutRecipientTypes.All
+            });
+        }
+
+        var query = _context.PrizePayouts.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(status))
-        {
-            if (!PrizeAwardStatuses.IsValid(status))
-            {
-                return BadRequest(new { message = "Invalid prize award status.", allowedValues = PrizeAwardStatuses.All });
-            }
+            query = query.Where(item => item.Status == status);
 
-            query = query.Where(a => a.Status == status);
-        }
+        if (!string.IsNullOrWhiteSpace(recipientType))
+            query = query.Where(item => item.RecipientType == recipientType);
 
-        var rewards = await query
-            .OrderByDescending(a => a.CreatedAt)
-            .Select(a => new
+        var payouts = await query
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new
             {
-                prizeAwardId = a.PrizeAwardId,
-                raceId = a.RaceId,
-                raceName = a.Race.RaceName,
-                tournamentId = a.Race.TournamentId,
-                tournamentName = a.Race.Tournament.TournamentName,
-                ownerId = a.OwnerId,
-                ownerName = a.Owner.Owner.FullName,
-                jockeyId = a.JockeyId,
-                jockeyName = a.Jockey == null ? null : a.Jockey.JockeyNavigation.FullName,
-                horseId = a.Registration.HorseId,
-                horseName = a.Registration.Horse.HorseName,
-                rankPosition = a.RankPosition,
-                prizeAmount = a.PrizeAmount,
-                status = a.Status,
-                paidAt = a.PaidAt,
-                createdAt = a.CreatedAt
+                prizePayoutId = item.PrizePayoutId,
+                prizeAwardId = item.PrizeAwardId,
+                raceId = item.PrizeAward.RaceId,
+                raceName = item.PrizeAward.Race.RaceName,
+                tournamentId = item.PrizeAward.Race.TournamentId,
+                tournamentName = item.PrizeAward.Race.Tournament.TournamentName,
+                recipientUserId = item.RecipientUserId,
+                recipientType = item.RecipientType,
+                recipientName = item.RecipientUser.FullName,
+                ownerId = item.PrizeAward.OwnerId,
+                ownerName = item.PrizeAward.Owner.Owner.FullName,
+                jockeyId = item.PrizeAward.JockeyId,
+                jockeyName = item.PrizeAward.Jockey == null
+                    ? null
+                    : item.PrizeAward.Jockey.JockeyNavigation.FullName,
+                horseId = item.PrizeAward.Registration.HorseId,
+                horseName = item.PrizeAward.Registration.Horse.HorseName,
+                rankPosition = item.PrizeAward.RankPosition,
+                totalPrizeAmount = item.PrizeAward.PrizeAmount,
+                payoutAmount = item.Amount,
+                status = item.Status,
+                claimedAt = item.ClaimedAt,
+                paidAt = item.PaidAt,
+                rejectedAt = item.RejectedAt,
+                paymentReference = item.PaymentReference,
+                adminNote = item.AdminNote,
+                createdAt = item.CreatedAt
             })
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
-        return Ok(rewards);
+        return Ok(payouts);
     }
 
-    [HttpPut("{id:int}/approve-payment")]
-    public async Task<IActionResult> ApprovePayment(int id)
+    [HttpPut("{payoutId:int}/approve-payment")]
+    public async Task<IActionResult> ApprovePayment(
+        int payoutId,
+        [FromBody] ReviewPrizePayoutRequest? request,
+        CancellationToken cancellationToken)
     {
-        var reward = await _context.PrizeAwards
-            .Include(a => a.Owner)
-                .ThenInclude(o => o.Owner)
-            .Include(a => a.Race)
-                .ThenInclude(r => r.Tournament)
-            .FirstOrDefaultAsync(a => a.PrizeAwardId == id);
+        var payout = await _context.PrizePayouts
+            .Include(item => item.RecipientUser)
+            .Include(item => item.PrizeAward)
+                .ThenInclude(item => item.Payouts)
+            .Include(item => item.PrizeAward)
+                .ThenInclude(item => item.Race)
+                    .ThenInclude(item => item.Tournament)
+            .FirstOrDefaultAsync(item => item.PrizePayoutId == payoutId, cancellationToken);
 
-        if (reward == null)
-        {
-            return NotFound(new { message = "Reward not found.", id });
-        }
+        if (payout == null)
+            return NotFound(new { message = "Prize payout not found.", payoutId });
 
-        if (reward.Status != PrizeAwardStatuses.UnderReview)
+        if (payout.Status != PrizeAwardStatuses.UnderReview)
         {
             return BadRequest(new
             {
-                message = "Only rewards under review can be marked as paid.",
-                id,
-                status = reward.Status
+                message = "Only payouts under review can be marked as paid.",
+                payoutId,
+                status = payout.Status
+            });
+        }
+
+        var paymentReference = Normalize(request?.PaymentReference);
+        if (string.IsNullOrWhiteSpace(paymentReference))
+        {
+            return BadRequest(new
+            {
+                message = "Payment reference is required after the external bank/gateway transfer is completed."
             });
         }
 
         var now = DateTime.UtcNow;
-        reward.Status = PrizeAwardStatuses.Paid;
-        reward.PaidAt = now;
+        payout.Status = PrizeAwardStatuses.Paid;
+        payout.PaidAt = now;
+        payout.RejectedAt = null;
+        payout.PaymentReference = paymentReference;
+        payout.AdminNote = Normalize(request?.AdminNote);
+        payout.UpdatedAt = now;
+
+        PrizePayoutService.SynchronizeAggregateStatus(payout.PrizeAward, now);
 
         _context.Notifications.Add(new Notification
         {
-            UserId = reward.OwnerId,
+            UserId = payout.RecipientUserId,
             Title = "Prize Payment Approved",
-            Message = $"Your prize claim for {reward.Race.Tournament.TournamentName} has been approved and marked as paid.",
+            Message = $"Your {payout.RecipientType.ToLowerInvariant()} payout for {payout.PrizeAward.Race.Tournament.TournamentName} was marked as paid. Reference: {paymentReference}.",
             IsRead = false,
             CreatedAt = now,
-            ActionType = "OwnerRewards",
-            ActionUrl = "/owner/result-reward",
-            RelatedType = "PrizeAward",
-            RelatedId = reward.PrizeAwardId
+            ActionType = payout.RecipientType == PrizePayoutRecipientTypes.Owner
+                ? "OwnerRewards"
+                : "JockeyRewards",
+            ActionUrl = payout.RecipientType == PrizePayoutRecipientTypes.Owner
+                ? "/owner/rewards"
+                : "/jockey/rewards",
+            RelatedType = "PrizePayout",
+            RelatedId = payout.PrizePayoutId
         });
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return Ok(new
         {
-            message = "Reward payment approved successfully.",
-            prizeAwardId = reward.PrizeAwardId,
-            status = reward.Status,
-            paidAt = reward.PaidAt
+            message = "Prize payout marked as paid successfully.",
+            prizePayoutId = payout.PrizePayoutId,
+            prizeAwardId = payout.PrizeAwardId,
+            recipientType = payout.RecipientType,
+            payoutAmount = payout.Amount,
+            status = payout.Status,
+            paidAt = payout.PaidAt,
+            paymentReference = payout.PaymentReference
         });
     }
 
-    [HttpPut("{id:int}/reject")]
-    public async Task<IActionResult> RejectPayment(int id)
+    [HttpPut("{payoutId:int}/reject")]
+    public async Task<IActionResult> RejectPayment(
+        int payoutId,
+        [FromBody] ReviewPrizePayoutRequest? request,
+        CancellationToken cancellationToken)
     {
-        var reward = await _context.PrizeAwards
-            .Include(a => a.Owner)
-                .ThenInclude(o => o.Owner)
-            .Include(a => a.Race)
-                .ThenInclude(r => r.Tournament)
-            .FirstOrDefaultAsync(a => a.PrizeAwardId == id);
+        var payout = await _context.PrizePayouts
+            .Include(item => item.RecipientUser)
+            .Include(item => item.PrizeAward)
+                .ThenInclude(item => item.Payouts)
+            .Include(item => item.PrizeAward)
+                .ThenInclude(item => item.Race)
+                    .ThenInclude(item => item.Tournament)
+            .FirstOrDefaultAsync(item => item.PrizePayoutId == payoutId, cancellationToken);
 
-        if (reward == null)
-        {
-            return NotFound(new { message = "Reward not found.", id });
-        }
+        if (payout == null)
+            return NotFound(new { message = "Prize payout not found.", payoutId });
 
-        if (reward.Status != PrizeAwardStatuses.UnderReview)
+        if (payout.Status != PrizeAwardStatuses.UnderReview)
         {
             return BadRequest(new
             {
-                message = "Only rewards under review can be rejected.",
-                id,
-                status = reward.Status
+                message = "Only payouts under review can be rejected.",
+                payoutId,
+                status = payout.Status
             });
         }
 
         var now = DateTime.UtcNow;
-        reward.Status = PrizeAwardStatuses.Rejected;
+        payout.Status = PrizeAwardStatuses.Rejected;
+        payout.RejectedAt = now;
+        payout.PaidAt = null;
+        payout.PaymentReference = null;
+        payout.AdminNote = Normalize(request?.AdminNote);
+        payout.UpdatedAt = now;
+
+        PrizePayoutService.SynchronizeAggregateStatus(payout.PrizeAward, now);
 
         _context.Notifications.Add(new Notification
         {
-            UserId = reward.OwnerId,
+            UserId = payout.RecipientUserId,
             Title = "Prize Payment Rejected",
-            Message = $"Your prize claim for {reward.Race.Tournament.TournamentName} has been rejected by admin.",
+            Message = $"Your {payout.RecipientType.ToLowerInvariant()} payout for {payout.PrizeAward.Race.Tournament.TournamentName} was rejected by admin.",
             IsRead = false,
             CreatedAt = now,
-            ActionType = "OwnerRewards",
-            ActionUrl = "/owner/result-reward",
-            RelatedType = "PrizeAward",
-            RelatedId = reward.PrizeAwardId
+            ActionType = payout.RecipientType == PrizePayoutRecipientTypes.Owner
+                ? "OwnerRewards"
+                : "JockeyRewards",
+            ActionUrl = payout.RecipientType == PrizePayoutRecipientTypes.Owner
+                ? "/owner/rewards"
+                : "/jockey/rewards",
+            RelatedType = "PrizePayout",
+            RelatedId = payout.PrizePayoutId
         });
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
 
         return Ok(new
         {
-            message = "Reward payment rejected successfully.",
-            prizeAwardId = reward.PrizeAwardId,
-            status = reward.Status
+            message = "Prize payout rejected successfully.",
+            prizePayoutId = payout.PrizePayoutId,
+            prizeAwardId = payout.PrizeAwardId,
+            recipientType = payout.RecipientType,
+            status = payout.Status
         });
     }
 
     [HttpGet("summary")]
     public async Task<IActionResult> GetRewardSummary(CancellationToken cancellationToken)
     {
-        var prizePayments = await _context.PrizeAwards
+        var prizePayments = await _context.PrizePayouts
             .AsNoTracking()
             .GroupBy(_ => 1)
             .Select(group => new
@@ -179,9 +250,13 @@ public class AdminRewardsController : ControllerBase
                 UnderReview = group.Count(item => item.Status == PrizeAwardStatuses.UnderReview),
                 Paid = group.Count(item => item.Status == PrizeAwardStatuses.Paid),
                 Rejected = group.Count(item => item.Status == PrizeAwardStatuses.Rejected),
-                TotalAmount = group.Sum(item => item.PrizeAmount),
+                TotalAmount = group.Sum(item => item.Amount),
                 PaidAmount = group.Where(item => item.Status == PrizeAwardStatuses.Paid)
-                    .Sum(item => (decimal?)item.PrizeAmount) ?? 0m
+                    .Sum(item => (decimal?)item.Amount) ?? 0m,
+                OwnerAmount = group.Where(item => item.RecipientType == PrizePayoutRecipientTypes.Owner)
+                    .Sum(item => (decimal?)item.Amount) ?? 0m,
+                JockeyAmount = group.Where(item => item.RecipientType == PrizePayoutRecipientTypes.Jockey)
+                    .Sum(item => (decimal?)item.Amount) ?? 0m
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -211,7 +286,9 @@ public class AdminRewardsController : ControllerBase
                 Paid = 0,
                 Rejected = 0,
                 TotalAmount = 0m,
-                PaidAmount = 0m
+                PaidAmount = 0m,
+                OwnerAmount = 0m,
+                JockeyAmount = 0m
             },
             seasonRewards = seasonRewards ?? new
             {
@@ -225,6 +302,18 @@ public class AdminRewardsController : ControllerBase
                 Expired = 0
             }
         });
+    }
+
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    public sealed class ReviewPrizePayoutRequest
+    {
+        [StringLength(200)]
+        public string? PaymentReference { get; set; }
+
+        [StringLength(1000)]
+        public string? AdminNote { get; set; }
     }
 
     [HttpGet("season-rewards")]

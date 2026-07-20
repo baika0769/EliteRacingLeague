@@ -41,6 +41,8 @@ public partial class EliteRacingLeagueContext : DbContext
 
     public virtual DbSet<PrizeAward> PrizeAwards { get; set; }
 
+    public virtual DbSet<PrizePayout> PrizePayouts { get; set; }
+
     public virtual DbSet<PrizeRule> PrizeRules { get; set; }
 
     public virtual DbSet<Race> Races { get; set; }
@@ -583,6 +585,68 @@ public partial class EliteRacingLeagueContext : DbContext
                 .HasForeignKey(d => d.RegistrationId)
                 .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("FK_prize_awards_registrations");
+        });
+
+        modelBuilder.Entity<PrizePayout>(entity =>
+        {
+            entity.HasKey(e => e.PrizePayoutId);
+
+            entity.ToTable("prize_payouts", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_prize_payouts_recipient_type",
+                    "[recipient_type] IN ('Owner', 'Jockey')");
+                table.HasCheckConstraint(
+                    "CK_prize_payouts_status",
+                    "[status] IN ('ReadyToClaim', 'UnderReview', 'Paid', 'Rejected')");
+                table.HasCheckConstraint(
+                    "CK_prize_payouts_amount",
+                    "[amount] >= 0");
+            });
+
+            entity.HasIndex(e => new { e.PrizeAwardId, e.RecipientType })
+                .IsUnique()
+                .HasDatabaseName("UQ_prize_payouts_award_recipient_type");
+
+            entity.Property(e => e.PrizePayoutId).HasColumnName("prize_payout_id");
+            entity.Property(e => e.PrizeAwardId).HasColumnName("prize_award_id");
+            entity.Property(e => e.RecipientUserId).HasColumnName("recipient_user_id");
+            entity.Property(e => e.RecipientType)
+                .HasMaxLength(20)
+                .IsUnicode(false)
+                .HasColumnName("recipient_type");
+            entity.Property(e => e.Amount)
+                .HasColumnType("decimal(18, 2)")
+                .HasColumnName("amount");
+            entity.Property(e => e.Status)
+                .HasMaxLength(30)
+                .IsUnicode(false)
+                .HasColumnName("status");
+            entity.Property(e => e.ClaimedAt).HasColumnName("claimed_at");
+            entity.Property(e => e.PaidAt).HasColumnName("paid_at");
+            entity.Property(e => e.RejectedAt).HasColumnName("rejected_at");
+            entity.Property(e => e.PaymentReference)
+                .HasMaxLength(200)
+                .HasColumnName("payment_reference");
+            entity.Property(e => e.AdminNote)
+                .HasMaxLength(1000)
+                .HasColumnName("admin_note");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(sysutcdatetime())")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasOne(e => e.PrizeAward)
+                .WithMany(e => e.Payouts)
+                .HasForeignKey(e => e.PrizeAwardId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_prize_payouts_prize_awards");
+
+            entity.HasOne(e => e.RecipientUser)
+                .WithMany(e => e.PrizePayouts)
+                .HasForeignKey(e => e.RecipientUserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_prize_payouts_users");
         });
 
         modelBuilder.Entity<PrizeRule>(entity =>

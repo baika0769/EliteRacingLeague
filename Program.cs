@@ -66,6 +66,7 @@ builder.Services.AddScoped<RaceResultCorrectionService>();
 builder.Services.AddScoped<RaceResultValidationService>();
 builder.Services.AddScoped<TournamentStandingService>();
 builder.Services.AddScoped<RewardInventoryService>();
+builder.Services.AddScoped<PrizePayoutService>();
 builder.Services.AddScoped<JockeyAccessService>();
 builder.Services.AddScoped<IJockeyMatchScoreService, JockeyMatchScoreService>();
 builder.Services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();

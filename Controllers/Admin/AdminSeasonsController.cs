@@ -1075,9 +1075,6 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
-            season.Status = SeasonStatuses.Settling;
-            season.UpdatedAt = _dateTimeProvider.UtcNow;
-
             var leaderboard = await _leaderboardService
                 .GetPredictorLeaderboardAsync(int.MaxValue, season.SeasonId);
 
@@ -1113,59 +1110,104 @@ public class AdminSeasonsController : ControllerBase
                 spectator.UpdatedAt = now;
             }
 
-            var leaderboardByRank = leaderboard.ToDictionary(item => item.Rank);
+            var winnersByRank = leaderboard
+                .GroupBy(item => item.Rank)
+                .ToDictionary(group => group.Key, group => group.ToList());
+
+            // A real tie receives the same reward for that rank. Validate the total
+            // physical inventory for every tied winner before changing season data.
+            var physicalRequirements = rewardRules
+                .Where(rule =>
+                    rule.RewardItem != null &&
+                    winnersByRank.ContainsKey(rule.RankPosition))
+                .GroupBy(rule => rule.RewardItemId!.Value)
+                .Select(group => new
+                {
+                    RewardItem = group.First().RewardItem!,
+                    RequiredQuantity = group.Sum(rule =>
+                        winnersByRank[rule.RankPosition].Count * Math.Max(1, rule.Quantity)),
+                    Ranks = group.Select(rule => rule.RankPosition).OrderBy(rank => rank).ToArray()
+                })
+                .ToList();
+
+            foreach (var requirement in physicalRequirements)
+            {
+                var availableQuantity = RewardInventoryService.Available(requirement.RewardItem);
+                if (availableQuantity < requirement.RequiredQuantity)
+                {
+                    return BadRequest(new
+                    {
+                        message = "Cannot close the season because tied winners require more physical reward inventory than is available.",
+                        seasonId = season.SeasonId,
+                        rewardItemId = requirement.RewardItem.RewardItemId,
+                        rewardItemName = requirement.RewardItem.Name,
+                        affectedRanks = requirement.Ranks,
+                        requiredQuantity = requirement.RequiredQuantity,
+                        availableQuantity,
+                        shortage = requirement.RequiredQuantity - availableQuantity
+                    });
+                }
+            }
+
+            season.Status = SeasonStatuses.Settling;
+            season.UpdatedAt = now;
+
             var rewardCount = 0;
             var generatedRewards = new List<SeasonReward>();
 
             foreach (var rule in rewardRules)
             {
-                if (!leaderboardByRank.TryGetValue(rule.RankPosition, out var item))
-                {
+                if (!winnersByRank.TryGetValue(rule.RankPosition, out var tiedWinners))
                     continue;
+
+                foreach (var item in tiedWinners)
+                {
+                    var seasonReward = new SeasonReward
+                    {
+                        SeasonId = season.SeasonId,
+                        SpectatorId = item.SpectatorId,
+                        RankPosition = item.Rank,
+                        FinalPoints = item.Points,
+                        RewardName = rule.RewardName,
+                        RewardDescription = rule.RewardDescription,
+                        BonusPoints = rule.BonusPoints,
+                        RewardItemId = rule.RewardItemId,
+                        Quantity = Math.Max(1, rule.Quantity),
+                        IsBonusApplied = false,
+                        AppliedToSeasonId = null,
+                        AppliedAt = null,
+                        Status = SeasonRewardStatuses.Eligible,
+                        AwardedAt = now,
+                        ClaimDeadline = now.AddDays(30)
+                    };
+                    _context.SeasonRewards.Add(seasonReward);
+                    generatedRewards.Add(seasonReward);
+
+                    if (rule.RewardItem != null)
+                    {
+                        await _rewardInventoryService.ReserveAsync(
+                            rule.RewardItem,
+                            seasonReward,
+                            seasonReward.Quantity,
+                            adminId,
+                            now);
+                    }
+
+                    _context.Notifications.Add(new Notification
+                    {
+                        UserId = item.SpectatorId,
+                        Title = "Season Reward Available",
+                        Message = $"You finished season {season.SeasonName} at rank #{item.Rank} and received {rule.RewardName}. Please claim it before the deadline.",
+                        IsRead = false,
+                        CreatedAt = now,
+                        ActionType = "SpectatorRewards",
+                        ActionUrl = "/spectator/results",
+                        RelatedType = "Season",
+                        RelatedId = season.SeasonId
+                    });
+
+                    rewardCount++;
                 }
-
-                var seasonReward = new SeasonReward
-                {
-                    SeasonId = season.SeasonId,
-                    SpectatorId = item.SpectatorId,
-                    RankPosition = item.Rank,
-                    FinalPoints = item.Points,
-                    RewardName = rule.RewardName,
-                    RewardDescription = rule.RewardDescription,
-                    BonusPoints = rule.BonusPoints,
-                    RewardItemId = rule.RewardItemId,
-                    Quantity = Math.Max(1, rule.Quantity),
-                    IsBonusApplied = false,
-                    AppliedToSeasonId = null,
-                    AppliedAt = null,
-                    Status = SeasonRewardStatuses.Eligible,
-                    AwardedAt = now,
-                    ClaimDeadline = now.AddDays(30)
-                };
-                _context.SeasonRewards.Add(seasonReward);
-                generatedRewards.Add(seasonReward);
-
-                if (rule.RewardItem != null)
-                {
-                    await _rewardInventoryService.ReserveAsync(
-                        rule.RewardItem, seasonReward, seasonReward.Quantity,
-                        adminId, now);
-                }
-
-                _context.Notifications.Add(new Notification
-                {
-                    UserId = item.SpectatorId,
-                    Title = "Season Reward Available",
-                    Message = $"You finished season {season.SeasonName} at rank #{item.Rank} and received {rule.RewardName}. Please claim it before the deadline.",
-                    IsRead = false,
-                    CreatedAt = now,
-                    ActionType = "SpectatorRewards",
-                    ActionUrl = "/spectator/results",
-                    RelatedType = "Season",
-                    RelatedId = season.SeasonId
-                });
-
-                rewardCount++;
             }
 
             season.Status = SeasonStatuses.Closed;

@@ -286,15 +286,16 @@ public class AdminRacesController : ControllerBase
             .Include(r => r.Tournament).ThenInclude(t => t.Season)
             .Include(r => r.RaceRegistrations).ThenInclude(r => r.JockeyInvitations)
             .Include(r => r.RaceResults)
-            .Include(r => r.PrizeAwards)
+            .Include(r => r.PrizeAwards).ThenInclude(a => a.Payouts)
             .FirstOrDefaultAsync(r => r.RaceId == raceId, cancellationToken);
         if (race == null) return NotFound(new { message = "Race not found." });
         if (race.Status == RaceStatuses.Cancelled)
             return Ok(new { message = "Race was already cancelled.", race.Status });
         if (race.Tournament.Season.Status != SeasonStatuses.Active)
             return BadRequest(new { message = "Race cannot be cancelled after season settlement starts." });
-        if (race.PrizeAwards.Any(x => x.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid))
-            return BadRequest(new { message = "Resolve claimed or paid prizes before cancelling this race." });
+        if (race.PrizeAwards.SelectMany(x => x.Payouts)
+            .Any(x => x.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid))
+            return BadRequest(new { message = "Resolve claimed or paid owner/jockey payouts before cancelling this race." });
 
         var oldStatus = race.Status;
         var settlement = await _settlement.RefundForCancelledRaceAsync(raceId, request.Reason, cancellationToken);

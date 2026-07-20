@@ -16,9 +16,10 @@ public class LeaderboardService : ILeaderboardService
         RaceResultStatuses.Published
     };
 
-    private static readonly string[] CountedPrizeAwardStatuses =
+    private static readonly string[] CountedPrizePayoutStatuses =
     {
         PrizeAwardStatuses.ReadyToClaim,
+        PrizeAwardStatuses.UnderReview,
         PrizeAwardStatuses.Paid
     };
 
@@ -55,12 +56,13 @@ public class LeaderboardService : ILeaderboardService
             })
             .ToListAsync(cancellationToken);
 
-        var prizes = await BuildCountedPrizeAwardsQuery(seasonId, year)
-            .GroupBy(p => p.OwnerId)
+        var prizes = await BuildCountedPrizePayoutsQuery(seasonId, year)
+            .Where(p => p.RecipientType == PrizePayoutRecipientTypes.Owner)
+            .GroupBy(p => p.RecipientUserId)
             .Select(g => new
             {
                 OwnerId = g.Key,
-                TotalPrize = g.Sum(p => p.PrizeAmount)
+                TotalPrize = g.Sum(p => p.Amount)
             })
             .ToDictionaryAsync(p => p.OwnerId, p => p.TotalPrize, cancellationToken);
 
@@ -125,13 +127,13 @@ public class LeaderboardService : ILeaderboardService
             })
             .ToListAsync(cancellationToken);
 
-        var prizes = await BuildCountedPrizeAwardsQuery(seasonId, year)
-            .Where(p => p.JockeyId != null)
-            .GroupBy(p => p.JockeyId!.Value)
+        var prizes = await BuildCountedPrizePayoutsQuery(seasonId, year)
+            .Where(p => p.RecipientType == PrizePayoutRecipientTypes.Jockey)
+            .GroupBy(p => p.RecipientUserId)
             .Select(g => new
             {
                 JockeyId = g.Key,
-                TotalPrize = g.Sum(p => p.PrizeAmount)
+                TotalPrize = g.Sum(p => p.Amount)
             })
             .ToDictionaryAsync(p => p.JockeyId, p => p.TotalPrize, cancellationToken);
 
@@ -192,25 +194,25 @@ public class LeaderboardService : ILeaderboardService
         return query;
     }
 
-    private IQueryable<PrizeAward> BuildCountedPrizeAwardsQuery(int? seasonId, int? year)
+    private IQueryable<PrizePayout> BuildCountedPrizePayoutsQuery(int? seasonId, int? year)
     {
-        var query = _context.PrizeAwards
+        var query = _context.PrizePayouts
             .AsNoTracking()
             .Where(p =>
-                CountedPrizeAwardStatuses.Contains(p.Status) &&
-                p.Race.Status == RaceStatuses.Published &&
-                p.Race.Tournament.Status == TournamentStatuses.Completed &&
-                p.Registration.RaceResult != null &&
-                CountedResultStatuses.Contains(p.Registration.RaceResult.Status));
+                CountedPrizePayoutStatuses.Contains(p.Status) &&
+                p.PrizeAward.Race.Status == RaceStatuses.Published &&
+                p.PrizeAward.Race.Tournament.Status == TournamentStatuses.Completed &&
+                p.PrizeAward.Registration.RaceResult != null &&
+                CountedResultStatuses.Contains(p.PrizeAward.Registration.RaceResult.Status));
 
         if (seasonId.HasValue)
         {
-            query = query.Where(p => p.Race.Tournament.SeasonId == seasonId.Value);
+            query = query.Where(p => p.PrizeAward.Race.Tournament.SeasonId == seasonId.Value);
         }
 
         if (year.HasValue)
         {
-            query = query.Where(p => p.Race.RaceDate.Year == year.Value);
+            query = query.Where(p => p.PrizeAward.Race.RaceDate.Year == year.Value);
         }
 
         return query;

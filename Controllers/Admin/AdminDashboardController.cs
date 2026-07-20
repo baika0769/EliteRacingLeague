@@ -50,7 +50,7 @@ public class AdminDashboardController : ControllerBase
             PendingRegistrations = await _context.RaceRegistrations.CountAsync(r => r.Status == RaceRegistrationStatuses.Pending, cancellationToken),
             PendingResults = await _context.RaceResults.CountAsync(r => r.Status == RaceResultStatuses.RefereeConfirmed, cancellationToken),
             PendingSeasonRewards = await _context.SeasonRewards.CountAsync(r => r.Status == SeasonRewardStatuses.Claimed || r.Status == SeasonRewardStatuses.Approved || r.Status == SeasonRewardStatuses.Preparing, cancellationToken),
-            PendingPrizeClaims = await _context.PrizeAwards.CountAsync(r => r.Status == PrizeAwardStatuses.UnderReview, cancellationToken),
+            PendingPrizeClaims = await _context.PrizePayouts.CountAsync(r => r.Status == PrizeAwardStatuses.UnderReview, cancellationToken),
             TotalPredictions = await _context.RacePredictions.CountAsync(cancellationToken),
             TotalStakePoints = await _context.RacePredictions.SumAsync(p => (long)p.StakePoints, cancellationToken),
             TotalPayoutPoints = await _context.RacePredictions.SumAsync(p => (long)p.PointsAwarded, cancellationToken),

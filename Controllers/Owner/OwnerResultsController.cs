@@ -125,17 +125,21 @@ public class OwnerResultsController : OwnerBaseController
                 FinishTime = r.FinishTimeSeconds,
                 Score = r.Score,
                 ResultStatus = r.Status,
-                PrizeAmount = _context.PrizeAwards
-                    .Where(a =>
-                        a.RaceId == r.RaceId &&
-                        a.RegistrationId == r.RegistrationId)
-                    .Select(a => (decimal?)a.PrizeAmount)
+                PrizeAmount = _context.PrizePayouts
+                    .Where(p =>
+                        p.PrizeAward.RaceId == r.RaceId &&
+                        p.PrizeAward.RegistrationId == r.RegistrationId &&
+                        p.RecipientUserId == ownerId.Value &&
+                        p.RecipientType == PrizePayoutRecipientTypes.Owner)
+                    .Select(p => (decimal?)p.Amount)
                     .FirstOrDefault(),
-                RewardStatus = _context.PrizeAwards
-                    .Where(a =>
-                        a.RaceId == r.RaceId &&
-                        a.RegistrationId == r.RegistrationId)
-                    .Select(a => a.Status)
+                RewardStatus = _context.PrizePayouts
+                    .Where(p =>
+                        p.PrizeAward.RaceId == r.RaceId &&
+                        p.PrizeAward.RegistrationId == r.RegistrationId &&
+                        p.RecipientUserId == ownerId.Value &&
+                        p.RecipientType == PrizePayoutRecipientTypes.Owner)
+                    .Select(p => p.Status)
                     .FirstOrDefault(),
                 PublishedAt = r.PublishedAt
             })

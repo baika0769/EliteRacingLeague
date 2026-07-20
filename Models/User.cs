@@ -43,6 +43,8 @@ public partial class User
 
     public virtual ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 
+    public virtual ICollection<PrizePayout> PrizePayouts { get; set; } = new List<PrizePayout>();
+
     public virtual ICollection<RacePrediction> RacePredictions { get; set; } = new List<RacePrediction>();
 
     public virtual RaceReferee? RaceReferee { get; set; }

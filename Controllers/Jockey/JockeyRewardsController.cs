@@ -1,17 +1,18 @@
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
-using Eliteracingleague.API.DTOs.Owner.Rewards;
+using Eliteracingleague.API.DTOs.Jockey;
+using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Rewards;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Eliteracingleague.API.Controllers.Owner;
+namespace Eliteracingleague.API.Controllers.Jockey;
 
-[Route("api/owner/rewards")]
+[Route("api/jockey/rewards")]
 [ApiController]
-[Authorize(Roles = UserRoles.HorseOwner)]
-public class OwnerRewardsController : OwnerBaseController
+[Authorize(Roles = UserRoles.Jockey)]
+public class JockeyRewardsController : ControllerBase
 {
     private static readonly string[] EarnedStatuses =
     {
@@ -20,38 +21,43 @@ public class OwnerRewardsController : OwnerBaseController
         PrizeAwardStatuses.Paid
     };
 
-    public OwnerRewardsController(EliteRacingLeagueContext context) : base(context)
+    private readonly EliteRacingLeagueContext _context;
+    private readonly JockeyAccessService _jockeyAccess;
+
+    public JockeyRewardsController(
+        EliteRacingLeagueContext context,
+        JockeyAccessService jockeyAccess)
     {
+        _context = context;
+        _jockeyAccess = jockeyAccess;
     }
 
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(CancellationToken cancellationToken)
     {
-        var ownerId = GetCurrentUserId();
-        if (ownerId == null) return InvalidToken();
+        var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+        if (!access.Succeeded) return AccessError(access);
 
-        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
-        if (ownerProfileError != null) return ownerProfileError;
-
-        var ownerPayouts = _context.PrizePayouts
+        var jockeyId = access.Jockey!.JockeyId;
+        var payouts = _context.PrizePayouts
             .AsNoTracking()
             .Where(item =>
-                item.RecipientUserId == ownerId.Value &&
-                item.RecipientType == PrizePayoutRecipientTypes.Owner);
+                item.RecipientUserId == jockeyId &&
+                item.RecipientType == PrizePayoutRecipientTypes.Jockey);
 
-        var totalPrizeEarned = await ownerPayouts
+        var totalPrizeEarned = await payouts
             .Where(item => EarnedStatuses.Contains(item.Status))
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
 
-        var claimedRewards = await ownerPayouts
+        var paidAmount = await payouts
             .Where(item => item.Status == PrizeAwardStatuses.Paid)
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
 
-        var pendingAmount = await ownerPayouts
+        var pendingAmount = await payouts
             .Where(item => item.Status == PrizeAwardStatuses.UnderReview)
             .SumAsync(item => (decimal?)item.Amount, cancellationToken) ?? 0m;
 
-        var tournamentWins = await ownerPayouts
+        var raceWins = await payouts
             .Where(item =>
                 EarnedStatuses.Contains(item.Status) &&
                 item.PrizeAward.RankPosition == 1)
@@ -62,30 +68,28 @@ public class OwnerRewardsController : OwnerBaseController
         return Ok(new
         {
             totalPrizeEarned,
-            claimedRewards,
+            paidAmount,
             pendingAmount,
-            tournamentWins
+            raceWins
         });
     }
 
-    [HttpGet("available")]
-    public async Task<IActionResult> GetAvailableRewards(
-        [FromQuery] int limit = 10,
+    [HttpGet]
+    public async Task<IActionResult> GetRewards(
+        [FromQuery] int limit = 50,
         CancellationToken cancellationToken = default)
     {
-        var ownerId = GetCurrentUserId();
-        if (ownerId == null) return InvalidToken();
+        var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+        if (!access.Succeeded) return AccessError(access);
 
-        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
-        if (ownerProfileError != null) return ownerProfileError;
-
-        limit = Math.Clamp(limit, 1, 50);
+        var jockeyId = access.Jockey!.JockeyId;
+        limit = Math.Clamp(limit, 1, 100);
 
         var rewards = await _context.PrizePayouts
             .AsNoTracking()
             .Where(item =>
-                item.RecipientUserId == ownerId.Value &&
-                item.RecipientType == PrizePayoutRecipientTypes.Owner)
+                item.RecipientUserId == jockeyId &&
+                item.RecipientType == PrizePayoutRecipientTypes.Jockey)
             .OrderByDescending(item => item.PrizeAward.Race.RaceDate)
             .ThenByDescending(item => item.CreatedAt)
             .Take(limit)
@@ -94,8 +98,10 @@ public class OwnerRewardsController : OwnerBaseController
                 prizePayoutId = item.PrizePayoutId,
                 prizeAwardId = item.PrizeAwardId,
                 tournamentName = item.PrizeAward.Race.Tournament.TournamentName,
+                raceName = item.PrizeAward.Race.RaceName,
                 raceDate = item.PrizeAward.Race.RaceDate,
                 horseName = item.PrizeAward.Registration.Horse.HorseName,
+                ownerName = item.PrizeAward.Owner.Owner.FullName,
                 rankPosition = item.PrizeAward.RankPosition,
                 totalPrizeAmount = item.PrizeAward.PrizeAmount,
                 payoutAmount = item.Amount,
@@ -117,23 +123,21 @@ public class OwnerRewardsController : OwnerBaseController
         int prizePayoutId,
         CancellationToken cancellationToken)
     {
-        var ownerId = GetCurrentUserId();
-        if (ownerId == null) return InvalidToken();
+        var access = await _jockeyAccess.ValidateActiveJockeyAsync(User);
+        if (!access.Succeeded) return AccessError(access);
 
-        var ownerProfileError = await ValidateOwnerProfileAsync(ownerId.Value);
-        if (ownerProfileError != null) return ownerProfileError;
-
+        var jockeyId = access.Jockey!.JockeyId;
         var payout = await _context.PrizePayouts
             .Include(item => item.PrizeAward)
                 .ThenInclude(item => item.Payouts)
             .FirstOrDefaultAsync(item =>
                 item.PrizePayoutId == prizePayoutId &&
-                item.RecipientUserId == ownerId.Value &&
-                item.RecipientType == PrizePayoutRecipientTypes.Owner,
+                item.RecipientUserId == jockeyId &&
+                item.RecipientType == PrizePayoutRecipientTypes.Jockey,
                 cancellationToken);
 
         if (payout == null)
-            return NotFound(new { message = "Owner prize payout not found." });
+            return NotFound(new { message = "Jockey prize payout not found." });
 
         if (payout.Status != PrizeAwardStatuses.ReadyToClaim)
         {
@@ -154,10 +158,22 @@ public class OwnerRewardsController : OwnerBaseController
 
         return Ok(new
         {
-            message = "Owner payout claim submitted successfully.",
+            message = "Jockey payout claim submitted successfully.",
             prizePayoutId = payout.PrizePayoutId,
             payoutAmount = payout.Amount,
             status = payout.Status
+        });
+    }
+
+    private IActionResult AccessError(JockeyAccessResult access)
+    {
+        if (access.StatusCode == StatusCodes.Status401Unauthorized)
+            return Unauthorized(new { message = access.Message });
+
+        return StatusCode(access.StatusCode, new
+        {
+            message = access.Message,
+            nextStep = access.NextStep
         });
     }
 }

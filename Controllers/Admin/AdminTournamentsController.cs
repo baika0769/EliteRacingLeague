@@ -9,6 +9,7 @@ using Eliteracingleague.API.Models;
 using System.Security.Claims;
 using Eliteracingleague.API.Services.Notifications;
 using Eliteracingleague.API.Services.Racing;
+using Eliteracingleague.API.Services.Rewards;
 using Eliteracingleague.API.Services.SystemTime;
 using System.Globalization;
 
@@ -1703,13 +1704,33 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            var prizeAwards = await _context.PrizeAwards
-                .Where(a => raceIds.Contains(a.RaceId) && a.Status != PrizeAwardStatuses.Paid)
+            var prizePayouts = await _context.PrizePayouts
+                .Include(p => p.PrizeAward)
+                    .ThenInclude(a => a.Payouts)
+                .Where(p => raceIds.Contains(p.PrizeAward.RaceId))
                 .ToListAsync();
 
-            foreach (var prizeAward in prizeAwards)
+            var lockedPayout = prizePayouts.FirstOrDefault(p =>
+                p.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid);
+            if (lockedPayout != null)
             {
-                prizeAward.Status = PrizeAwardStatuses.Rejected;
+                throw new InvalidOperationException(
+                    "Tournament cannot be cancelled while an owner or jockey payout is under review or paid.");
+            }
+
+            foreach (var payout in prizePayouts.Where(p =>
+                         p.Status == PrizeAwardStatuses.ReadyToClaim))
+            {
+                payout.Status = PrizeAwardStatuses.Rejected;
+                payout.RejectedAt = now;
+                payout.UpdatedAt = now;
+            }
+
+            foreach (var prizeAward in prizePayouts
+                         .Select(p => p.PrizeAward)
+                         .Distinct())
+            {
+                PrizePayoutService.SynchronizeAggregateStatus(prizeAward, now);
             }
         }
 

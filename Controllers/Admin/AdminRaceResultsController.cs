@@ -7,6 +7,7 @@ using Eliteracingleague.API.Services;
 using Eliteracingleague.API.Services.Auditing;
 using Eliteracingleague.API.Services.Notifications;
 using Eliteracingleague.API.Services.Racing;
+using Eliteracingleague.API.Services.Rewards;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public class AdminRaceResultsController : ControllerBase
     private readonly RaceResultValidationService _validationService;
     private readonly IAuditService _auditService;
     private readonly INotificationService _notificationService;
+    private readonly PrizePayoutService _prizePayoutService;
 
     public AdminRaceResultsController(
         EliteRacingLeagueContext context,
@@ -31,7 +33,8 @@ public class AdminRaceResultsController : ControllerBase
         TournamentStandingService standingService,
         RaceResultValidationService validationService,
         IAuditService auditService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        PrizePayoutService prizePayoutService)
     {
         _context = context;
         _predictionEvaluationService = predictionEvaluationService;
@@ -39,6 +42,7 @@ public class AdminRaceResultsController : ControllerBase
         _validationService = validationService;
         _auditService = auditService;
         _notificationService = notificationService;
+        _prizePayoutService = prizePayoutService;
     }
 
     [HttpGet]
@@ -292,19 +296,22 @@ public class AdminRaceResultsController : ControllerBase
             .ToDictionaryAsync(r => r.RankPosition, cancellationToken);
 
         var existingAwards = await _context.PrizeAwards
+            .Include(a => a.Payouts)
             .Where(a => a.RaceId == raceId)
             .ToListAsync(cancellationToken);
 
-        var lockedAward = existingAwards.FirstOrDefault(a =>
-            a.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid);
+        var lockedPayout = existingAwards
+            .SelectMany(a => a.Payouts)
+            .FirstOrDefault(p =>
+                p.Status is PrizeAwardStatuses.UnderReview or PrizeAwardStatuses.Paid);
 
-        if (lockedAward != null)
+        if (lockedPayout != null)
         {
             return Conflict(new AdminActionResponse
             {
-                Message = "A prize is under review or already paid. Resolve it before approving again.",
-                Id = lockedAward.PrizeAwardId,
-                Status = lockedAward.Status
+                Message = "An owner or jockey payout is under review or already paid. Resolve it before approving again.",
+                Id = lockedPayout.PrizePayoutId,
+                Status = lockedPayout.Status
             });
         }
 
@@ -375,7 +382,7 @@ public class AdminRaceResultsController : ControllerBase
 
                 var registration = registrationById[result.RegistrationId];
 
-                _context.PrizeAwards.Add(new PrizeAward
+                var prizeAward = new PrizeAward
                 {
                     RaceId = raceId,
                     RegistrationId = result.RegistrationId,
@@ -385,7 +392,10 @@ public class AdminRaceResultsController : ControllerBase
                     PrizeAmount = prizeRule.PrizeAmount,
                     Status = PrizeAwardStatuses.ReadyToClaim,
                     CreatedAt = now
-                });
+                };
+
+                _prizePayoutService.CreateRecipientPayouts(prizeAward, now);
+                _context.PrizeAwards.Add(prizeAward);
             }
 
             await _context.SaveChangesAsync(cancellationToken);
