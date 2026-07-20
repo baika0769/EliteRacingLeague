@@ -13,6 +13,15 @@ public class RefereeRaceLifecycleService
         RaceRegistrationStatuses.ReadyToRace
     };
 
+    // After a race is approved, registrations are moved to Completed. If the
+    // published result is reopened, those same participants must remain part
+    // of the post-race correction workflow.
+    private static readonly string[] PostRaceRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
+    };
+
     private static readonly string[] ViolationAllowedRaceStatuses =
     {
         RaceStatuses.AssignedReferee,
@@ -71,30 +80,46 @@ public class RefereeRaceLifecycleService
             return null;
         }
 
+        var isPostRaceStage = race.Status is
+            RaceStatuses.Finished or
+            RaceStatuses.ResultPending or
+            RaceStatuses.Published;
+
+        var eligibleRegistrationStatuses = isPostRaceStage
+            ? PostRaceRegistrationStatuses
+            : ActiveRegistrationStatuses;
+
         var registrationIds = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status))
+                eligibleRegistrationStatuses.Contains(r.Status))
             .Select(r => r.RegistrationId)
             .ToListAsync();
 
         var totalRegistrations = registrationIds.Count;
 
         var inspections = registrationIds.Count == 0
-            ? new List<string>()
+            ? new List<InspectionState>()
             : await _context.PreRaceInspections
                 .AsNoTracking()
                 .Where(i =>
                     i.RaceId == raceId &&
                     registrationIds.Contains(i.RegistrationId))
-                .Select(i => i.Status)
+                .Select(i => new InspectionState(
+                    i.RegistrationId,
+                    i.Status))
                 .ToListAsync();
 
-        var passedInspections = inspections.Count(s =>
-            s == PreRaceInspectionStatuses.Passed);
-        var failedInspections = inspections.Count(s =>
-            s == PreRaceInspectionStatuses.Failed);
+        var passedRegistrationIds = inspections
+            .Where(inspection =>
+                inspection.Status == PreRaceInspectionStatuses.Passed)
+            .Select(inspection => inspection.RegistrationId)
+            .ToHashSet();
+
+        var passedInspections = passedRegistrationIds.Count;
+        var failedInspections = inspections.Count(inspection =>
+            inspection.Status == PreRaceInspectionStatuses.Failed);
         var pendingInspections = Math.Max(
             0,
             totalRegistrations - passedInspections - failedInspections);
@@ -103,7 +128,8 @@ public class RefereeRaceLifecycleService
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                r.EnteredByRefereeId == refereeId)
+                r.EnteredByRefereeId == refereeId &&
+                passedRegistrationIds.Contains(r.RegistrationId))
             .Select(r => r.Status)
             .ToListAsync();
 
@@ -135,8 +161,11 @@ public class RefereeRaceLifecycleService
             PassedInspections = passedInspections,
             FailedInspections = failedInspections,
             PendingInspections = pendingInspections,
+            // Returned results behave like drafts during a correction: the
+            // referee must edit/reconfirm them before resubmission.
             DraftResults = resultStatuses.Count(s =>
-                s == RaceResultStatuses.Draft),
+                s == RaceResultStatuses.Draft ||
+                s == RaceResultStatuses.Returned),
             RefereeConfirmedResults = resultStatuses.Count(s =>
                 s == RaceResultStatuses.RefereeConfirmed),
             AdminApprovedResults = resultStatuses.Count(s =>
@@ -144,9 +173,9 @@ public class RefereeRaceLifecycleService
                 s == RaceResultStatuses.Published)
         };
 
-        var eligibleRegistrations = Math.Max(
-            0,
-            totalRegistrations - failedInspections);
+        // Only horses that explicitly passed pre-race inspection can
+        // participate in Post-Race results, ranking and prize evaluation.
+        var eligibleRegistrations = passedInspections;
         var localNow = _dateTimeProvider.GetLocalNow(
             _dateTimeProvider.TimeZoneId);
 
@@ -247,16 +276,20 @@ public class RefereeRaceLifecycleService
 
             CanFinishRace = raceStatus == RaceStatuses.Ongoing,
 
-            CanEnterResults = raceStatus == RaceStatuses.Finished,
+            CanEnterResults = raceStatus == RaceStatuses.Finished &&
+                hasEligibleRegistrations,
 
             CanConfirmResults = raceStatus == RaceStatuses.Finished &&
                 counts.DraftResults > 0 &&
                 counts.DraftResults + counts.RefereeConfirmedResults >= eligibleRegistrations &&
                 hasEligibleRegistrations,
 
-            CanSubmitPostRaceReport = isPostRaceStage && postRaceReport == null,
+            CanSubmitPostRaceReport = isPostRaceStage &&
+                hasEligibleRegistrations &&
+                postRaceReport == null,
 
             CanResubmitPostRaceReport = isPostRaceStage &&
+                hasEligibleRegistrations &&
                 postRaceReport?.Status == RefereeReportStatuses.Returned,
 
             CanReportViolation = ViolationAllowedRaceStatuses.Contains(raceStatus)
@@ -409,4 +442,6 @@ public class RefereeRaceLifecycleService
 
         return null;
     }
+    private sealed record InspectionState(int RegistrationId, string Status);
+
 }

@@ -210,14 +210,18 @@ public class AdminRaceResultsController : ControllerBase
             .Where(r =>
                 r.RaceId == raceId &&
                 (r.Status == RaceRegistrationStatuses.ReadyToRace ||
-                 r.Status == RaceRegistrationStatuses.Completed))
+                 r.Status == RaceRegistrationStatuses.Completed) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed))
             .ToListAsync(cancellationToken);
 
         if (registrations.Count == 0)
         {
             return BadRequest(new AdminActionResponse
             {
-                Message = "No eligible ReadyToRace/Completed registrations were found.",
+                Message = "No horses passed pre-race inspection, so there are no post-race results to approve.",
                 Id = raceId
             });
         }
@@ -243,7 +247,7 @@ public class AdminRaceResultsController : ControllerBase
             return BadRequest(new
             {
                 code = "MISSING_RACE_RESULTS",
-                message = "Every ReadyToRace registration must have a result before approval.",
+                message = "Every horse that passed pre-race inspection must have a result before approval.",
                 expectedResults = registrationIds.Count,
                 actualResults = results.Count,
                 missingRegistrationIds
@@ -572,7 +576,13 @@ public class AdminRaceResultsController : ControllerBase
     }
 
     private IQueryable<AdminRaceResultResponse> ResultQuery() =>
-        _context.RaceResults.AsNoTracking().Select(r => new AdminRaceResultResponse
+        _context.RaceResults
+            .AsNoTracking()
+            .Where(r => _context.PreRaceInspections.Any(inspection =>
+                inspection.RaceId == r.RaceId &&
+                inspection.RegistrationId == r.RegistrationId &&
+                inspection.Status == PreRaceInspectionStatuses.Passed))
+            .Select(r => new AdminRaceResultResponse
         {
             ResultId = r.ResultId,
             RaceId = r.RaceId,

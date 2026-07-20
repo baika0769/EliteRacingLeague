@@ -30,6 +30,16 @@ public class RefereeRacesController : ControllerBase
         RaceRegistrationStatuses.ReadyToRace
     };
 
+    // Registrations are marked Completed after a race is published. When an
+    // admin reopens published results for correction, the same participants
+    // must remain available to the referee without changing their historical
+    // registration status back to ReadyToRace.
+    private static readonly string[] PostRaceRegistrationStatuses =
+    {
+        RaceRegistrationStatuses.ReadyToRace,
+        RaceRegistrationStatuses.Completed
+    };
+
     private static readonly string[] ViolationAllowedRaceStatuses =
 {
     RaceStatuses.AssignedReferee,
@@ -103,13 +113,21 @@ public class RefereeRacesController : ControllerBase
     private async Task<List<RefereeRaceRegistrationResponse>> GetRefereeRegistrationResponsesAsync(
         int raceId,
         bool usePendingInspectionFallback,
-        bool includeInspectionReportFields)
+        bool includeInspectionReportFields,
+        bool includeCompletedRegistrations = false,
+        bool passedOnly = false)
     {
         var registrations = await _context.RaceRegistrations
             .AsNoTracking()
             .Where(registration =>
                 registration.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(registration.Status) &&
+                (includeCompletedRegistrations
+                    ? PostRaceRegistrationStatuses.Contains(registration.Status)
+                    : ActiveRegistrationStatuses.Contains(registration.Status)) &&
+                (!passedOnly || _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == registration.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed)) &&
                 registration.Race.Status != RaceStatuses.Cancelled &&
                 registration.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .Select(registration => new RefereeRaceRegistrationResponse
@@ -352,10 +370,31 @@ public class RefereeRacesController : ControllerBase
             return await BuildLifecycleAccessErrorAsync(raceId);
         }
 
+        var raceStatus = await _context.Races
+            .AsNoTracking()
+            .Where(r =>
+                r.RaceId == raceId &&
+                r.Status != RaceStatuses.Cancelled &&
+                r.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(r => r.Status)
+            .FirstOrDefaultAsync();
+
+        if (raceStatus == null)
+        {
+            return NotFound(new { message = "Race not found or has been cancelled." });
+        }
+
+        var includeCompletedRegistrations = raceStatus is
+            RaceStatuses.Finished or
+            RaceStatuses.ResultPending or
+            RaceStatuses.Published;
+
         var registrations = await GetRefereeRegistrationResponsesAsync(
             raceId,
             usePendingInspectionFallback: false,
-            includeInspectionReportFields: false);
+            includeInspectionReportFields: false,
+            includeCompletedRegistrations: includeCompletedRegistrations,
+            passedOnly: includeCompletedRegistrations);
 
         return Ok(registrations);
     }
@@ -669,6 +708,33 @@ public class RefereeRacesController : ControllerBase
             inspection.InspectedAt = _dateTimeProvider.UtcNow;
         }
 
+        // A horse that fails pre-race inspection never participates in the race,
+        // so it must not keep a post-race result row from an earlier test/correction.
+        if (request.Status == PreRaceInspectionStatuses.Failed)
+        {
+            var staleResults = await _context.RaceResults
+                .Where(result =>
+                    result.RaceId == raceId &&
+                    result.RegistrationId == request.RegistrationId)
+                .ToListAsync();
+
+            if (staleResults.Any(result =>
+                    result.Status is RaceResultStatuses.AdminApproved or
+                        RaceResultStatuses.Published))
+            {
+                return Conflict(new
+                {
+                    code = "PUBLISHED_RESULT_EXISTS",
+                    message = "This horse already has an approved/published result. Reopen the published race before changing the pre-race inspection."
+                });
+            }
+
+            if (staleResults.Count > 0)
+            {
+                _context.RaceResults.RemoveRange(staleResults);
+            }
+        }
+
         await _context.SaveChangesAsync();
 
         return Ok(new
@@ -768,24 +834,33 @@ public class RefereeRacesController : ControllerBase
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.RegistrationId == request.RegistrationId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
+                PostRaceRegistrationStatuses.Contains(r.Status) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (registration == null)
         {
-            return NotFound("Registration not found or has been cancelled.");
-        }
+            var failedInspection = await _context.PreRaceInspections
+                .AsNoTracking()
+                .AnyAsync(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == request.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed);
 
-        var failedInspection = await _context.PreRaceInspections
-            .AnyAsync(i =>
-                i.RaceId == raceId &&
-                i.RegistrationId == request.RegistrationId &&
-                i.Status == PreRaceInspectionStatuses.Failed);
+            if (failedInspection)
+            {
+                return Conflict(new
+                {
+                    code = "PRE_RACE_FAILED_NOT_ELIGIBLE",
+                    message = "This horse failed pre-race inspection and is shown only in Violations. It cannot receive a post-race result."
+                });
+            }
 
-        if (failedInspection && outcomeStatus is RaceOutcomeStatuses.Finished or RaceOutcomeStatuses.DidNotFinish)
-        {
-            return BadRequest("A registration that failed pre-race inspection must be recorded as DNS, DSQ, or Withdrawn.");
+            return NotFound("Registration not found or did not pass pre-race inspection.");
         }
 
         var result = request.ResultId.HasValue
@@ -1008,7 +1083,11 @@ public class RefereeRacesController : ControllerBase
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status))
+                PostRaceRegistrationStatuses.Contains(r.Status) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed))
             .Select(r => r.RegistrationId)
             .ToListAsync(cancellationToken);
 
@@ -1034,7 +1113,7 @@ public class RefereeRacesController : ControllerBase
             return BadRequest(new
             {
                 code = "MISSING_RACE_RESULTS",
-                message = "Every ReadyToRace registration must have a result, including DNS, DNF, DSQ, or Withdrawn participants.",
+                message = "Every horse that passed pre-race inspection must have a post-race result.",
                 missingRegistrationIds
             });
         }
@@ -1052,17 +1131,6 @@ public class RefereeRacesController : ControllerBase
                 message = "Admin-approved or published results cannot be confirmed by the referee."
             });
         }
-
-        var failedInspectionIds = (await _context.PreRaceInspections
-            .AsNoTracking()
-            .Where(i =>
-                i.RaceId == raceId &&
-                i.Status == PreRaceInspectionStatuses.Failed &&
-                registrationIdSet.Contains(i.RegistrationId))
-            .Select(i => i.RegistrationId)
-            .Distinct()
-            .ToListAsync(cancellationToken))
-            .ToHashSet();
 
         var disqualifiedIds = (await _context.RaceViolations
             .AsNoTracking()
@@ -1093,18 +1161,8 @@ public class RefereeRacesController : ControllerBase
             }
         }
 
-        var failedInspectionErrors = results
-            .Where(r =>
-                failedInspectionIds.Contains(r.RegistrationId) &&
-                r.OutcomeStatus != RaceOutcomeStatuses.DidNotStart &&
-                r.OutcomeStatus != RaceOutcomeStatuses.Disqualified &&
-                r.OutcomeStatus != RaceOutcomeStatuses.Withdrawn)
-            .Select(r => $"Registration #{r.RegistrationId} failed pre-race inspection and must use DNS, DSQ, or Withdrawn.")
-            .ToList();
-
         var validationErrors = _resultValidationService
             .ValidateForPublication(results, registrationIdSet, disqualifiedIds)
-            .Concat(failedInspectionErrors)
             .Distinct()
             .ToList();
 
@@ -1194,13 +1252,17 @@ public class RefereeRacesController : ControllerBase
             .AnyAsync(r =>
                 r.RaceId == raceId &&
                 r.RegistrationId == request.RegistrationId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
+                PostRaceRegistrationStatuses.Contains(r.Status) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (!registrationExists)
         {
-            return NotFound("Registration not found or has been cancelled.");
+            return NotFound("Registration not found, cancelled, or did not pass pre-race inspection.");
         }
 
         var violation = new RaceViolation
@@ -1225,6 +1287,7 @@ public class RefereeRacesController : ControllerBase
             {
                 result.OutcomeStatus = RaceOutcomeStatuses.Disqualified;
                 result.FinishPosition = null;
+                result.FinishTimeSeconds = null;
                 result.UpdatedAt = _dateTimeProvider.UtcNow;
             }
         }
@@ -1309,13 +1372,17 @@ public class RefereeRacesController : ControllerBase
             .AnyAsync(r =>
                 r.RaceId == raceId &&
                 r.RegistrationId == request.RegistrationId &&
-                ActiveRegistrationStatuses.Contains(r.Status) &&
+                PostRaceRegistrationStatuses.Contains(r.Status) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled);
 
         if (!registrationExists)
         {
-            return NotFound("Registration not found or has been cancelled.");
+            return NotFound("Registration not found, cancelled, or did not pass pre-race inspection.");
         }
 
         var violation = await _context.RaceViolations
@@ -1345,6 +1412,7 @@ public class RefereeRacesController : ControllerBase
             {
                 result.OutcomeStatus = RaceOutcomeStatuses.Disqualified;
                 result.FinishPosition = null;
+                result.FinishTimeSeconds = null;
                 result.UpdatedAt = _dateTimeProvider.UtcNow;
             }
         }
@@ -1539,7 +1607,11 @@ public class RefereeRacesController : ControllerBase
                 .AsNoTracking()
                 .Where(r =>
                     r.RaceId == raceId &&
-                    ActiveRegistrationStatuses.Contains(r.Status))
+                    PostRaceRegistrationStatuses.Contains(r.Status) &&
+                    _context.PreRaceInspections.Any(inspection =>
+                        inspection.RaceId == raceId &&
+                        inspection.RegistrationId == r.RegistrationId &&
+                        inspection.Status == PreRaceInspectionStatuses.Passed))
                 .Select(r => r.RegistrationId)
                 .ToListAsync(cancellationToken);
 
@@ -1572,7 +1644,7 @@ public class RefereeRacesController : ControllerBase
                 return Conflict(new
                 {
                     code = "RESULTS_NOT_CONFIRMED",
-                    message = "The final report can only be submitted after every ReadyToRace registration has a referee-confirmed result.",
+                    message = "The final report can only be submitted after every horse that passed pre-race inspection has a referee-confirmed result.",
                     expectedResults = activeRegistrationIds.Count,
                     actualResults = confirmedResults.Count,
                     missingRegistrationIds,
@@ -1851,7 +1923,11 @@ public class RefereeRacesController : ControllerBase
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == raceId &&
-                ActiveRegistrationStatuses.Contains(r.Status))
+                PostRaceRegistrationStatuses.Contains(r.Status) &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed))
             .Select(r => r.RegistrationId)
             .ToListAsync(cancellationToken);
 
@@ -1869,7 +1945,7 @@ public class RefereeRacesController : ControllerBase
             return Conflict(new
             {
                 code = "RESULTS_NOT_RECONFIRMED",
-                message = "Every ReadyToRace registration must be referee-confirmed before the final report is resubmitted.",
+                message = "Every horse that passed pre-race inspection must be referee-confirmed before the final report is resubmitted.",
                 expectedResults = activeRegistrationIds.Count,
                 confirmedResults = confirmedResultCount
             });
@@ -1881,6 +1957,8 @@ public class RefereeRacesController : ControllerBase
         report.RevisionNumber += 1;
         report.SubmittedAt = now;
         report.ResubmittedAt = now;
+        report.ReviewedByAdminId = null;
+        report.ReviewedAt = null;
         report.UpdatedAt = now;
 
         await _notificationService.CreateForAdminsAsync(
@@ -1923,26 +2001,64 @@ public class RefereeRacesController : ControllerBase
             return Forbid();
         }
 
-        var violations = await _context.RaceViolations
+        var postRaceViolations = await _context.RaceViolations
             .AsNoTracking()
             .Where(v =>
                 v.RaceId == raceId &&
                 v.RefereeId == refereeId &&
+                !_context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == v.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed) &&
                 v.Race.Status != RaceStatuses.Cancelled &&
                 v.Race.Tournament.Status != TournamentStatuses.Cancelled)
-            .OrderByDescending(v => v.CreatedAt)
-            .Select(v => new
+            .Select(v => new RefereeViolationDisplayResponse
             {
-                violationId = v.ViolationId,
-                registrationId = v.RegistrationId,
-                horseName = v.Registration.Horse.HorseName,
-                violationType = v.ViolationType,
-                description = v.Description,
-                action = v.Action,
-                penaltyPoints = v.PenaltyPoints,
-                createdAt = v.CreatedAt
+                ViolationId = v.ViolationId,
+                RegistrationId = v.RegistrationId,
+                HorseName = v.Registration.Horse.HorseName,
+                ViolationType = v.ViolationType,
+                Description = v.Description,
+                Action = v.Action,
+                PenaltyPoints = v.PenaltyPoints,
+                CreatedAt = v.CreatedAt,
+                SourceType = "PostRaceViolation",
+                Phase = "PostRace",
+                IsReadOnly = false
             })
             .ToListAsync();
+
+        // A failed pre-race inspection is shown in the Violations tab only.
+        // It is not copied to race_violations and does not create a RaceResult.
+        var preRaceFailures = await _context.PreRaceInspections
+            .AsNoTracking()
+            .Where(inspection =>
+                inspection.RaceId == raceId &&
+                inspection.RefereeId == refereeId &&
+                inspection.Status == PreRaceInspectionStatuses.Failed &&
+                inspection.Race.Status != RaceStatuses.Cancelled &&
+                inspection.Race.Tournament.Status != TournamentStatuses.Cancelled)
+            .Select(inspection => new RefereeViolationDisplayResponse
+            {
+                // Negative IDs avoid collisions with real RaceViolation IDs.
+                ViolationId = -inspection.InspectionId,
+                RegistrationId = inspection.RegistrationId,
+                HorseName = inspection.Registration.Horse.HorseName,
+                ViolationType = "Pre-Race Inspection Failed",
+                Description = inspection.Note,
+                Action = "NotEligible",
+                PenaltyPoints = null,
+                CreatedAt = inspection.InspectedAt,
+                SourceType = "PreRaceInspection",
+                Phase = "PreRace",
+                IsReadOnly = true
+            })
+            .ToListAsync();
+
+        var violations = postRaceViolations
+            .Concat(preRaceFailures)
+            .OrderByDescending(item => item.CreatedAt)
+            .ToList();
 
         return Ok(violations);
     }
@@ -1967,14 +2083,20 @@ public class RefereeRacesController : ControllerBase
             .Where(r =>
                 r.RaceId == raceId &&
                 r.EnteredByRefereeId == refereeId &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == raceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Passed) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderBy(r => r.FinishPosition)
+            .ThenBy(r => r.ResultId)
             .Select(r => new
             {
                 resultId = r.ResultId,
                 registrationId = r.RegistrationId,
                 horseName = r.Registration.Horse.HorseName,
+                outcomeStatus = r.OutcomeStatus,
                 finishTimeSeconds = r.FinishTimeSeconds,
                 finishPosition = r.FinishPosition,
                 score = r.Score,
@@ -2110,3 +2232,19 @@ public class RefereeRacesController : ControllerBase
     }
 
 }
+
+public sealed class RefereeViolationDisplayResponse
+{
+    public int ViolationId { get; set; }
+    public int RegistrationId { get; set; }
+    public string HorseName { get; set; } = string.Empty;
+    public string ViolationType { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public decimal? PenaltyPoints { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string SourceType { get; set; } = string.Empty;
+    public string Phase { get; set; } = string.Empty;
+    public bool IsReadOnly { get; set; }
+}
+

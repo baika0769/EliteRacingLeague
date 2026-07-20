@@ -37,6 +37,7 @@ public class RaceResultCorrectionService
             .Include(r => r.Tournament).ThenInclude(t => t.Season)
             .Include(r => r.RaceResults)
             .Include(r => r.PrizeAwards)
+            .Include(r => r.RefereeReports)
             .Include(r => r.RefereeAssignments)
             .FirstOrDefaultAsync(r => r.RaceId == raceId, cancellationToken)
             ?? throw new InvalidOperationException("Race not found.");
@@ -104,8 +105,27 @@ public class RaceResultCorrectionService
         var settlement = await _settlementService.ReverseForResultCorrectionAsync(
             raceId, reason, cancellationToken);
 
+        // A published prize is provisional until the correction is approved.
+        // Remove ReadyToClaim/Rejected awards now; ApproveAllResults recreates
+        // them from the corrected ranking. UnderReview/Paid awards are blocked
+        // above and can never be silently removed.
         _context.PrizeAwards.RemoveRange(race.PrizeAwards);
         var oldRaceStatus = race.Status;
+
+        var finalPostRaceReport = race.RefereeReports
+            .Where(report => report.ReportType == RefereeReportTypes.PostRace)
+            .OrderByDescending(report => report.ReportId)
+            .FirstOrDefault();
+
+        if (finalPostRaceReport != null)
+        {
+            finalPostRaceReport.Status = RefereeReportStatuses.Returned;
+            finalPostRaceReport.ReturnReasonCategory = RefereeReportReturnReasonCategories.Other;
+            finalPostRaceReport.ReturnReason = reason.Trim();
+            finalPostRaceReport.ReviewedByAdminId = adminId;
+            finalPostRaceReport.ReviewedAt = now;
+            finalPostRaceReport.UpdatedAt = now;
+        }
 
         foreach (var result in race.RaceResults)
         {
@@ -166,7 +186,13 @@ public class RaceResultCorrectionService
         await _auditService.WriteAsync(adminId, AuditActionTypes.ReopenResult,
             "Race", raceId.ToString(),
             new { Status = oldRaceStatus, Results = snapshot },
-            new { Status = race.Status, Revision = nextVersion }, reason,
+            new
+            {
+                Status = race.Status,
+                Revision = nextVersion,
+                ReportStatus = finalPostRaceReport?.Status,
+                ReversedPrizeAwards = race.PrizeAwards.Count
+            }, reason,
             cancellationToken);
 
         await _context.SaveChangesAsync(cancellationToken);
