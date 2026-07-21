@@ -13,7 +13,7 @@ public class CreateRewardItemRequest
     [StringLength(1000)]
     public string? Description { get; set; }
 
-    [StringLength(500)]
+    [StringLength(1000)]
     public string? ImageUrl { get; set; }
 
     [Range(0, 1_000_000)]
@@ -31,11 +31,10 @@ public class UpdateRewardItemRequest
     [StringLength(1000)]
     public string? Description { get; set; }
 
-    [StringLength(500)]
+    [StringLength(1000)]
     public string? ImageUrl { get; set; }
 
-    [Required]
-    public string RowVersion { get; set; } = null!;
+    public string? RowVersion { get; set; }
 }
 
 public class AdjustRewardInventoryRequest

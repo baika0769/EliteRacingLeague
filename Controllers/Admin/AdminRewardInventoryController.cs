@@ -127,12 +127,19 @@ public class AdminRewardInventoryController : ControllerBase
             return Conflict(new { message = "Reward SKU already exists." });
         }
 
-        if (!TryDecodeRowVersion(request.RowVersion, out var originalRowVersion))
+        if (!string.IsNullOrWhiteSpace(request.RowVersion))
         {
-            return BadRequest(new { message = "The reward item version is invalid. Refresh the page and try again." });
-        }
+            if (!TryDecodeRowVersion(request.RowVersion, out var originalRowVersion))
+            {
+                return BadRequest(new { message = "The reward item version is invalid. Open the edit form again and try once more." });
+            }
 
-        _context.Entry(item).Property(x => x.RowVersion).OriginalValue = originalRowVersion;
+            _context.Entry(item).Property(x => x.RowVersion).OriginalValue = originalRowVersion;
+        }
+        else
+        {
+            _context.Entry(item).Property(x => x.RowVersion).OriginalValue = item.RowVersion;
+        }
 
         var before = new
         {

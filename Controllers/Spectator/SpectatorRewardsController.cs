@@ -135,7 +135,10 @@ public class SpectatorRewardsController : ControllerBase
                     RankPosition = item.RankPosition,
                     RewardName = item.RewardName,
                     RewardDescription = item.RewardDescription,
-                    BonusPoints = item.BonusPoints
+                    BonusPoints = item.BonusPoints,
+                    RewardItemName = item.RewardItem != null ? item.RewardItem.Name : null,
+                    Quantity = item.Quantity,
+                    RewardItemImageUrl = item.RewardItem != null ? item.RewardItem.ImageUrl : null
                 })
                 .ToListAsync();
 
@@ -418,6 +421,9 @@ public class ActiveSeasonRewardRuleResponse
     public string RewardName { get; set; } = string.Empty;
     public string? RewardDescription { get; set; }
     public int BonusPoints { get; set; }
+    public string? RewardItemName { get; set; }
+    public int Quantity { get; set; }
+    public string? RewardItemImageUrl { get; set; }
 }
 
 public class WalletTransactionResponse
