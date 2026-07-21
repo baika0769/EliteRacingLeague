@@ -1,4 +1,4 @@
-﻿using Eliteracingleague.API.Constants;
+using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Spectator;
 using Microsoft.AspNetCore.Authorization;
@@ -78,6 +78,8 @@ public class SpectatorRaceReplayController : ControllerBase
                 r.RegistrationId,
                 r.FinishPosition,
                 r.FinishTimeSeconds,
+                r.OutcomeStatus,
+                r.Note,
                 r.PublishedAt,
                 r.Registration.HorseId,
                 r.Registration.Horse.HorseName,
@@ -104,9 +106,9 @@ public class SpectatorRaceReplayController : ControllerBase
         var runners = approvedResults
             .Select((r, index) =>
             {
-                var rank = r.FinishPosition ?? index + 1;
-                var finishSeconds = r.FinishTimeSeconds ?? (12m + rank * 1.2m);
-                var finishMs = Math.Max(1000, (int)Math.Round(finishSeconds * 1000m, MidpointRounding.AwayFromZero));
+                var finishMs = r.FinishTimeSeconds.HasValue
+                    ? Math.Max(1000, (int)Math.Round(r.FinishTimeSeconds.Value * 1000m, MidpointRounding.AwayFromZero))
+                    : (int?)null;
 
                 return new SpectatorRaceReplayRunnerResponse
                 {
@@ -119,16 +121,22 @@ public class SpectatorRaceReplayController : ControllerBase
                     OwnerName = r.OwnerName,
                     JockeyId = r.JockeyId,
                     JockeyName = r.JockeyName,
-                    Rank = rank,
-                    FinishTimeSeconds = finishSeconds,
+                    Rank = r.FinishPosition,
+                    FinishTimeSeconds = r.FinishTimeSeconds,
                     FinishTimeMs = finishMs,
+                    OutcomeStatus = r.OutcomeStatus,
+                    Note = r.Note,
                     Lane = index + 1,
                     Color = RunnerColors[index % RunnerColors.Length]
                 };
             })
             .ToList();
 
-        var totalDurationMs = runners.Max(r => r.FinishTimeMs) + 1500;
+        var totalDurationMs = runners
+            .Where(r => r.FinishTimeMs.HasValue)
+            .Select(r => r.FinishTimeMs!.Value)
+            .DefaultIfEmpty(11000)
+            .Max() + 1500;
 
         return Ok(new SpectatorRaceReplayResponse
         {

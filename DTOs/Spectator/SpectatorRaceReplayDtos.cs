@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.DTOs.Spectator;
+namespace Eliteracingleague.API.DTOs.Spectator;
 
 public class SpectatorRaceReplayResponse
 {
@@ -26,9 +26,11 @@ public class SpectatorRaceReplayRunnerResponse
     public string OwnerName { get; set; } = string.Empty;
     public int? JockeyId { get; set; }
     public string? JockeyName { get; set; }
-    public int Rank { get; set; }
-    public decimal FinishTimeSeconds { get; set; }
-    public int FinishTimeMs { get; set; }
+    public int? Rank { get; set; }
+    public decimal? FinishTimeSeconds { get; set; }
+    public int? FinishTimeMs { get; set; }
+    public string OutcomeStatus { get; set; } = "Finished";
+    public string? Note { get; set; }
     public int Lane { get; set; }
     public string Color { get; set; } = string.Empty;
 }
