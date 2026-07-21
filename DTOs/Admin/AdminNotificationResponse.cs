@@ -1,4 +1,4 @@
-﻿namespace Eliteracingleague.API.DTOs.Admin
+namespace Eliteracingleague.API.DTOs.Admin
 {
     public class AdminNotificationResponse
     {
@@ -17,6 +17,8 @@
         public DateTime CreatedAt { get; set; }
 
         public string Priority { get; set; } = "Normal";
+
+        public string? ActionType { get; set; }
 
         public string? ActionUrl { get; set; }
 

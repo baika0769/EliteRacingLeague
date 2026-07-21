@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.DTOs.Admin;
@@ -106,6 +106,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                         IsRead = n.IsRead,
                         CreatedAt = n.CreatedAt,
                         Priority = GetPriority(type),
+                        ActionType = n.ActionType,
                         ActionUrl = n.ActionUrl,
                         RelatedType = n.RelatedType,
                         RelatedId = n.RelatedId
