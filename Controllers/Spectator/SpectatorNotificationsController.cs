@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -31,6 +31,7 @@ public class SpectatorNotificationsController : ControllerBase
         }
 
         var notifications = await _context.Notifications
+            .AsNoTracking()
             .Where(n => n.UserId == userId)
             .OrderByDescending(n => n.CreatedAt)
             .Select(n => new
@@ -39,7 +40,11 @@ public class SpectatorNotificationsController : ControllerBase
                 title = n.Title,
                 message = n.Message,
                 isRead = n.IsRead,
-                createdAt = n.CreatedAt
+                createdAt = n.CreatedAt,
+                actionType = n.ActionType,
+                actionUrl = n.ActionUrl,
+                relatedType = n.RelatedType,
+                relatedId = n.RelatedId
             })
             .ToListAsync();
 

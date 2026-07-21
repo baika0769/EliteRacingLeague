@@ -1444,6 +1444,10 @@ namespace Eliteracingleague.API.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("preparing_at");
 
+                    b.Property<DateTime?>("ShippedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("shipped_at");
+
                     b.Property<string>("ReceiverName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")

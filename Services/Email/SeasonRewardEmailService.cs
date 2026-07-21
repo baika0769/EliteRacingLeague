@@ -137,7 +137,8 @@ public sealed class SeasonRewardEmailService
         {
             SeasonRewardStatuses.Approved => ("Phần thưởng đã được duyệt", "Thông tin nhận quà của bạn đã được Admin duyệt."),
             SeasonRewardStatuses.Preparing => ("Phần thưởng đang được chuẩn bị", "Quà của bạn đang được đóng gói và chuẩn bị giao."),
-            SeasonRewardStatuses.Delivered => ("Phần thưởng đã được giao", "Hệ thống đã cập nhật phần thưởng của bạn là đã giao."),
+            SeasonRewardStatuses.Shipped => ("Phần thưởng đã được gửi đi", "Quà đã rời kho và đang được giao đến địa chỉ bạn đã đăng ký. Sau khi nhận, hãy xác nhận trên trang phần thưởng."),
+            SeasonRewardStatuses.Delivered => ("Bạn đã xác nhận nhận quà", "Hệ thống đã ghi nhận bạn nhận phần thưởng thành công."),
             SeasonRewardStatuses.Rejected => ("Yêu cầu nhận quà chưa được chấp nhận", "Yêu cầu nhận quà đã bị từ chối. Vui lòng xem ghi chú của Admin và liên hệ hỗ trợ nếu cần."),
             _ => ("Trạng thái phần thưởng đã thay đổi", $"Trạng thái mới của phần thưởng là {reward.Status}.")
         };

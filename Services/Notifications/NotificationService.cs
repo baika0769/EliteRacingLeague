@@ -77,6 +77,114 @@ public class NotificationService : INotificationService
         }
     }
 
+    public async Task CreateForRaceSpectatorsAsync(
+        int raceId,
+        string title,
+        string message,
+        string? actionType = null,
+        string? actionUrl = null,
+        string? relatedType = null,
+        int? relatedId = null,
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
+    {
+        var userIds = await _context.RacePredictions
+            .AsNoTracking()
+            .Where(item => item.RaceId == raceId && item.Status != RacePredictionStatuses.Cancelled)
+            .Select(item => item.SpectatorId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        await CreateForUsersAsync(userIds, title, message, actionType, actionUrl,
+            relatedType, relatedId, cancellationToken, preventDuplicates);
+    }
+
+    public async Task CreateForAssignedRaceRefereesAsync(
+        int raceId,
+        string title,
+        string message,
+        string? actionType = null,
+        string? actionUrl = null,
+        string? relatedType = null,
+        int? relatedId = null,
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
+    {
+        var userIds = await _context.RefereeAssignments
+            .AsNoTracking()
+            .Where(item => item.RaceId == raceId && item.Status == RefereeAssignmentStatuses.Assigned)
+            .Select(item => item.RefereeId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        await CreateForUsersAsync(userIds, title, message, actionType, actionUrl,
+            relatedType, relatedId, cancellationToken, preventDuplicates);
+    }
+
+    public async Task CreateForTournamentSpectatorsAsync(
+        int tournamentId,
+        string title,
+        string message,
+        string? actionType = null,
+        string? actionUrl = null,
+        string? relatedType = null,
+        int? relatedId = null,
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
+    {
+        var userIds = await _context.RacePredictions
+            .AsNoTracking()
+            .Where(item => item.Race.TournamentId == tournamentId && item.Status != RacePredictionStatuses.Cancelled)
+            .Select(item => item.SpectatorId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        await CreateForUsersAsync(userIds, title, message, actionType, actionUrl,
+            relatedType, relatedId, cancellationToken, preventDuplicates);
+    }
+
+    public async Task CreateForTournamentRefereesAsync(
+        int tournamentId,
+        string title,
+        string message,
+        string? actionType = null,
+        string? actionUrl = null,
+        string? relatedType = null,
+        int? relatedId = null,
+        CancellationToken cancellationToken = default,
+        bool preventDuplicates = true)
+    {
+        var userIds = await _context.RefereeAssignments
+            .AsNoTracking()
+            .Where(item =>
+                item.Race.TournamentId == tournamentId &&
+                item.Status == RefereeAssignmentStatuses.Assigned)
+            .Select(item => item.RefereeId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        await CreateForUsersAsync(userIds, title, message, actionType, actionUrl,
+            relatedType, relatedId, cancellationToken, preventDuplicates);
+    }
+
+    private async Task CreateForUsersAsync(
+        IEnumerable<int> userIds,
+        string title,
+        string message,
+        string? actionType,
+        string? actionUrl,
+        string? relatedType,
+        int? relatedId,
+        CancellationToken cancellationToken,
+        bool preventDuplicates)
+    {
+        foreach (var userId in userIds.Distinct())
+        {
+            await CreateForUserAsync(userId, title, message, actionType, actionUrl,
+                relatedType, relatedId, cancellationToken, preventDuplicates);
+        }
+    }
+
     public Task CreateForAdminsAsync(
         string title,
         string message,

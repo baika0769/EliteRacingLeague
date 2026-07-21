@@ -755,6 +755,18 @@ namespace Eliteracingleague.API.Controllers.Admin
                 new[] { tournament.TournamentId },
                 now);
 
+            foreach (var race in tournament.Races)
+            {
+                await _notificationService.CreateForAssignedRaceRefereesAsync(
+                    race.RaceId,
+                    "Pre-Race Inspection Available",
+                    $"Registration for {tournament.TournamentName} is closed. You can now inspect participants for {race.RaceName}.",
+                    "RefereePreRaceAvailable",
+                    $"/referee/races/pre-race/{race.RaceId}",
+                    "Race",
+                    race.RaceId);
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new AdminActionResponse

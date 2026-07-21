@@ -143,6 +143,7 @@ public class AdminSeasonsController : ControllerBase
                         r.ClaimedAt,
                         r.ApprovedAt,
                         r.PreparingAt,
+                        r.ShippedAt,
                         r.DeliveredAt,
                         r.RejectedAt,
                         r.ReceiverName,
@@ -1365,6 +1366,7 @@ public class AdminSeasonsController : ControllerBase
                 r.ClaimedAt,
                 r.ApprovedAt,
                 r.PreparingAt,
+                r.ShippedAt,
                 r.DeliveredAt,
                 r.RejectedAt,
                 r.ReceiverName,
@@ -1388,11 +1390,15 @@ public class AdminSeasonsController : ControllerBase
     {
         if (!User.TryGetUserId(out var adminId)) return Unauthorized();
         if (!SeasonRewardStatuses.IsValid(request.Status) ||
-            request.Status is SeasonRewardStatuses.Eligible or SeasonRewardStatuses.Claimed or SeasonRewardStatuses.Expired)
+            request.Status is SeasonRewardStatuses.Eligible or
+                SeasonRewardStatuses.Claimed or
+                SeasonRewardStatuses.Shipped or
+                SeasonRewardStatuses.Delivered or
+                SeasonRewardStatuses.Expired)
         {
             return BadRequest(new
             {
-                message = "Admin status must be Approved, Preparing, Delivered, or Rejected."
+                message = "Admin status must be Approved, Preparing, or Rejected. Use the ship endpoint to send a prepared reward; the spectator confirms final delivery."
             });
         }
 
@@ -1411,7 +1417,7 @@ public class AdminSeasonsController : ControllerBase
         {
             SeasonRewardStatuses.Claimed => request.Status is SeasonRewardStatuses.Approved or SeasonRewardStatuses.Rejected,
             SeasonRewardStatuses.Approved => request.Status is SeasonRewardStatuses.Preparing or SeasonRewardStatuses.Rejected,
-            SeasonRewardStatuses.Preparing => request.Status is SeasonRewardStatuses.Delivered or SeasonRewardStatuses.Rejected,
+            SeasonRewardStatuses.Preparing => request.Status == SeasonRewardStatuses.Rejected,
             _ => false
         };
 
@@ -1439,11 +1445,6 @@ public class AdminSeasonsController : ControllerBase
                 break;
             case SeasonRewardStatuses.Preparing:
                 reward.PreparingAt = now;
-                break;
-            case SeasonRewardStatuses.Delivered:
-                reward.DeliveredAt = now;
-                if (reward.RewardItem != null)
-                    await _rewardInventoryService.DeliverAsync(reward.RewardItem, reward, adminId, now);
                 break;
             case SeasonRewardStatuses.Rejected:
                 reward.RejectedAt = now;
@@ -1480,8 +1481,84 @@ public class AdminSeasonsController : ControllerBase
             reward.AdminNote,
             reward.ApprovedAt,
             reward.PreparingAt,
+            reward.ShippedAt,
             reward.DeliveredAt,
             reward.RejectedAt,
+            emailSent
+        });
+    }
+
+
+    [HttpPut("rewards/{rewardId:int}/ship")]
+    public async Task<IActionResult> ShipSeasonReward(
+        int rewardId,
+        [FromBody] ShipSeasonRewardRequest? request)
+    {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
+
+        var reward = await _context.SeasonRewards
+            .Include(item => item.Season)
+            .Include(item => item.Spectator)
+            .Include(item => item.RewardItem)
+            .FirstOrDefaultAsync(item => item.SeasonRewardId == rewardId);
+
+        if (reward == null)
+            return NotFound(new { message = "Season reward not found.", rewardId });
+
+        if (reward.Status != SeasonRewardStatuses.Preparing)
+        {
+            return BadRequest(new
+            {
+                message = "Only a prepared reward can be marked as shipped.",
+                rewardId,
+                status = reward.Status
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(reward.DeliveryAddress) ||
+            string.IsNullOrWhiteSpace(reward.ReceiverName) ||
+            string.IsNullOrWhiteSpace(reward.ReceiverPhone))
+        {
+            return BadRequest(new
+            {
+                message = "Receiver name, phone, and delivery address are required before shipping."
+            });
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+        reward.Status = SeasonRewardStatuses.Shipped;
+        reward.ShippedAt = now;
+        reward.AdminNote = string.IsNullOrWhiteSpace(request?.AdminNote)
+            ? reward.AdminNote
+            : request.AdminNote.Trim();
+
+        // Inventory remains reserved while the parcel is in transit. It is moved
+        // to Delivered only when the spectator confirms actual receipt.
+        _context.Notifications.Add(new Notification
+        {
+            UserId = reward.SpectatorId,
+            Title = "Season Reward Shipped",
+            Message = $"Your reward {reward.RewardName} from season {reward.Season.SeasonName} has been shipped to {reward.DeliveryAddress}. Confirm receipt after it arrives.",
+            IsRead = false,
+            CreatedAt = now,
+            ActionType = "SpectatorRewardShipped",
+            ActionUrl = "/spectator/results",
+            RelatedType = "SeasonReward",
+            RelatedId = reward.SeasonRewardId
+        });
+
+        await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+            "SeasonReward", reward.SeasonRewardId.ToString(), null,
+            new { reward.Status, reward.ShippedAt, reward.InventoryReserved }, reward.AdminNote);
+        await _context.SaveChangesAsync();
+        var emailSent = await _rewardEmailService.TrySendStatusUpdatedAsync(reward.SeasonRewardId);
+
+        return Ok(new
+        {
+            message = "Season reward marked as shipped. Waiting for spectator delivery confirmation.",
+            rewardId = reward.SeasonRewardId,
+            reward.Status,
+            reward.ShippedAt,
             emailSent
         });
     }
@@ -1661,6 +1738,12 @@ public class SeasonRewardRuleRequest
 
     [Range(1, 100)]
     public int Quantity { get; set; } = 1;
+}
+
+public class ShipSeasonRewardRequest
+{
+    [StringLength(1000)]
+    public string? AdminNote { get; set; }
 }
 
 public class UpdateSeasonRewardStatusRequest

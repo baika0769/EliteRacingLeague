@@ -174,7 +174,9 @@ public class SpectatorLeaderboardService
         return new SpectatorRewardSummary
         {
             HasActiveSeason = true,
-            RewardPoints = wallet?.SeasonScore ?? 0,
+            // Season ranking is skill-based, not stake-based: every correct
+            // prediction earns the same score configured for the season.
+            RewardPoints = checked(correctPredictions * Math.Max(1, season.PointsPerCorrectPrediction)),
             BettingPoints = wallet?.CurrentBettingPoints ?? 0,
             BaseOpeningPoints = baseOpeningPoints,
             CarriedBonusPoints = carriedBonusPoints,
@@ -271,6 +273,13 @@ public class SpectatorLeaderboardService
 
     public async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit, int seasonId)
     {
+        var pointsPerCorrectPrediction = await _context.Seasons
+            .AsNoTracking()
+            .Where(item => item.SeasonId == seasonId)
+            .Select(item => (int?)item.PointsPerCorrectPrediction)
+            .FirstOrDefaultAsync() ?? 100;
+        pointsPerCorrectPrediction = Math.Max(1, pointsPerCorrectPrediction);
+
         var rows = await _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
@@ -287,24 +296,17 @@ public class SpectatorLeaderboardService
             {
                 g.Key.SpectatorId,
                 g.Key.SpectatorName,
-                LegacyScore = g.Sum(p => p.PointsAwarded),
                 CorrectPredictions = g.Count(p => p.IsCorrect == true),
                 TotalPredictions = g.Count()
             })
             .ToListAsync();
-
-        var spectatorIds = rows.Select(item => item.SpectatorId).ToArray();
-        var walletScores = await _context.SpectatorSeasonWallets
-            .AsNoTracking()
-            .Where(item => item.SeasonId == seasonId && spectatorIds.Contains(item.SpectatorId))
-            .ToDictionaryAsync(item => item.SpectatorId, item => item.SeasonScore);
 
         var ordered = rows
             .Select(r => new PredictorLeaderboardItem
             {
                 SpectatorId = r.SpectatorId,
                 SpectatorName = r.SpectatorName,
-                Points = walletScores.GetValueOrDefault(r.SpectatorId, r.LegacyScore),
+                Points = checked(r.CorrectPredictions * pointsPerCorrectPrediction),
                 CorrectPredictions = r.CorrectPredictions,
                 TotalPredictions = r.TotalPredictions,
                 Accuracy = r.TotalPredictions == 0

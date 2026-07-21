@@ -49,7 +49,11 @@ public class AdminDashboardController : ControllerBase
             ActiveTournaments = await _context.Tournaments.CountAsync(t => t.Status == TournamentStatuses.OpenRegistration || t.Status == TournamentStatuses.ClosedRegistration || t.Status == TournamentStatuses.Ongoing, cancellationToken),
             PendingRegistrations = await _context.RaceRegistrations.CountAsync(r => r.Status == RaceRegistrationStatuses.Pending, cancellationToken),
             PendingResults = await _context.RaceResults.CountAsync(r => r.Status == RaceResultStatuses.RefereeConfirmed, cancellationToken),
-            PendingSeasonRewards = await _context.SeasonRewards.CountAsync(r => r.Status == SeasonRewardStatuses.Claimed || r.Status == SeasonRewardStatuses.Approved || r.Status == SeasonRewardStatuses.Preparing, cancellationToken),
+            PendingSeasonRewards = await _context.SeasonRewards.CountAsync(r =>
+                r.Status == SeasonRewardStatuses.Claimed ||
+                r.Status == SeasonRewardStatuses.Approved ||
+                r.Status == SeasonRewardStatuses.Preparing ||
+                r.Status == SeasonRewardStatuses.Shipped, cancellationToken),
             PendingPrizeClaims = await _context.PrizePayouts.CountAsync(r => r.Status == PrizeAwardStatuses.UnderReview, cancellationToken),
             TotalPredictions = await _context.RacePredictions.CountAsync(cancellationToken),
             TotalStakePoints = await _context.RacePredictions.SumAsync(p => (long)p.StakePoints, cancellationToken),

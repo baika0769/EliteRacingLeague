@@ -541,6 +541,62 @@ public class AdminRaceResultsController : ControllerBase
                 cancellationToken,
                 preventDuplicates: true);
 
+            await _notificationService.CreateForRaceSpectatorsAsync(
+                raceId,
+                "Official Race Results Published",
+                $"Official results for {race.RaceName} are now available. Open Results to see the published outcome; prediction settlement notifications will follow.",
+                "SpectatorRaceResultsPublished",
+                "/spectator/results",
+                "Race",
+                raceId,
+                cancellationToken,
+                preventDuplicates: true);
+
+            await _notificationService.CreateForAdminsAsync(
+                "Official Race Results Published",
+                $"Final report and {results.Count} result(s) for {race.RaceName} were approved and published successfully.",
+                "AdminRaceResultsPublished",
+                $"/admin/results?raceId={raceId}",
+                "Race",
+                raceId,
+                cancellationToken,
+                preventDuplicates: true);
+
+            if (race.Tournament.Status == TournamentStatuses.Completed)
+            {
+                await _notificationService.CreateForTournamentRefereesAsync(
+                    race.TournamentId,
+                    "Tournament Completed",
+                    $"{race.Tournament.TournamentName} has been completed and all official results are published.",
+                    "RefereeTournamentCompleted",
+                    "/referee/races",
+                    "Tournament",
+                    race.TournamentId,
+                    cancellationToken,
+                    preventDuplicates: true);
+
+                await _notificationService.CreateForTournamentSpectatorsAsync(
+                    race.TournamentId,
+                    "Tournament Completed",
+                    $"{race.Tournament.TournamentName} is complete. Final results and prediction outcomes are available.",
+                    "SpectatorTournamentCompleted",
+                    "/spectator/results",
+                    "Tournament",
+                    race.TournamentId,
+                    cancellationToken,
+                    preventDuplicates: true);
+
+                await _notificationService.CreateForAdminsAsync(
+                    "Tournament Completed",
+                    $"{race.Tournament.TournamentName} is now completed. All races are published or cancelled.",
+                    "AdminTournamentCompleted",
+                    "/admin/races",
+                    "Tournament",
+                    race.TournamentId,
+                    cancellationToken,
+                    preventDuplicates: true);
+            }
+
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)

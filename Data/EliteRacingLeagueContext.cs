@@ -1188,6 +1188,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.Property(e => e.ClaimedAt).HasColumnName("claimed_at");
             entity.Property(e => e.ApprovedAt).HasColumnName("approved_at");
             entity.Property(e => e.PreparingAt).HasColumnName("preparing_at");
+            entity.Property(e => e.ShippedAt).HasColumnName("shipped_at");
             entity.Property(e => e.DeliveredAt).HasColumnName("delivered_at");
             entity.Property(e => e.RejectedAt).HasColumnName("rejected_at");
             entity.Property(e => e.ReceiverName).HasMaxLength(200).HasColumnName("receiver_name");

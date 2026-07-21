@@ -356,7 +356,9 @@ public class RefereeRacesController : ControllerBase
     }
 
     [HttpGet("{raceId}/registrations")]
-    public async Task<IActionResult> GetRaceRegistrations(int raceId)
+    public async Task<IActionResult> GetRaceRegistrations(
+        int raceId,
+        [FromQuery] bool passedOnly = false)
     {
         if (!TryGetRefereeId(out var refereeId))
         {
@@ -393,7 +395,7 @@ public class RefereeRacesController : ControllerBase
         // explicitly passed pre-race inspection. Previously this filter was
         // enabled only after Finish Race, so failed horses were still returned
         // while the race was Ongoing and appeared in the Post-Race dropdown.
-        var passedOnly = raceStatus is
+        var effectivePassedOnly = passedOnly || raceStatus is
             RaceStatuses.Ongoing or
             RaceStatuses.Finished or
             RaceStatuses.ResultPending or
@@ -404,7 +406,7 @@ public class RefereeRacesController : ControllerBase
             usePendingInspectionFallback: false,
             includeInspectionReportFields: false,
             includeCompletedRegistrations: includeCompletedRegistrations,
-            passedOnly: passedOnly);
+            passedOnly: effectivePassedOnly);
 
         return Ok(registrations);
     }
@@ -487,6 +489,23 @@ public class RefereeRacesController : ControllerBase
 
         race.Status = RaceStatuses.RefereeReady;
         race.UpdatedAt = _dateTimeProvider.UtcNow;
+
+        await _notificationService.CreateForAdminsAsync(
+            "Race Ready",
+            $"Pre-race inspection is complete for {race.RaceName}. The referee marked the race ready to start.",
+            "RaceReady",
+            "/admin/races",
+            "Race",
+            race.RaceId);
+
+        await _notificationService.CreateForRaceSpectatorsAsync(
+            race.RaceId,
+            "Race Ready",
+            $"{race.RaceName} passed pre-race checks and is ready to start.",
+            "SpectatorRaceReady",
+            "/spectator/predictions",
+            "Race",
+            race.RaceId);
 
         await _context.SaveChangesAsync();
 
@@ -589,6 +608,15 @@ public class RefereeRacesController : ControllerBase
             "Race",
             race.RaceId);
 
+        await _notificationService.CreateForRaceSpectatorsAsync(
+            race.RaceId,
+            "Race Started",
+            $"{race.RaceName} in {race.Tournament.TournamentName} is now live. Predictions are locked.",
+            "SpectatorRaceStarted",
+            "/spectator/predictions",
+            "Race",
+            race.RaceId);
+
         await _context.SaveChangesAsync();
 
         return Ok(await _lifecycleService.GetLifecycleAsync(raceId, refereeId));
@@ -627,6 +655,23 @@ public class RefereeRacesController : ControllerBase
 
         race.Status = RaceStatuses.Finished;
         race.UpdatedAt = _dateTimeProvider.UtcNow;
+
+        await _notificationService.CreateForAdminsAsync(
+            "Race Finished",
+            $"Referee finished race {race.RaceName}. Post-race results are now being prepared.",
+            "RaceFinished",
+            "/admin/results",
+            "Race",
+            race.RaceId);
+
+        await _notificationService.CreateForRaceSpectatorsAsync(
+            race.RaceId,
+            "Race Finished",
+            $"{race.RaceName} has finished. Official results will be published after admin review.",
+            "SpectatorRaceFinished",
+            "/spectator/predictions",
+            "Race",
+            race.RaceId);
 
         await _context.SaveChangesAsync();
 
@@ -1209,7 +1254,7 @@ public class RefereeRacesController : ControllerBase
                     "Race Result Submitted",
                     $"Referee submitted all results for {race.RaceName}. Please validate.",
                     "RaceResultValidation",
-                    "/admin/validate-results",
+                    "/admin/results",
                     "Race",
                     raceId,
                     cancellationToken);
@@ -1316,7 +1361,7 @@ public class RefereeRacesController : ControllerBase
             "Race Violation Reported",
             $"Referee reported a violation in race {race.RaceName}.",
             "RaceViolation",
-            "/admin/validate-results",
+            "/admin/results",
             "RaceViolation",
             violation.ViolationId);
 
@@ -1723,9 +1768,20 @@ public class RefereeRacesController : ControllerBase
                     "RefereeReport",
                     report.ReportId,
                     cancellationToken);
-
-                await _context.SaveChangesAsync(cancellationToken);
             }
+            else if (request.ReportType == RefereeReportTypes.PreRace)
+            {
+                await _notificationService.CreateForAdminsAsync(
+                    "Pre-race report submitted",
+                    $"A referee submitted the pre-race report for {race.RaceName}.",
+                    "PreRaceReportSubmitted",
+                    "/admin/races",
+                    "RefereeReport",
+                    report.ReportId,
+                    cancellationToken);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
         }
@@ -2230,12 +2286,9 @@ public class RefereeRacesController : ControllerBase
     {
         if (reportType == RefereeReportTypes.PreRace)
         {
-            return raceStatus is RaceStatuses.Ongoing
-                or RaceStatuses.Finished
-                or RaceStatuses.ResultPending
-                or RaceStatuses.Published
-                    ? "Pre-race report can only be submitted before the race starts."
-                    : null;
+            return raceStatus is RaceStatuses.AssignedReferee or RaceStatuses.RefereeReady
+                ? null
+                : "Pre-race report is only available after registration closes and before the race starts.";
         }
 
         if (reportType == RefereeReportTypes.PostRace)

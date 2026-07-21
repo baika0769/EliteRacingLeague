@@ -42,6 +42,8 @@ public partial class SeasonReward
 
     public DateTime? PreparingAt { get; set; }
 
+    public DateTime? ShippedAt { get; set; }
+
     public DateTime? DeliveredAt { get; set; }
 
     public DateTime? RejectedAt { get; set; }

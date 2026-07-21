@@ -167,6 +167,7 @@ public class SpectatorRewardsController : ControllerBase
                 item.ClaimedAt,
                 item.ApprovedAt,
                 item.PreparingAt,
+                item.ShippedAt,
                 item.DeliveredAt,
                 item.RejectedAt,
                 item.ReceiverName,
@@ -174,7 +175,8 @@ public class SpectatorRewardsController : ControllerBase
                 item.DeliveryAddress,
                 item.AdminNote,
                 canClaim = item.Status == SeasonRewardStatuses.Eligible &&
-                           (!item.ClaimDeadline.HasValue || item.ClaimDeadline > now)
+                           (!item.ClaimDeadline.HasValue || item.ClaimDeadline > now),
+                canConfirmDelivery = item.Status == SeasonRewardStatuses.Shipped
             })
             .ToListAsync();
 
@@ -230,6 +232,77 @@ public class SpectatorRewardsController : ControllerBase
             mySeasonRewards,
             pointHistory,
             walletTransactions
+        });
+    }
+
+
+    [HttpPut("{rewardId:int}/confirm-delivery")]
+    public async Task<IActionResult> ConfirmRewardDelivery(int rewardId)
+    {
+        var userId = GetUserId();
+        var reward = await _context.SeasonRewards
+            .Include(item => item.Season)
+            .Include(item => item.RewardItem)
+            .FirstOrDefaultAsync(item =>
+                item.SeasonRewardId == rewardId &&
+                item.SpectatorId == userId);
+
+        if (reward == null)
+            return NotFound(new { message = "Season reward not found." });
+
+        if (reward.Status != SeasonRewardStatuses.Shipped)
+        {
+            return BadRequest(new
+            {
+                message = "Only a shipped reward can be confirmed as delivered.",
+                rewardId,
+                status = reward.Status
+            });
+        }
+
+        var now = _dateTimeProvider.UtcNow;
+
+        if (reward.RewardItem != null)
+        {
+            await _rewardInventoryService.DeliverAsync(
+                reward.RewardItem, reward, userId, now);
+        }
+
+        reward.Status = SeasonRewardStatuses.Delivered;
+        reward.DeliveredAt = now;
+
+        var adminIds = await _context.Users
+            .AsNoTracking()
+            .Where(item => item.Role == UserRoles.Admin && item.Status == UserStatuses.Active)
+            .Select(item => item.UserId)
+            .ToListAsync();
+
+        foreach (var adminId in adminIds)
+        {
+            _context.Notifications.Add(new Notification
+            {
+                UserId = adminId,
+                Title = "Reward Delivery Confirmed",
+                Message = $"The spectator confirmed receipt of {reward.RewardName} from season {reward.Season.SeasonName}.",
+                IsRead = false,
+                CreatedAt = now,
+                ActionType = "AdminSeasonRewardDelivered",
+                ActionUrl = "/admin/seasons",
+                RelatedType = "SeasonReward",
+                RelatedId = reward.SeasonRewardId
+            });
+        }
+
+        await _context.SaveChangesAsync();
+        var emailSent = await _rewardEmailService.TrySendStatusUpdatedAsync(reward.SeasonRewardId);
+
+        return Ok(new
+        {
+            message = "Delivery confirmed successfully.",
+            rewardId = reward.SeasonRewardId,
+            reward.Status,
+            reward.DeliveredAt,
+            emailSent
         });
     }
 

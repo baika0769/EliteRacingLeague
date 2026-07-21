@@ -6,6 +6,7 @@ public static class SeasonRewardStatuses
     public const string Claimed = "Claimed";
     public const string Approved = "Approved";
     public const string Preparing = "Preparing";
+    public const string Shipped = "Shipped";
     public const string Delivered = "Delivered";
     public const string Rejected = "Rejected";
     public const string Expired = "Expired";
@@ -16,6 +17,7 @@ public static class SeasonRewardStatuses
         Claimed,
         Approved,
         Preparing,
+        Shipped,
         Delivered,
         Rejected,
         Expired

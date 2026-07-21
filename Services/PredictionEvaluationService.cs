@@ -202,32 +202,33 @@ public class PredictionEvaluationService
                 {
                     newlyCorrectPredictions++;
 
-                    if (payoutPoints > 0)
+                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                        raceInfo.SeasonId,
+                        prediction.Spectator,
+                        prediction.Spectator.BettingPoints,
+                        now,
+                        cancellationToken);
+
+                    // Wallet payout follows stake/risk. SeasonScore is a skill score:
+                    // every correct prediction in the same season earns the same amount,
+                    // so a large stake cannot buy a higher leaderboard position. Amount may
+                    // be zero in an edge case, but the correct prediction still earns score.
+                    var payoutResult = await _spectatorWalletService.ApplyAsync(
+                        wallet,
+                        prediction.Spectator,
+                        PointTransactionTypes.PredictionPayout,
+                        payoutPoints,
+                        pointsPerCorrectPrediction,
+                        $"PREDICTION_PAYOUT_{prediction.PredictionId}",
+                        "RacePrediction",
+                        prediction.PredictionId,
+                        $"Payout and fixed season score for correct prediction #{prediction.PredictionId}.",
+                        now,
+                        cancellationToken);
+
+                    if (!payoutResult.AlreadyApplied)
                     {
-                        var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
-                            raceInfo.SeasonId,
-                            prediction.Spectator,
-                            prediction.Spectator.BettingPoints,
-                            now,
-                            cancellationToken);
-
-                        var payoutResult = await _spectatorWalletService.ApplyAsync(
-                            wallet,
-                            prediction.Spectator,
-                            PointTransactionTypes.PredictionPayout,
-                            payoutPoints,
-                            payoutPoints,
-                            $"PREDICTION_PAYOUT_{prediction.PredictionId}",
-                            "RacePrediction",
-                            prediction.PredictionId,
-                            $"Payout for correct prediction #{prediction.PredictionId}.",
-                            now,
-                            cancellationToken);
-
-                        if (!payoutResult.AlreadyApplied)
-                        {
-                            newlyPaidPoints += payoutPoints;
-                        }
+                        newlyPaidPoints += payoutPoints;
                     }
 
                     _context.Notifications.Add(new Notification
@@ -235,8 +236,8 @@ public class PredictionEvaluationService
                         UserId = prediction.SpectatorId,
                         Title = "Bet Won",
                         Message = payoutPoints > 0
-                            ? $"Your prediction was correct. {winner.HorseName} won and you received {payoutPoints} points."
-                            : $"Your prediction was correct. {winner.HorseName} won.",
+                            ? $"Correct prediction: {winner.HorseName} won. Wallet payout: {payoutPoints} points; season leaderboard score: +{pointsPerCorrectPrediction}."
+                            : $"Correct prediction: {winner.HorseName} won. Season leaderboard score: +{pointsPerCorrectPrediction}.",
                         IsRead = false,
                         CreatedAt = now,
                         ActionType = "SpectatorRewards",

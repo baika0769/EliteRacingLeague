@@ -34,7 +34,13 @@ public class RacePredictionSettlementService
 
         var race = await _context.Races.AsNoTracking()
             .Where(r => r.RaceId == raceId)
-            .Select(r => new { r.RaceId, SeasonId = r.Tournament.SeasonId, SeasonStatus = r.Tournament.Season.Status })
+            .Select(r => new
+            {
+                r.RaceId,
+                SeasonId = r.Tournament.SeasonId,
+                SeasonStatus = r.Tournament.Season.Status,
+                ScorePerCorrectPrediction = r.Tournament.Season.PointsPerCorrectPrediction
+            })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("Race not found.");
 
@@ -64,7 +70,10 @@ public class RacePredictionSettlementService
                     prediction.Spectator,
                     PointTransactionTypes.PredictionPayoutReversal,
                     prediction.PointsAwarded,
-                    prediction.PointsAwarded,
+                    await GetRecordedScoreDeltaAsync(
+                        prediction.PredictionId,
+                        prediction.IsCorrect == true ? race.ScorePerCorrectPrediction : 0,
+                        cancellationToken),
                     $"CANCEL_RACE_PAYOUT_REVERSAL_{raceId}_{prediction.PredictionId}",
                     "RacePrediction",
                     prediction.PredictionId,
@@ -138,7 +147,12 @@ public class RacePredictionSettlementService
 
         var race = await _context.Races.AsNoTracking()
             .Where(r => r.RaceId == raceId)
-            .Select(r => new { SeasonId = r.Tournament.SeasonId, SeasonStatus = r.Tournament.Season.Status })
+            .Select(r => new
+            {
+                SeasonId = r.Tournament.SeasonId,
+                SeasonStatus = r.Tournament.Season.Status,
+                ScorePerCorrectPrediction = r.Tournament.Season.PointsPerCorrectPrediction
+            })
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("Race not found.");
 
@@ -167,7 +181,10 @@ public class RacePredictionSettlementService
                     prediction.Spectator,
                     PointTransactionTypes.ResultCorrectionAdjustment,
                     prediction.PointsAwarded,
-                    prediction.PointsAwarded,
+                    await GetRecordedScoreDeltaAsync(
+                        prediction.PredictionId,
+                        prediction.IsCorrect == true ? race.ScorePerCorrectPrediction : 0,
+                        cancellationToken),
                     $"RESULT_CORRECTION_REVERSAL_{raceId}_{prediction.PredictionId}_{prediction.EvaluatedAt:yyyyMMddHHmmss}",
                     "RacePrediction",
                     prediction.PredictionId,
@@ -195,6 +212,24 @@ public class RacePredictionSettlementService
             await transaction.DisposeAsync();
         }
         return new PredictionSettlementSummary(predictions.Count, 0, payoutReversed);
+    }
+
+    private async Task<int> GetRecordedScoreDeltaAsync(
+        int predictionId,
+        int fallback,
+        CancellationToken cancellationToken)
+    {
+        var recorded = await _context.PointTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.ReferenceType == "RacePrediction" &&
+                item.ReferenceId == predictionId &&
+                item.TransactionType == PointTransactionTypes.PredictionPayout)
+            .OrderByDescending(item => item.PointTransactionId)
+            .Select(item => (int?)item.ScoreDelta)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Math.Max(0, recorded ?? Math.Max(0, fallback));
     }
 }
 

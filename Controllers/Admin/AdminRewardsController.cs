@@ -270,6 +270,7 @@ public class AdminRewardsController : ControllerBase
                 Claimed = group.Count(item => item.Status == SeasonRewardStatuses.Claimed),
                 Approved = group.Count(item => item.Status == SeasonRewardStatuses.Approved),
                 Preparing = group.Count(item => item.Status == SeasonRewardStatuses.Preparing),
+                Shipped = group.Count(item => item.Status == SeasonRewardStatuses.Shipped),
                 Delivered = group.Count(item => item.Status == SeasonRewardStatuses.Delivered),
                 Rejected = group.Count(item => item.Status == SeasonRewardStatuses.Rejected),
                 Expired = group.Count(item => item.Status == SeasonRewardStatuses.Expired)
@@ -297,6 +298,7 @@ public class AdminRewardsController : ControllerBase
                 Claimed = 0,
                 Approved = 0,
                 Preparing = 0,
+                Shipped = 0,
                 Delivered = 0,
                 Rejected = 0,
                 Expired = 0
