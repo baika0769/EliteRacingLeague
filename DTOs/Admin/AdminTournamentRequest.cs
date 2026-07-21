@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
 
 namespace Eliteracingleague.API.DTOs.Admin;
@@ -33,6 +33,15 @@ public class AdminTournamentRequest
 
     [Range(typeof(decimal), "0", "1000000000")]
     public decimal PrizePool { get; set; }
+
+    [Range(typeof(decimal), "0.01", "1000000000")]
+    public decimal GoldPrize { get; set; }
+
+    [Range(typeof(decimal), "0.01", "1000000000")]
+    public decimal SilverPrize { get; set; }
+
+    [Range(typeof(decimal), "0.01", "1000000000")]
+    public decimal BronzePrize { get; set; }
 
     public IFormFile? TournamentImage { get; set; }
 

@@ -128,6 +128,46 @@ public class AdminRaceResultsController : ControllerBase
             // report approval endpoint and then approve-all immediately after.
             if (alreadyPublishedResults > 0 && alreadyApprovedReport)
             {
+                var expectedAwardRanks = await _context.RaceResults
+                    .AsNoTracking()
+                    .Where(result =>
+                        result.RaceId == raceId &&
+                        result.Status == RaceResultStatuses.Published &&
+                        result.OutcomeStatus == RaceOutcomeStatuses.Finished &&
+                        result.FinishPosition.HasValue &&
+                        result.FinishPosition.Value >= 1 &&
+                        result.FinishPosition.Value <= 3)
+                    .Select(result => result.FinishPosition!.Value)
+                    .Distinct()
+                    .OrderBy(rank => rank)
+                    .ToListAsync(cancellationToken);
+
+                var generatedAwardRanks = await _context.PrizeAwards
+                    .AsNoTracking()
+                    .Where(award => award.RaceId == raceId)
+                    .Select(award => award.RankPosition)
+                    .Distinct()
+                    .ToListAsync(cancellationToken);
+
+                var missingAwardRanks = expectedAwardRanks
+                    .Except(generatedAwardRanks)
+                    .OrderBy(rank => rank)
+                    .ToList();
+
+                if ((race.Tournament.PrizePool ?? 0m) > 0m &&
+                    missingAwardRanks.Count > 0)
+                {
+                    return Conflict(new
+                    {
+                        code = "PUBLISHED_RACE_PRIZE_DATA_MISSING",
+                        message = "The race is already published, but prize awards/payouts are missing for one or more winning ranks. Configure the prize rules and run the supplied repair script for this race.",
+                        raceId,
+                        tournamentId = race.TournamentId,
+                        tournamentPrizePool = race.Tournament.PrizePool,
+                        missingAwardRanks
+                    });
+                }
+
                 return Ok(new
                 {
                     message = "This post-race submission was already approved and published.",
@@ -295,6 +335,30 @@ public class AdminRaceResultsController : ControllerBase
             .Where(r => r.RaceId == raceId)
             .ToDictionaryAsync(r => r.RankPosition, cancellationToken);
 
+        var tournamentPrizePool = race.Tournament.PrizePool ?? 0m;
+        if (tournamentPrizePool > 0m)
+        {
+            var requiredRanks = new[] { 1, 2, 3 };
+            var missingPrizeRuleRanks = requiredRanks
+                .Where(rank => !prizeRules.TryGetValue(rank, out var rule) || rule.PrizeAmount <= 0m)
+                .ToList();
+            var allocatedPrize = prizeRules.Values.Sum(rule => rule.PrizeAmount);
+
+            if (missingPrizeRuleRanks.Count > 0 || allocatedPrize != tournamentPrizePool)
+            {
+                return Conflict(new
+                {
+                    code = "PRIZE_RULES_REQUIRED",
+                    message = "This race has a prize pool but does not have a complete and matching Gold/Silver/Bronze prize distribution. Configure prize rules before publishing results.",
+                    raceId,
+                    tournamentId = race.TournamentId,
+                    tournamentPrizePool,
+                    allocatedPrize,
+                    missingPrizeRuleRanks
+                });
+            }
+        }
+
         var existingAwards = await _context.PrizeAwards
             .Include(a => a.Payouts)
             .Where(a => a.RaceId == raceId)
@@ -374,9 +438,19 @@ public class AdminRaceResultsController : ControllerBase
             foreach (var result in results)
             {
                 if (result.OutcomeStatus != RaceOutcomeStatuses.Finished ||
-                    !result.FinishPosition.HasValue ||
-                    !prizeRules.TryGetValue(result.FinishPosition.Value, out var prizeRule))
+                    !result.FinishPosition.HasValue)
                 {
+                    continue;
+                }
+
+                if (!prizeRules.TryGetValue(result.FinishPosition.Value, out var prizeRule))
+                {
+                    if (result.FinishPosition.Value <= 3 && tournamentPrizePool > 0m)
+                    {
+                        throw new InvalidOperationException(
+                            $"Prize rule for rank {result.FinishPosition.Value} is missing.");
+                    }
+
                     continue;
                 }
 

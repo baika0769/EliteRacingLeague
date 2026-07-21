@@ -60,6 +60,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                             .ThenInclude(r => r.Referee)
                 .Include(t => t.Races)
                     .ThenInclude(r => r.RaceRegistrations)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.PrizeRules)
                 .AsSplitQuery()
                 .OrderByDescending(t => t.TournamentId)
                 .ToListAsync(cancellationToken);
@@ -72,6 +74,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                     registration.Status != RaceRegistrationStatuses.Cancelled &&
                     registration.Status != RaceRegistrationStatuses.Withdrawn));
                 var totalCapacity = t.Races.Sum(r => r.MaxHorses);
+                var prizeRulesByRank = race?.PrizeRules
+                    .GroupBy(rule => rule.RankPosition)
+                    .ToDictionary(group => group.Key, group => group.First().PrizeAmount)
+                    ?? new Dictionary<int, decimal>();
 
                 return new
                 {
@@ -83,6 +89,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                     endDate = t.EndDate,
                     maxHorses = totalCapacity > 0 ? totalCapacity : t.MaxHorses,
                     prizePool = t.PrizePool,
+                    goldPrize = prizeRulesByRank.GetValueOrDefault(1),
+                    silverPrize = prizeRulesByRank.GetValueOrDefault(2),
+                    bronzePrize = prizeRulesByRank.GetValueOrDefault(3),
+                    hasCompletePrizeRules = prizeRulesByRank.ContainsKey(1) &&
+                        prizeRulesByRank.ContainsKey(2) &&
+                        prizeRulesByRank.ContainsKey(3),
                     imageUrl = t.ImageUrl,
                     status = t.Status,
                     rules = t.Rules,
@@ -124,6 +136,8 @@ namespace Eliteracingleague.API.Controllers.Admin
                             .ThenInclude(r => r.Referee)
                 .Include(t => t.Races)
                     .ThenInclude(r => r.RaceRegistrations)
+                .Include(t => t.Races)
+                    .ThenInclude(r => r.PrizeRules)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(t => t.TournamentId == id, cancellationToken);
 
@@ -142,6 +156,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                 registration.Status != RaceRegistrationStatuses.Cancelled &&
                 registration.Status != RaceRegistrationStatuses.Withdrawn));
             var totalCapacity = tournament.Races.Sum(r => r.MaxHorses);
+            var prizeRulesByRank = primaryRace?.PrizeRules
+                .GroupBy(rule => rule.RankPosition)
+                .ToDictionary(group => group.Key, group => group.First().PrizeAmount)
+                ?? new Dictionary<int, decimal>();
 
             return Ok(new
             {
@@ -153,6 +171,12 @@ namespace Eliteracingleague.API.Controllers.Admin
                 endDate = tournament.EndDate,
                 maxHorses = totalCapacity > 0 ? totalCapacity : tournament.MaxHorses,
                 prizePool = tournament.PrizePool,
+                goldPrize = prizeRulesByRank.GetValueOrDefault(1),
+                silverPrize = prizeRulesByRank.GetValueOrDefault(2),
+                bronzePrize = prizeRulesByRank.GetValueOrDefault(3),
+                hasCompletePrizeRules = prizeRulesByRank.ContainsKey(1) &&
+                    prizeRulesByRank.ContainsKey(2) &&
+                    prizeRulesByRank.ContainsKey(3),
                 imageUrl = tournament.ImageUrl,
                 status = tournament.Status,
                 rules = tournament.Rules,
@@ -199,6 +223,8 @@ namespace Eliteracingleague.API.Controllers.Admin
             {
                 return validationResult;
             }
+
+            var requestedPrizePool = CalculatePrizePool(request);
 
             var userIdText = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
@@ -317,7 +343,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                     StartDate = request.RegistrationDeadline,
                     EndDate = request.RaceDate,
                     MaxHorses = request.MaxHorses,
-                    PrizePool = request.PrizePool,
+                    PrizePool = requestedPrizePool,
                     ImageUrl = imageUrl,
                     Status = TournamentStatuses.Draft,
                     Rules = string.IsNullOrWhiteSpace(request.Rules)
@@ -351,6 +377,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 };
 
                 _context.Races.Add(race);
+                SynchronizeTopThreePrizeRules(race, request);
                 await _context.SaveChangesAsync();
 
                 if (request.RefereeId.HasValue)
@@ -394,7 +421,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                     seasonStatus = season.Status,
                     imageUrl = tournament.ImageUrl,
                     refereeId = request.RefereeId,
-                    raceStatus = race.Status
+                    raceStatus = race.Status,
+                    prizePool = requestedPrizePool,
+                    goldPrize = request.GoldPrize,
+                    silverPrize = request.SilverPrize,
+                    bronzePrize = request.BronzePrize
                 });
             }
             catch
@@ -417,6 +448,7 @@ namespace Eliteracingleague.API.Controllers.Admin
 
             var tournament = await _context.Tournaments
                 .Include(t => t.Races)
+                    .ThenInclude(r => r.PrizeRules)
                 .FirstOrDefaultAsync(t => t.TournamentId == id);
 
             if (tournament == null)
@@ -461,6 +493,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             var raceDateTime = BuildRaceDateTime(request);
+            var requestedPrizePool = CalculatePrizePool(request);
             var jockeySelectionDeadline =
                 request.RegistrationDeadline.ToDateTime(TimeOnly.MaxValue);
             var matchingSeason =
@@ -523,7 +556,10 @@ namespace Eliteracingleague.API.Controllers.Admin
                         tournament.StartDate != request.RegistrationDeadline ||
                         tournament.EndDate != request.RaceDate ||
                         tournament.MaxHorses != request.MaxHorses ||
-                        tournament.PrizePool != request.PrizePool ||
+                        tournament.PrizePool != requestedPrizePool ||
+                        GetPrizeAmount(race, 1) != request.GoldPrize ||
+                        GetPrizeAmount(race, 2) != request.SilverPrize ||
+                        GetPrizeAmount(race, 3) != request.BronzePrize ||
                         race.RaceDate != raceDateTime ||
                         race.DistanceMeters != request.DistanceMeters ||
                         race.MaxHorses != request.MaxHorses ||
@@ -578,7 +614,7 @@ namespace Eliteracingleague.API.Controllers.Admin
             tournament.StartDate = request.RegistrationDeadline;
             tournament.EndDate = request.RaceDate;
             tournament.MaxHorses = request.MaxHorses;
-            tournament.PrizePool = request.PrizePool;
+            tournament.PrizePool = requestedPrizePool;
             tournament.Rules = string.IsNullOrWhiteSpace(request.Rules)
                 ? null
                 : request.Rules.Trim();
@@ -617,6 +653,7 @@ namespace Eliteracingleague.API.Controllers.Admin
                 race.UpdatedAt = now;
             }
 
+            SynchronizeTopThreePrizeRules(race, request);
             await _context.SaveChangesAsync();
 
             return Ok(new
@@ -627,7 +664,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 status = tournament.Status,
                 seasonId = matchingSeason.SeasonId,
                 seasonName = matchingSeason.SeasonName,
-                seasonStatus = matchingSeason.Status
+                seasonStatus = matchingSeason.Status,
+                prizePool = requestedPrizePool,
+                goldPrize = request.GoldPrize,
+                silverPrize = request.SilverPrize,
+                bronzePrize = request.BronzePrize
             });
         }
 
@@ -1471,12 +1512,49 @@ namespace Eliteracingleague.API.Controllers.Admin
                 });
             }
 
-            if (request.PrizePool is < 0 or > MaxPrizePool)
+            if (request.GoldPrize <= 0 ||
+                request.SilverPrize <= 0 ||
+                request.BronzePrize <= 0)
             {
                 return BadRequest(new AdminActionResponse
                 {
-                    Message = $"Prize pool must be between 0 and {MaxPrizePool:N0}",
+                    Message = "Gold, Silver, and Bronze prizes must all be greater than 0.",
                     Id = id
+                });
+            }
+
+            if (!(request.GoldPrize > request.SilverPrize &&
+                  request.SilverPrize > request.BronzePrize))
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Prize amounts must decrease by rank: Gold must be greater than Silver, and Silver must be greater than Bronze.",
+                    Id = id
+                });
+            }
+
+            var calculatedPrizePool = CalculatePrizePool(request);
+            if (calculatedPrizePool > MaxPrizePool)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = $"Prize pool cannot exceed {MaxPrizePool:N0}.",
+                    Id = id
+                });
+            }
+
+            if (request.PrizePool != calculatedPrizePool)
+            {
+                return BadRequest(new
+                {
+                    code = "PRIZE_POOL_MISMATCH",
+                    message = "Prize pool must equal Gold Prize + Silver Prize + Bronze Prize.",
+                    suppliedPrizePool = request.PrizePool,
+                    calculatedPrizePool,
+                    request.GoldPrize,
+                    request.SilverPrize,
+                    request.BronzePrize,
+                    tournamentId = id
                 });
             }
 
@@ -1494,6 +1572,58 @@ namespace Eliteracingleague.API.Controllers.Admin
             }
 
             return null;
+        }
+
+        private static decimal CalculatePrizePool(AdminTournamentRequest request) =>
+            request.GoldPrize + request.SilverPrize + request.BronzePrize;
+
+        private static decimal GetPrizeAmount(Race race, int rankPosition) =>
+            race.PrizeRules
+                .Where(rule => rule.RankPosition == rankPosition)
+                .Select(rule => rule.PrizeAmount)
+                .FirstOrDefault();
+
+        private void SynchronizeTopThreePrizeRules(
+            Race race,
+            AdminTournamentRequest request)
+        {
+            var desiredRules = new Dictionary<int, (decimal Amount, string Note)>
+            {
+                [1] = (request.GoldPrize, "Gold prize"),
+                [2] = (request.SilverPrize, "Silver prize"),
+                [3] = (request.BronzePrize, "Bronze prize")
+            };
+
+            var obsoleteRules = race.PrizeRules
+                .Where(rule => !desiredRules.ContainsKey(rule.RankPosition))
+                .ToList();
+
+            if (obsoleteRules.Count > 0)
+            {
+                _context.PrizeRules.RemoveRange(obsoleteRules);
+            }
+
+            foreach (var (rankPosition, desired) in desiredRules)
+            {
+                var existingRule = race.PrizeRules
+                    .FirstOrDefault(rule => rule.RankPosition == rankPosition);
+
+                if (existingRule == null)
+                {
+                    _context.PrizeRules.Add(new PrizeRule
+                    {
+                        Race = race,
+                        RankPosition = rankPosition,
+                        PrizeAmount = desired.Amount,
+                        Note = desired.Note
+                    });
+                }
+                else
+                {
+                    existingRule.PrizeAmount = desired.Amount;
+                    existingRule.Note = desired.Note;
+                }
+            }
         }
 
         private static bool IsAllowedImageUrl(string imageUrl)
