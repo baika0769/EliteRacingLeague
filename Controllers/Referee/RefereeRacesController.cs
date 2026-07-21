@@ -389,12 +389,22 @@ public class RefereeRacesController : ControllerBase
             RaceStatuses.ResultPending or
             RaceStatuses.Published;
 
+        // As soon as the race starts, Post-Race must expose only horses that
+        // explicitly passed pre-race inspection. Previously this filter was
+        // enabled only after Finish Race, so failed horses were still returned
+        // while the race was Ongoing and appeared in the Post-Race dropdown.
+        var passedOnly = raceStatus is
+            RaceStatuses.Ongoing or
+            RaceStatuses.Finished or
+            RaceStatuses.ResultPending or
+            RaceStatuses.Published;
+
         var registrations = await GetRefereeRegistrationResponsesAsync(
             raceId,
             usePendingInspectionFallback: false,
             includeInspectionReportFields: false,
             includeCompletedRegistrations: includeCompletedRegistrations,
-            passedOnly: includeCompletedRegistrations);
+            passedOnly: passedOnly);
 
         return Ok(registrations);
     }
