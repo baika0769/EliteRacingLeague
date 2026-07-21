@@ -9,6 +9,7 @@ namespace Eliteracingleague.API.Controllers;
 public class UploadsController : ControllerBase
 {
     private const long MaxFileSize = 10 * 1024 * 1024;
+    private const long MaxRewardImageFileSize = 5 * 1024 * 1024;
     private readonly IWebHostEnvironment _env;
 
     public UploadsController(IWebHostEnvironment env)
@@ -38,6 +39,16 @@ public class UploadsController : ControllerBase
             return BadRequest(new { message = "Category không hợp lệ." });
         }
 
+        if (uploadCategory == UploadCategory.Rewards && !User.IsInRole("Admin"))
+        {
+            return Forbid();
+        }
+
+        if (uploadCategory == UploadCategory.Rewards && file.Length > MaxRewardImageFileSize)
+        {
+            return BadRequest(new { message = "Ảnh phần thưởng có dung lượng tối đa 5MB." });
+        }
+
         if (!TryResolveSafeExtension(file.FileName, uploadCategory, out var safeExtension))
         {
             return BadRequest(new { message = "Định dạng file không hợp lệ." });
@@ -53,6 +64,7 @@ public class UploadsController : ControllerBase
         {
             UploadCategory.Horses => "horses",
             UploadCategory.Jockeys => "jockeys",
+            UploadCategory.Rewards => "rewards",
             _ => throw new InvalidOperationException("Unsupported upload category.")
         };
 
@@ -100,6 +112,7 @@ public class UploadsController : ControllerBase
         {
             "horses" => UploadCategory.Horses,
             "jockeys" => UploadCategory.Jockeys,
+            "rewards" => UploadCategory.Rewards,
             _ => UploadCategory.Invalid
         };
 
@@ -124,6 +137,10 @@ public class UploadsController : ControllerBase
             (UploadCategory.Jockeys, ".png") => ".png",
             (UploadCategory.Jockeys, ".webp") => ".webp",
             (UploadCategory.Jockeys, ".pdf") => ".pdf",
+            (UploadCategory.Rewards, ".jpg") => ".jpg",
+            (UploadCategory.Rewards, ".jpeg") => ".jpeg",
+            (UploadCategory.Rewards, ".png") => ".png",
+            (UploadCategory.Rewards, ".webp") => ".webp",
             _ => string.Empty
         };
 
@@ -148,6 +165,7 @@ public class UploadsController : ControllerBase
     {
         Invalid = 0,
         Horses = 1,
-        Jockeys = 2
+        Jockeys = 2,
+        Rewards = 3
     }
 }
