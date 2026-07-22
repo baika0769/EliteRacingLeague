@@ -537,6 +537,8 @@ public class AdminSeasonsController : ControllerBase
         int id,
         [FromBody] UpsertSeasonRewardRulesRequest request)
     {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
+
         var season = await _context.Seasons
             .Include(s => s.SeasonRewardRules)
             .FirstOrDefaultAsync(s => s.SeasonId == id);
@@ -550,15 +552,41 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
-        if (season.Status != SeasonStatuses.Draft)
+        // Reward rules may be edited while Draft (normal case) or while Active
+        // (recovery path - e.g. a season was activated before its rules were ever
+        // configured, or they need correcting). The real point that must stay
+        // locked down is Close: that's when SeasonReward rows are generated from
+        // these rules and become real prizes, so editing must be blocked at or
+        // after that point (Settling/Closed/Cancelled), and also blocked the
+        // instant any SeasonReward row already exists for this season, even if
+        // the season's own Status field hasn't caught up yet.
+        if (season.Status != SeasonStatuses.Draft && season.Status != SeasonStatuses.Active)
         {
             return BadRequest(new AdminActionResponse
             {
-                Message = "Reward rules can only be changed while the season is in Draft status",
+                Message = "Reward rules can only be changed while the season is Draft or Active, before it is closed.",
                 Id = season.SeasonId,
                 Name = season.SeasonName,
                 Status = season.Status
             });
+        }
+
+        if (season.Status == SeasonStatuses.Active)
+        {
+            var hasGeneratedRewards = await _context.SeasonRewards
+                .AsNoTracking()
+                .AnyAsync(r => r.SeasonId == season.SeasonId);
+
+            if (hasGeneratedRewards)
+            {
+                return BadRequest(new AdminActionResponse
+                {
+                    Message = "Reward rules cannot be changed after season rewards have already been generated.",
+                    Id = season.SeasonId,
+                    Name = season.SeasonName,
+                    Status = season.Status
+                });
+            }
         }
 
         if (request.Rules == null || request.Rules.Count == 0)
@@ -707,6 +735,12 @@ public class AdminSeasonsController : ControllerBase
         }
 
         season.UpdatedAt = now;
+
+        await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+            "Season", season.SeasonId.ToString(),
+            null,
+            new { RuleCount = request.Rules.Count, season.Status },
+            $"Reward rules updated while season status is {season.Status}");
 
         await _context.SaveChangesAsync();
 
