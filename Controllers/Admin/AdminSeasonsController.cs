@@ -722,6 +722,8 @@ public class AdminSeasonsController : ControllerBase
     [HttpPut("{id:int}/activate")]
     public async Task<IActionResult> ActivateSeason(int id)
     {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
+
         await using var transaction = await _context.Database.BeginTransactionAsync(
             IsolationLevel.Serializable);
 
@@ -921,6 +923,27 @@ public class AdminSeasonsController : ControllerBase
             season.Status = SeasonStatuses.Active;
             season.UpdatedAt = now;
 
+            // Activation does not require today to fall inside the season's own
+            // StartDate-EndDate range (an admin may legitimately prep/activate a
+            // season a little early). We do not block on this, but the mismatch is
+            // surfaced below (outOfDateRangeWarning) so it isn't silently invisible,
+            // and it's captured in the audit log for later troubleshooting.
+            var localNow = _dateTimeProvider.GetLocalNow(_dateTimeProvider.TimeZoneId);
+            var isOutsideDateRange = localNow.Date < season.StartDate.Date || localNow.Date > season.EndDate.Date;
+
+            await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+                "Season", season.SeasonId.ToString(),
+                new { Status = SeasonStatuses.Draft },
+                new
+                {
+                    Status = season.Status,
+                    season.StartDate,
+                    season.EndDate,
+                    ActivatedOn = localNow.Date,
+                    IsOutsideDateRange = isOutsideDateRange
+                },
+                "Season activated");
+
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
 
@@ -937,7 +960,10 @@ public class AdminSeasonsController : ControllerBase
                 appliedBonusRewardCount,
                 totalBonusPoints,
                 repairedOrphanBonusCount,
-                normalizedAppliedBonusCount
+                normalizedAppliedBonusCount,
+                outOfDateRangeWarning = isOutsideDateRange
+                    ? $"Activated outside the season's configured date range ({season.StartDate:yyyy-MM-dd} to {season.EndDate:yyyy-MM-dd})."
+                    : null
             });
         }
         catch
@@ -1257,6 +1283,8 @@ public class AdminSeasonsController : ControllerBase
     [HttpPut("{id:int}/cancel")]
     public async Task<IActionResult> CancelSeason(int id)
     {
+        if (!User.TryGetUserId(out var adminId)) return Unauthorized();
+
         var season = await _context.Seasons
             .FirstOrDefaultAsync(s => s.SeasonId == id);
 
@@ -1306,8 +1334,15 @@ public class AdminSeasonsController : ControllerBase
             });
         }
 
+        var previousStatus = season.Status;
         season.Status = SeasonStatuses.Cancelled;
         season.UpdatedAt = DateTime.UtcNow;
+
+        await _auditService.WriteAsync(adminId, AuditActionTypes.StatusChange,
+            "Season", season.SeasonId.ToString(),
+            new { Status = previousStatus },
+            new { Status = season.Status },
+            "Season cancelled");
 
         await _context.SaveChangesAsync();
 
