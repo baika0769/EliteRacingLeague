@@ -26,6 +26,7 @@ public class AdminRaceResultsController : ControllerBase
     private readonly IAuditService _auditService;
     private readonly INotificationService _notificationService;
     private readonly PrizePayoutService _prizePayoutService;
+    private readonly ILogger<AdminRaceResultsController> _logger;
 
     public AdminRaceResultsController(
         EliteRacingLeagueContext context,
@@ -34,7 +35,8 @@ public class AdminRaceResultsController : ControllerBase
         RaceResultValidationService validationService,
         IAuditService auditService,
         INotificationService notificationService,
-        PrizePayoutService prizePayoutService)
+        PrizePayoutService prizePayoutService,
+        ILogger<AdminRaceResultsController> logger)
     {
         _context = context;
         _predictionEvaluationService = predictionEvaluationService;
@@ -43,6 +45,7 @@ public class AdminRaceResultsController : ControllerBase
         _auditService = auditService;
         _notificationService = notificationService;
         _prizePayoutService = prizePayoutService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -503,106 +506,123 @@ public class AdminRaceResultsController : ControllerBase
         }
 
         // Audit and notification are secondary effects. They must not roll back a
-        // successfully published race if one of them temporarily fails.
-        string? secondaryWarning = null;
+        // successfully published race if one of them temporarily fails. Each effect
+        // runs in its own try/catch so a single failure (e.g. one bad notification
+        // query) can't silently wipe out every other notification that was queued
+        // before it - previously all of these shared one try/catch around a single
+        // SaveChangesAsync, so any exception anywhere in the block meant NOTHING in
+        // it got persisted, including notifications that had already succeeded.
+        var secondaryWarnings = new List<string>();
 
-        try
+        async Task RunSecondaryEffectAsync(string label, Func<Task> action)
         {
-            await _auditService.WriteAsync(
-                adminId,
-                AuditActionTypes.Approve,
-                "RaceResult",
-                raceId.ToString(),
-                new
-                {
-                    RaceStatus = RaceStatuses.ResultPending,
-                    ResultStatus = RaceResultStatuses.RefereeConfirmed,
-                    ReportStatus = RefereeReportStatuses.Submitted
-                },
-                new
-                {
-                    RaceStatus = RaceStatuses.Published,
-                    ResultStatus = RaceResultStatuses.Published,
-                    ReportStatus = RefereeReportStatuses.Approved,
-                    ResultCount = results.Count,
-                    TournamentStatus = race.Tournament.Status
-                },
-                "Atomic final report approval and race result publication",
-                cancellationToken);
-
-            await _notificationService.CreateForUserAsync(
-                finalReport.RefereeId,
-                "Final report and race results approved",
-                $"Your final report and all results for race {race.RaceName} were approved and published.",
-                "PostRaceSubmissionApproved",
-                $"/referee/races/post-race?raceId={raceId}&reportId={finalReport.ReportId}",
-                "RefereeReport",
-                finalReport.ReportId,
-                cancellationToken,
-                preventDuplicates: true);
-
-            await _notificationService.CreateForRaceSpectatorsAsync(
-                raceId,
-                "Official Race Results Published",
-                $"Official results for {race.RaceName} are now available. Open Results to see the published outcome; prediction settlement notifications will follow.",
-                "SpectatorRaceResultsPublished",
-                "/spectator/results",
-                "Race",
-                raceId,
-                cancellationToken,
-                preventDuplicates: true);
-
-            await _notificationService.CreateForAdminsAsync(
-                "Official Race Results Published",
-                $"Final report and {results.Count} result(s) for {race.RaceName} were approved and published successfully.",
-                "AdminRaceResultsPublished",
-                $"/admin/results?raceId={raceId}",
-                "Race",
-                raceId,
-                cancellationToken,
-                preventDuplicates: true);
-
-            if (race.Tournament.Status == TournamentStatuses.Completed)
+            try
             {
-                await _notificationService.CreateForTournamentRefereesAsync(
-                    race.TournamentId,
-                    "Tournament Completed",
-                    $"{race.Tournament.TournamentName} has been completed and all official results are published.",
-                    "RefereeTournamentCompleted",
-                    "/referee/races",
-                    "Tournament",
-                    race.TournamentId,
-                    cancellationToken,
-                    preventDuplicates: true);
-
-                await _notificationService.CreateForTournamentSpectatorsAsync(
-                    race.TournamentId,
-                    "Tournament Completed",
-                    $"{race.Tournament.TournamentName} is complete. Final results and prediction outcomes are available.",
-                    "SpectatorTournamentCompleted",
-                    "/spectator/results",
-                    "Tournament",
-                    race.TournamentId,
-                    cancellationToken,
-                    preventDuplicates: true);
-
-                await _notificationService.CreateForAdminsAsync(
-                    "Tournament Completed",
-                    $"{race.Tournament.TournamentName} is now completed. All races are published or cancelled.",
-                    "AdminTournamentCompleted",
-                    "/admin/races",
-                    "Tournament",
-                    race.TournamentId,
-                    cancellationToken,
-                    preventDuplicates: true);
+                await action();
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Post-race approval secondary effect failed: {Label} (raceId={RaceId}, reportId={ReportId})",
+                    label, raceId, finalReport.ReportId);
+                secondaryWarnings.Add($"{label}: {ex.Message}");
+            }
+        }
 
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (Exception ex)
+        await RunSecondaryEffectAsync("audit log", () => _auditService.WriteAsync(
+            adminId,
+            AuditActionTypes.Approve,
+            "RaceResult",
+            raceId.ToString(),
+            new
+            {
+                RaceStatus = RaceStatuses.ResultPending,
+                ResultStatus = RaceResultStatuses.RefereeConfirmed,
+                ReportStatus = RefereeReportStatuses.Submitted
+            },
+            new
+            {
+                RaceStatus = RaceStatuses.Published,
+                ResultStatus = RaceResultStatuses.Published,
+                ReportStatus = RefereeReportStatuses.Approved,
+                ResultCount = results.Count,
+                TournamentStatus = race.Tournament.Status
+            },
+            "Atomic final report approval and race result publication",
+            cancellationToken));
+
+        await RunSecondaryEffectAsync("referee approval notification", () => _notificationService.CreateForUserAsync(
+            finalReport.RefereeId,
+            "Final report and race results approved",
+            $"Your final report and all results for race {race.RaceName} were approved and published.",
+            "PostRaceSubmissionApproved",
+            $"/referee/races/post-race?raceId={raceId}&reportId={finalReport.ReportId}",
+            "RefereeReport",
+            finalReport.ReportId,
+            cancellationToken,
+            preventDuplicates: true));
+
+        await RunSecondaryEffectAsync("spectator race results notification", () => _notificationService.CreateForRaceSpectatorsAsync(
+            raceId,
+            "Official Race Results Published",
+            $"Official results for {race.RaceName} are now available. Open Results to see the published outcome; prediction settlement notifications will follow.",
+            "SpectatorRaceResultsPublished",
+            "/spectator/results",
+            "Race",
+            raceId,
+            cancellationToken,
+            preventDuplicates: true));
+
+        await RunSecondaryEffectAsync("admin race results notification", () => _notificationService.CreateForAdminsAsync(
+            "Official Race Results Published",
+            $"Final report and {results.Count} result(s) for {race.RaceName} were approved and published successfully.",
+            "AdminRaceResultsPublished",
+            $"/admin/results?raceId={raceId}",
+            "Race",
+            raceId,
+            cancellationToken,
+            preventDuplicates: true));
+
+        if (race.Tournament.Status == TournamentStatuses.Completed)
         {
-            secondaryWarning = ex.Message;
+            await RunSecondaryEffectAsync("tournament completed referee notification", () => _notificationService.CreateForTournamentRefereesAsync(
+                race.TournamentId,
+                "Tournament Completed",
+                $"{race.Tournament.TournamentName} has been completed and all official results are published.",
+                "RefereeTournamentCompleted",
+                "/referee/races",
+                "Tournament",
+                race.TournamentId,
+                cancellationToken,
+                preventDuplicates: true));
+
+            await RunSecondaryEffectAsync("tournament completed spectator notification", () => _notificationService.CreateForTournamentSpectatorsAsync(
+                race.TournamentId,
+                "Tournament Completed",
+                $"{race.Tournament.TournamentName} is complete. Final results and prediction outcomes are available.",
+                "SpectatorTournamentCompleted",
+                "/spectator/results",
+                "Tournament",
+                race.TournamentId,
+                cancellationToken,
+                preventDuplicates: true));
+
+            await RunSecondaryEffectAsync("tournament completed admin notification", () => _notificationService.CreateForAdminsAsync(
+                "Tournament Completed",
+                $"{race.Tournament.TournamentName} is now completed. All races are published or cancelled.",
+                "AdminTournamentCompleted",
+                "/admin/races",
+                "Tournament",
+                race.TournamentId,
+                cancellationToken,
+                preventDuplicates: true));
         }
+
+        await RunSecondaryEffectAsync("save secondary effects", () => _context.SaveChangesAsync(cancellationToken));
+
+        string? secondaryWarning = secondaryWarnings.Count > 0
+            ? string.Join(" | ", secondaryWarnings)
+            : null;
 
         PredictionEvaluationResult? evaluation = null;
         string? evaluationError = null;
@@ -614,6 +634,7 @@ public class AdminRaceResultsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Prediction evaluation failed for raceId={RaceId}", raceId);
             evaluationError = ex.Message;
         }
 
@@ -627,6 +648,7 @@ public class AdminRaceResultsController : ControllerBase
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "Tournament standing recalculation failed for tournamentId={TournamentId}", race.TournamentId);
             standingsError = ex.Message;
         }
 
