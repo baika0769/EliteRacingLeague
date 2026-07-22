@@ -57,11 +57,17 @@ public class SpectatorRaceReplayController : ControllerBase
             return NotFound(new { message = "Race not found or has been cancelled." });
         }
 
-        if (race.RaceStatus != RaceStatuses.Published || race.TournamentStatus != TournamentStatuses.Completed)
+        // Replay only needs THIS race's own results to be approved/published. Requiring
+        // the whole tournament to be marked Completed was wrong: tournament completion
+        // is a separate, manually-triggered "finalize standings" admin action that can
+        // happen long after (or independently of) any single race's results going out,
+        // so a race with officially published results was getting stuck with no replay
+        // until someone finalized every other race in the same tournament too.
+        if (race.RaceStatus != RaceStatuses.Published)
         {
             return BadRequest(new
             {
-                message = "Replay is only available after admin approves all race results.",
+                message = "Replay is only available after admin approves this race's results.",
                 raceStatus = race.RaceStatus,
                 tournamentStatus = race.TournamentStatus
             });
