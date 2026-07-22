@@ -836,8 +836,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 StepNumber = 1,
                 Key = "Submitted",
-                Label = "Đã gửi đơn",
-                Description = "Owner đã gửi đơn đăng ký race.",
+                Label = "Submitted",
+                Description = "Owner submitted the race registration.",
                 IsCompleted = currentStep >= 1,
                 IsCurrent = currentStep == 1
             },
@@ -845,8 +845,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 StepNumber = 2,
                 Key = "PendingReview",
-                Label = "Chờ Admin duyệt",
-                Description = "Admin đang kiểm tra đơn đăng ký.",
+                Label = "Pending Review",
+                Description = "Admin is reviewing the registration.",
                 IsCompleted = currentStep >= 2 &&
                     registration.Status != RaceRegistrationStatuses.Rejected &&
                     registration.Status != RaceRegistrationStatuses.Cancelled,
@@ -856,8 +856,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 StepNumber = 3,
                 Key = RaceRegistrationStatuses.Approved,
-                Label = "Đã được duyệt",
-                Description = "Đơn đăng ký đã được Admin duyệt.",
+                Label = "Approved",
+                Description = "The registration has been approved by Admin.",
                 IsCompleted = currentStep >= 3 &&
                     registration.Status != RaceRegistrationStatuses.Rejected &&
                     registration.Status != RaceRegistrationStatuses.Cancelled,
@@ -867,8 +867,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 StepNumber = 4,
                 Key = RaceRegistrationStatuses.JockeyInvited,
-                Label = "Mời Jockey",
-                Description = "Owner đã mời Jockey tham gia race.",
+                Label = "Jockey Invited",
+                Description = "Owner invited a jockey to join the race.",
                 IsCompleted = currentStep >= 4 &&
                     registration.Status != RaceRegistrationStatuses.Rejected &&
                     registration.Status != RaceRegistrationStatuses.Cancelled,
@@ -878,8 +878,8 @@ public class OwnerRegistrationsController : OwnerBaseController
             {
                 StepNumber = 5,
                 Key = RaceRegistrationStatuses.ReadyToRace,
-                Label = "Sẵn sàng thi đấu",
-                Description = "Ngựa và Jockey đã sẵn sàng tham gia race.",
+                Label = "Ready to Race",
+                Description = "Horse and jockey are ready for the race.",
                 IsCompleted = currentStep >= 5 &&
                     registration.Status != RaceRegistrationStatuses.Rejected &&
                     registration.Status != RaceRegistrationStatuses.Cancelled,
