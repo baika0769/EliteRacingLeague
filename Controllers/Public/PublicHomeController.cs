@@ -17,9 +17,14 @@ public class PublicHomeController : ControllerBase
     }
 
     [HttpGet("home")]
-    public async Task<IActionResult> GetHomePage(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetHomePage(
+        [FromQuery] int upcomingLimit = 6,
+        CancellationToken cancellationToken = default)
     {
-        var response = await _publicHomeService.GetHomePageAsync(cancellationToken);
+        var response = await _publicHomeService.GetHomePageAsync(
+            upcomingLimit,
+            cancellationToken);
+
         return Ok(response);
     }
 
@@ -28,7 +33,10 @@ public class PublicHomeController : ControllerBase
         [FromQuery] int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        var response = await _publicHomeService.GetUpcomingTournamentsAsync(limit, cancellationToken);
+        var response = await _publicHomeService.GetUpcomingTournamentsAsync(
+            limit,
+            cancellationToken);
+
         return Ok(response);
     }
 }

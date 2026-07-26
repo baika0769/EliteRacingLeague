@@ -1,8 +1,10 @@
 using Eliteracingleague.API.Services.Leaderboards;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Eliteracingleague.API.Controllers;
 
+[AllowAnonymous]
 [ApiController]
 [Route("api")]
 public class LeaderboardsController : ControllerBase
@@ -21,7 +23,12 @@ public class LeaderboardsController : ControllerBase
         [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        var items = await _leaderboardService.GetOwnerLeaderboardAsync(seasonId, year, limit, cancellationToken);
+        var items = await _leaderboardService.GetOwnerLeaderboardAsync(
+            seasonId,
+            year,
+            limit,
+            cancellationToken);
+
         return Ok(new { items });
     }
 
@@ -32,7 +39,12 @@ public class LeaderboardsController : ControllerBase
         [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        var items = await _leaderboardService.GetJockeyLeaderboardAsync(seasonId, year, limit, cancellationToken);
+        var items = await _leaderboardService.GetJockeyLeaderboardAsync(
+            seasonId,
+            year,
+            limit,
+            cancellationToken);
+
         return Ok(new { items });
     }
 }
