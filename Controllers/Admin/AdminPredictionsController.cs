@@ -70,6 +70,7 @@ public class AdminPredictionsController : ControllerBase
                 spectator = prediction.Spectator.FullName,
                 horseId = prediction.PredictedRegistration.HorseId,
                 horse = prediction.PredictedRegistration.Horse.HorseName,
+                horseImageUrl = prediction.PredictedRegistration.Horse.ImageUrl,
                 status = prediction.Status,
                 isCorrect = prediction.IsCorrect,
                 accuracy = prediction.IsCorrect == true
