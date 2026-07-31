@@ -111,6 +111,7 @@ public class SpectatorLeaderboardService
                 HasActiveSeason = false,
                 RewardPoints = 0,
                 BettingPoints = 0,
+                PendingRecoveryPoints = 0,
                 BaseOpeningPoints = 0,
                 CarriedBonusPoints = 0,
                 OpeningTotalPoints = 0,
@@ -133,6 +134,7 @@ public class SpectatorLeaderboardService
                 item.OpeningBettingPoints,
                 item.CurrentBettingPoints,
                 item.SeasonScore,
+                item.PendingRecoveryPoints,
                 item.Status
             })
             .FirstOrDefaultAsync();
@@ -174,10 +176,9 @@ public class SpectatorLeaderboardService
         return new SpectatorRewardSummary
         {
             HasActiveSeason = true,
-            // Season ranking is skill-based, not stake-based: every correct
-            // prediction earns the same score configured for the season.
-            RewardPoints = checked(correctPredictions * Math.Max(1, season.PointsPerCorrectPrediction)),
+            RewardPoints = wallet?.SeasonScore ?? 0,
             BettingPoints = wallet?.CurrentBettingPoints ?? 0,
+            PendingRecoveryPoints = wallet?.PendingRecoveryPoints ?? 0,
             BaseOpeningPoints = baseOpeningPoints,
             CarriedBonusPoints = carriedBonusPoints,
             OpeningTotalPoints = checked(baseOpeningPoints + carriedBonusPoints),
@@ -273,13 +274,6 @@ public class SpectatorLeaderboardService
 
     public async Task<IReadOnlyList<PredictorLeaderboardItem>> GetPredictorLeaderboardAsync(int limit, int seasonId)
     {
-        var pointsPerCorrectPrediction = await _context.Seasons
-            .AsNoTracking()
-            .Where(item => item.SeasonId == seasonId)
-            .Select(item => (int?)item.PointsPerCorrectPrediction)
-            .FirstOrDefaultAsync() ?? 100;
-        pointsPerCorrectPrediction = Math.Max(1, pointsPerCorrectPrediction);
-
         var rows = await _context.RacePredictions
             .AsNoTracking()
             .Where(p =>
@@ -301,12 +295,20 @@ public class SpectatorLeaderboardService
             })
             .ToListAsync();
 
+        var spectatorIds = rows.Select(item => item.SpectatorId).ToArray();
+        var seasonScores = await _context.SpectatorSeasonWallets
+            .AsNoTracking()
+            .Where(item =>
+                item.SeasonId == seasonId &&
+                spectatorIds.Contains(item.SpectatorId))
+            .ToDictionaryAsync(item => item.SpectatorId, item => item.SeasonScore);
+
         var ordered = rows
             .Select(r => new PredictorLeaderboardItem
             {
                 SpectatorId = r.SpectatorId,
                 SpectatorName = r.SpectatorName,
-                Points = checked(r.CorrectPredictions * pointsPerCorrectPrediction),
+                Points = seasonScores.GetValueOrDefault(r.SpectatorId, 0),
                 CorrectPredictions = r.CorrectPredictions,
                 TotalPredictions = r.TotalPredictions,
                 Accuracy = r.TotalPredictions == 0

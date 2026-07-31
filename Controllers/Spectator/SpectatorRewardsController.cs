@@ -110,6 +110,7 @@ public class SpectatorRewardsController : ControllerBase
                 isCorrect = p.IsCorrect,
                 stakePoints = p.StakePoints,
                 payoutPoints = p.PointsAwarded,
+                grossPayoutPoints = p.PointsAwarded,
                 points = p.PointsAwarded,
                 netPoints = p.Status == RacePredictionStatuses.Cancelled
                     ? 0
@@ -197,8 +198,10 @@ public class SpectatorRewardsController : ControllerBase
                     SeasonId = item.SpectatorSeasonWallet.SeasonId,
                     SeasonName = item.SpectatorSeasonWallet.Season.SeasonName,
                     TransactionType = item.TransactionType,
+                    RequestedAmount = item.RequestedAmount,
                     Amount = item.Amount,
                     ScoreDelta = item.ScoreDelta,
+                    RecoveryDebtDelta = item.RecoveryDebtDelta,
                     BalanceBefore = item.BalanceBefore,
                     BalanceAfter = item.BalanceAfter,
                     ReferenceType = item.ReferenceType,
@@ -217,6 +220,7 @@ public class SpectatorRewardsController : ControllerBase
             rewardPoints = rewardSummary.RewardPoints,
             seasonScore = rewardSummary.RewardPoints,
             bettingPoints = rewardSummary.BettingPoints,
+            pendingRecoveryPoints = rewardSummary.PendingRecoveryPoints,
             baseOpeningPoints = rewardSummary.BaseOpeningPoints,
             carriedBonusPoints = rewardSummary.CarriedBonusPoints,
             openingTotalPoints = rewardSummary.OpeningTotalPoints,
@@ -224,6 +228,8 @@ public class SpectatorRewardsController : ControllerBase
             totalStakePoints = rewardSummary.TotalStakePoints,
             totalPayoutPoints = rewardSummary.TotalPayoutPoints,
             netPoints = rewardSummary.NetPoints,
+            winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+            winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
             correctPredictions = rewardSummary.CorrectPredictions,
             predictionAccuracy = rewardSummary.PredictionAccuracy,
             myRank,
@@ -432,8 +438,10 @@ public class WalletTransactionResponse
     public int SeasonId { get; set; }
     public string SeasonName { get; set; } = string.Empty;
     public string TransactionType { get; set; } = string.Empty;
+    public int RequestedAmount { get; set; }
     public int Amount { get; set; }
     public int ScoreDelta { get; set; }
+    public int RecoveryDebtDelta { get; set; }
     public int BalanceBefore { get; set; }
     public int BalanceAfter { get; set; }
     public string? ReferenceType { get; set; }

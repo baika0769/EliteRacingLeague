@@ -145,6 +145,7 @@ public class SpectatorTournamentsController : ControllerBase
                         isCorrect = p.IsCorrect,
                         stakePoints = p.StakePoints,
                         payoutPoints = p.PointsAwarded,
+                        grossPayoutPoints = p.PointsAwarded,
                         pointsAwarded = p.PointsAwarded,
                         netPoints = p.Status == RacePredictionStatuses.Cancelled
                             ? 0

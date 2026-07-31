@@ -12,7 +12,8 @@ public class SpectatorSeasonWallet
 
     public int CurrentBettingPoints { get; set; }
 
-    // Điểm thành tích chỉ tăng từ phần thưởng dự đoán đúng, không lấy điểm mở ví để đổi quà.
+    // Điểm xếp hạng mùa phản ánh lãi/lỗ dự đoán: thắng +2x stake, thua -stake.
+    // Điểm mở ví và carried bonus không làm thay đổi SeasonScore.
     public int SeasonScore { get; set; }
 
     // Điểm đã chi sau khi nhận payout nhưng phải thu hồi do sửa/hủy kết quả.

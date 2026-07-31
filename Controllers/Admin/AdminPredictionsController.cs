@@ -2,6 +2,7 @@ using System.Data;
 using Eliteracingleague.API.Constants;
 using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Services;
+using Eliteracingleague.API.Services.Racing;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,16 +16,16 @@ public class AdminPredictionsController : ControllerBase
 {
     private readonly EliteRacingLeagueContext _context;
     private readonly PredictionEvaluationService _predictionEvaluationService;
-    private readonly SpectatorWalletService _spectatorWalletService;
+    private readonly RacePredictionSettlementService _settlementService;
 
     public AdminPredictionsController(
         EliteRacingLeagueContext context,
         PredictionEvaluationService predictionEvaluationService,
-        SpectatorWalletService spectatorWalletService)
+        RacePredictionSettlementService settlementService)
     {
         _context = context;
         _predictionEvaluationService = predictionEvaluationService;
-        _spectatorWalletService = spectatorWalletService;
+        _settlementService = settlementService;
     }
 
     [HttpGet]
@@ -80,9 +81,12 @@ public class AdminPredictionsController : ControllerBase
                         : "Pending",
                 stakePoints = prediction.StakePoints,
                 payoutPoints = prediction.PointsAwarded,
-                netPoints = prediction.Status == RacePredictionStatuses.Evaluated
-                    ? prediction.PointsAwarded - prediction.StakePoints
-                    : -prediction.StakePoints,
+                grossPayoutPoints = prediction.PointsAwarded,
+                netPoints = prediction.Status == RacePredictionStatuses.Cancelled
+                    ? 0
+                    : prediction.Status == RacePredictionStatuses.Evaluated
+                        ? prediction.PointsAwarded - prediction.StakePoints
+                        : -prediction.StakePoints,
                 rewardAmount = prediction.RewardAmount,
                 rewardStatus = prediction.RewardStatus,
                 predictedAt = prediction.PredictedAt,
@@ -164,16 +168,6 @@ public class AdminPredictionsController : ControllerBase
                 });
             }
 
-            if (prediction.Status == RacePredictionStatuses.Evaluated)
-            {
-                return BadRequest(new
-                {
-                    message = "Evaluated predictions cannot be changed manually.",
-                    id,
-                    status = prediction.Status
-                });
-            }
-
             if (prediction.Status == RacePredictionStatuses.Cancelled)
             {
                 return BadRequest(new
@@ -195,52 +189,14 @@ public class AdminPredictionsController : ControllerBase
                 });
             }
 
-            if (request.Status == RacePredictionStatuses.Cancelled &&
-                prediction.Race.Status == RaceStatuses.Published)
-            {
-                return BadRequest(new
-                {
-                    message = "A prediction cannot be cancelled after the race has been published.",
-                    id,
-                    raceStatus = prediction.Race.Status
-                });
-            }
-
             var now = DateTime.UtcNow;
 
             if (request.Status == RacePredictionStatuses.Cancelled)
             {
-                if (prediction.StakePoints > 0)
-                {
-                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
-                        prediction.Race.Tournament.SeasonId,
-                        prediction.Spectator,
-                        prediction.Spectator.BettingPoints,
-                        now,
-                        cancellationToken);
-
-                    await _spectatorWalletService.ApplyAsync(
-                        wallet,
-                        prediction.Spectator,
-                        PointTransactionTypes.PredictionRefund,
-                        prediction.StakePoints,
-                        scoreDelta: 0,
-                        idempotencyKey: $"PREDICTION_REFUND_{prediction.PredictionId}",
-                        referenceType: "RacePrediction",
-                        referenceId: prediction.PredictionId,
-                        description: $"Refund for cancelled prediction #{prediction.PredictionId}.",
-                        now: now,
-                        cancellationToken: cancellationToken);
-                }
-
-                prediction.Status = RacePredictionStatuses.Cancelled;
-                prediction.ActualWinnerRegistrationId = null;
-                prediction.IsCorrect = null;
-                prediction.PointsAwarded = 0;
-                prediction.RewardAmount = null;
-                prediction.RewardStatus = PredictionRewardStatuses.None;
-                prediction.EvaluatedAt = null;
-                prediction.UpdatedAt = now;
+                await _settlementService.CancelPredictionAsync(
+                    prediction.PredictionId,
+                    "Cancelled manually by an administrator.",
+                    cancellationToken);
             }
             else
             {

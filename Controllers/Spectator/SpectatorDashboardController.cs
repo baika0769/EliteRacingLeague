@@ -103,6 +103,7 @@ public class SpectatorDashboardController : ControllerBase
             upcomingTournaments,
             predictionsSubmitted,
             bettingPoints,
+            pendingRecoveryPoints = rewardSummary.PendingRecoveryPoints,
             hasActiveSeason = rewardSummary.HasActiveSeason,
             baseOpeningPoints = rewardSummary.BaseOpeningPoints,
             carriedBonusPoints = rewardSummary.CarriedBonusPoints,
@@ -113,6 +114,8 @@ public class SpectatorDashboardController : ControllerBase
             netPoints = rewardSummary.NetPoints,
             totalStakePoints = rewardSummary.TotalStakePoints,
             totalPayoutPoints = rewardSummary.TotalPayoutPoints,
+            winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+            winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
             myRank,
             featuredTournament
         });

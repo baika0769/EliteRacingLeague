@@ -1316,9 +1316,9 @@ namespace Eliteracingleague.API.Migrations
 
                     b.HasIndex("RefereeId");
 
-                    b.HasIndex("ReviewedByAdminId", "IX_referee_reports_reviewed_by_admin_id");
+                    b.HasIndex(new[] { "ReviewedByAdminId" }, "IX_referee_reports_reviewed_by_admin_id");
 
-                    b.HasIndex("Status", "IX_referee_reports_status");
+                    b.HasIndex(new[] { "Status" }, "IX_referee_reports_status");
 
                     b.ToTable("referee_reports", null, t =>
                         {
@@ -1606,6 +1606,18 @@ namespace Eliteracingleague.API.Migrations
                         .HasColumnType("int")
                         .HasColumnName("reference_id");
 
+                    b.Property<int>("RecoveryDebtDelta")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("recovery_debt_delta");
+
+                    b.Property<int>("RequestedAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("requested_amount");
+
                     b.Property<string>("ReferenceType")
                         .HasMaxLength(50)
                         .IsUnicode(false)
@@ -1629,7 +1641,7 @@ namespace Eliteracingleague.API.Migrations
 
                     b.HasKey("PointTransactionId");
 
-                    b.HasIndex("IdempotencyKey", "UX_point_transactions_idempotency_key")
+                    b.HasIndex(new[] { "IdempotencyKey" }, "UX_point_transactions_idempotency_key")
                         .IsUnique();
 
                     b.HasIndex(new[] { "SpectatorSeasonWalletId", "CreatedAt" }, "IX_point_transactions_wallet_created_at");
@@ -1679,6 +1691,12 @@ namespace Eliteracingleague.API.Migrations
                         .HasColumnType("int")
                         .HasColumnName("opening_betting_points");
 
+                    b.Property<int>("PendingRecoveryPoints")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("pending_recovery_points");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -1722,7 +1740,7 @@ namespace Eliteracingleague.API.Migrations
                         {
                             t.HasCheckConstraint("CK_spectator_season_wallets_balance", "[opening_betting_points] >= 0 AND [current_betting_points] >= 0");
 
-                            t.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0");
+                            t.HasCheckConstraint("CK_spectator_season_wallets_score", "[pending_recovery_points] >= 0");
 
                             t.HasCheckConstraint("CK_spectator_season_wallets_status", "[status] IN ('Active', 'Frozen', 'Settled')");
                         });

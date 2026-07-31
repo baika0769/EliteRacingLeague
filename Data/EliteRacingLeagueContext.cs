@@ -1221,7 +1221,7 @@ public partial class EliteRacingLeagueContext : DbContext
             entity.ToTable("spectator_season_wallets", table =>
             {
                 table.HasCheckConstraint("CK_spectator_season_wallets_balance", "[opening_betting_points] >= 0 AND [current_betting_points] >= 0");
-                table.HasCheckConstraint("CK_spectator_season_wallets_score", "[season_score] >= 0 AND [pending_recovery_points] >= 0");
+                table.HasCheckConstraint("CK_spectator_season_wallets_score", "[pending_recovery_points] >= 0");
                 table.HasCheckConstraint("CK_spectator_season_wallets_status", "[status] IN ('Active', 'Frozen', 'Settled')");
             });
 

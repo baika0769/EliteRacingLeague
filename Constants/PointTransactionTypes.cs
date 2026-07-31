@@ -4,6 +4,9 @@ public static class PointTransactionTypes
 {
     public const string SeasonOpening = "SeasonOpening";
     public const string PredictionStake = "PredictionStake";
+    public const string PredictionWinSettlement = "PredictionWinSettlement";
+    public const string PredictionLossSettlement = "PredictionLossSettlement";
+    public const string PredictionSettlementReversal = "PredictionSettlementReversal";
     public const string PredictionPayout = "PredictionPayout";
     public const string PredictionRefund = "PredictionRefund";
     public const string PredictionPayoutReversal = "PredictionPayoutReversal";

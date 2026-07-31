@@ -4,6 +4,7 @@ using Eliteracingleague.API.Data;
 using Eliteracingleague.API.Models;
 using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Eliteracingleague.API.Services;
 
@@ -27,9 +28,13 @@ public class PredictionEvaluationService
         int raceId,
         CancellationToken cancellationToken = default)
     {
-        await using var transaction = await _context.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
+        IDbContextTransaction? transaction = null;
+        if (_context.Database.CurrentTransaction == null)
+        {
+            transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+        }
 
         try
         {
@@ -43,8 +48,7 @@ public class PredictionEvaluationService
                     TournamentStatus = r.Tournament.Status,
                     SeasonId = r.Tournament.SeasonId,
                     SeasonStatus = r.Tournament.Season.Status,
-                    PointsPerCorrectPrediction =
-                        (int?)r.Tournament.Season.PointsPerCorrectPrediction
+                    r.LifecycleVersion
                 })
                 .FirstOrDefaultAsync(cancellationToken);
 
@@ -102,7 +106,8 @@ public class PredictionEvaluationService
 
             if (predictions.Count == 0)
             {
-                await transaction.CommitAsync(cancellationToken);
+                if (transaction != null)
+                    await transaction.CommitAsync(cancellationToken);
 
                 return PredictionEvaluationResult.Successful(
                     raceId,
@@ -136,7 +141,8 @@ public class PredictionEvaluationService
 
             if (predictionsToEvaluate.Count == 0)
             {
-                await transaction.CommitAsync(cancellationToken);
+                if (transaction != null)
+                    await transaction.CommitAsync(cancellationToken);
 
                 return PredictionEvaluationResult.Successful(
                     raceId,
@@ -149,24 +155,6 @@ public class PredictionEvaluationService
                     alreadyEvaluated: true,
                     message: "All predictions for this race were already evaluated.");
             }
-
-            var pointsPerCorrectPrediction =
-                raceInfo.PointsPerCorrectPrediction.GetValueOrDefault(100);
-
-            if (pointsPerCorrectPrediction <= 0)
-            {
-                pointsPerCorrectPrediction = 100;
-            }
-
-            var allCorrectPredictions = predictions
-                .Where(prediction =>
-                    prediction.PredictedRegistrationId == winner.RegistrationId)
-                .ToList();
-
-            var payouts = CalculatePariMutuelPayouts(
-                predictions,
-                allCorrectPredictions,
-                pointsPerCorrectPrediction);
 
             var now = _dateTimeProvider.UtcNow;
             var newlyCorrectPredictions = 0;
@@ -184,9 +172,12 @@ public class PredictionEvaluationService
                 var isCorrect =
                     prediction.PredictedRegistrationId == winner.RegistrationId;
 
-                var payoutPoints = payouts.GetValueOrDefault(
-                    prediction.PredictionId,
-                    0);
+                var payoutPoints = isCorrect
+                    ? SpectatorBettingRules.CalculateWinGrossPayout(prediction.StakePoints)
+                    : 0;
+                var scoreDelta = isCorrect
+                    ? SpectatorBettingRules.CalculateWinScoreDelta(prediction.StakePoints)
+                    : SpectatorBettingRules.CalculateLossScoreDelta(prediction.StakePoints);
 
                 prediction.ActualWinnerRegistrationId = winner.RegistrationId;
                 prediction.IsCorrect = isCorrect;
@@ -198,35 +189,37 @@ public class PredictionEvaluationService
                 prediction.EvaluatedAt = now;
                 prediction.UpdatedAt = now;
 
+                var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
+                    raceInfo.SeasonId,
+                    prediction.Spectator,
+                    prediction.Spectator.BettingPoints,
+                    now,
+                    cancellationToken);
+
+                var settlement = await _spectatorWalletService.ApplyAsync(
+                    wallet,
+                    prediction.Spectator,
+                    isCorrect
+                        ? PointTransactionTypes.PredictionWinSettlement
+                        : PointTransactionTypes.PredictionLossSettlement,
+                    payoutPoints,
+                    scoreDelta,
+                    isCorrect
+                        ? $"PREDICTION_WIN_{prediction.PredictionId}_V{raceInfo.LifecycleVersion}"
+                        : $"PREDICTION_LOSS_{prediction.PredictionId}_V{raceInfo.LifecycleVersion}",
+                    "RacePrediction",
+                    prediction.PredictionId,
+                    isCorrect
+                        ? $"Fixed gross payout of {payoutPoints} and season score +{scoreDelta} for winning prediction #{prediction.PredictionId}."
+                        : $"Loss settlement and season score {scoreDelta} for prediction #{prediction.PredictionId}.",
+                    now,
+                    cancellationToken);
+
                 if (isCorrect)
                 {
                     newlyCorrectPredictions++;
 
-                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
-                        raceInfo.SeasonId,
-                        prediction.Spectator,
-                        prediction.Spectator.BettingPoints,
-                        now,
-                        cancellationToken);
-
-                    // Wallet payout follows stake/risk. SeasonScore is a skill score:
-                    // every correct prediction in the same season earns the same amount,
-                    // so a large stake cannot buy a higher leaderboard position. Amount may
-                    // be zero in an edge case, but the correct prediction still earns score.
-                    var payoutResult = await _spectatorWalletService.ApplyAsync(
-                        wallet,
-                        prediction.Spectator,
-                        PointTransactionTypes.PredictionPayout,
-                        payoutPoints,
-                        pointsPerCorrectPrediction,
-                        $"PREDICTION_PAYOUT_{prediction.PredictionId}",
-                        "RacePrediction",
-                        prediction.PredictionId,
-                        $"Payout and fixed season score for correct prediction #{prediction.PredictionId}.",
-                        now,
-                        cancellationToken);
-
-                    if (!payoutResult.AlreadyApplied)
+                    if (!settlement.AlreadyApplied)
                     {
                         newlyPaidPoints += payoutPoints;
                     }
@@ -235,9 +228,7 @@ public class PredictionEvaluationService
                     {
                         UserId = prediction.SpectatorId,
                         Title = "Bet Won",
-                        Message = payoutPoints > 0
-                            ? $"Correct prediction: {winner.HorseName} won. Wallet payout: {payoutPoints} points; season leaderboard score: +{pointsPerCorrectPrediction}."
-                            : $"Correct prediction: {winner.HorseName} won. Season leaderboard score: +{pointsPerCorrectPrediction}.",
+                        Message = $"Correct prediction: {winner.HorseName} won. Gross wallet payout: {payoutPoints} points; net profit and season score: +{scoreDelta}.",
                         IsRead = false,
                         CreatedAt = now,
                         ActionType = "SpectatorRewards",
@@ -252,7 +243,7 @@ public class PredictionEvaluationService
                     {
                         UserId = prediction.SpectatorId,
                         Title = "Bet Lost",
-                        Message = $"Your prediction was not correct. {winner.HorseName} won, so your {prediction.StakePoints} staked points were lost.",
+                        Message = $"Your prediction was not correct. {winner.HorseName} won. Wallet payout: 0; season score: {scoreDelta}.",
                         IsRead = false,
                         CreatedAt = now,
                         ActionType = "SpectatorPredictions",
@@ -264,7 +255,8 @@ public class PredictionEvaluationService
             }
 
             await _context.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            if (transaction != null)
+                await transaction.CommitAsync(cancellationToken);
 
             return PredictionEvaluationResult.Successful(
                 raceId,
@@ -279,87 +271,15 @@ public class PredictionEvaluationService
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            if (transaction != null)
+                await transaction.RollbackAsync(cancellationToken);
             throw;
         }
-    }
-
-    private static Dictionary<int, int> CalculatePariMutuelPayouts(
-        IReadOnlyCollection<RacePrediction> allPredictions,
-        IReadOnlyCollection<RacePrediction> correctPredictions,
-        int legacyPointsPerCorrectPrediction)
-    {
-        var payouts = allPredictions.ToDictionary(
-            prediction => prediction.PredictionId,
-            _ => 0);
-
-        if (correctPredictions.Count == 0)
+        finally
         {
-            return payouts;
+            if (transaction != null)
+                await transaction.DisposeAsync();
         }
-
-        var totalPool = allPredictions.Sum(
-            prediction => Math.Max(0, prediction.StakePoints));
-
-        var totalCorrectStake = correctPredictions.Sum(
-            prediction => Math.Max(0, prediction.StakePoints));
-
-        // Compatibility for predictions created before stake points were added.
-        if (totalPool <= 0 || totalCorrectStake <= 0)
-        {
-            foreach (var prediction in correctPredictions)
-            {
-                payouts[prediction.PredictionId] = legacyPointsPerCorrectPrediction;
-            }
-
-            return payouts;
-        }
-
-        var remainingPoints = totalPool;
-
-        var allocatedRows = correctPredictions
-            .Select(prediction =>
-            {
-                var exactNumerator =
-                    (long)totalPool * Math.Max(0, prediction.StakePoints);
-
-                var basePayout = (int)(exactNumerator / totalCorrectStake);
-                var remainder = exactNumerator % totalCorrectStake;
-
-                remainingPoints -= basePayout;
-
-                return new
-                {
-                    Prediction = prediction,
-                    BasePayout = basePayout,
-                    Remainder = remainder
-                };
-            })
-            .OrderByDescending(row => row.Remainder)
-            .ThenByDescending(row => row.Prediction.StakePoints)
-            .ThenBy(row => row.Prediction.PredictionId)
-            .ToList();
-
-        foreach (var row in allocatedRows)
-        {
-            payouts[row.Prediction.PredictionId] = row.BasePayout;
-        }
-
-        for (var index = 0;
-             index < remainingPoints && index < allocatedRows.Count;
-             index++)
-        {
-            payouts[allocatedRows[index].Prediction.PredictionId] += 1;
-        }
-
-        foreach (var prediction in correctPredictions)
-        {
-            payouts[prediction.PredictionId] +=
-                legacyPointsPerCorrectPrediction;
-        }
-
-
-        return payouts;
     }
 }
 

@@ -115,6 +115,7 @@ public class SpectatorRewardSummary
     public bool HasActiveSeason { get; set; }
     public int RewardPoints { get; set; }
     public int BettingPoints { get; set; }
+    public int PendingRecoveryPoints { get; set; }
     public int BaseOpeningPoints { get; set; }
     public int CarriedBonusPoints { get; set; }
     public int OpeningTotalPoints { get; set; }

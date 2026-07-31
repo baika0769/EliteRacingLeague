@@ -69,12 +69,15 @@ public class SpectatorPredictionsController : ControllerBase
                 hasActiveSeason = false,
                 bettingPoints = 0,
                 seasonScore = 0,
+                pendingRecoveryPoints = 0,
                 initialBettingPoints = 0,
                 baseOpeningPoints = 0,
                 carriedBonusPoints = 0,
                 openingTotalPoints = 0,
                 walletStatus = (string?)null,
                 minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
+                winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+                winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
                 totalStakePoints = 0,
                 totalPayoutPoints = 0,
                 pendingStakePoints = 0,
@@ -122,12 +125,15 @@ public class SpectatorPredictionsController : ControllerBase
             hasActiveSeason = true,
             bettingPoints = wallet?.CurrentBettingPoints ?? 0,
             seasonScore = wallet?.SeasonScore ?? 0,
+            pendingRecoveryPoints = wallet?.PendingRecoveryPoints ?? 0,
             initialBettingPoints = baseOpeningPoints,
             baseOpeningPoints,
             carriedBonusPoints,
             openingTotalPoints = checked(baseOpeningPoints + carriedBonusPoints),
             walletStatus = wallet?.Status,
             minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
+            winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+            winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
             totalStakePoints,
             totalPayoutPoints,
             pendingStakePoints,
@@ -365,8 +371,12 @@ public class SpectatorPredictionsController : ControllerBase
             status = prediction.Status,
             stakePoints = prediction.StakePoints,
             payoutPoints = prediction.PointsAwarded,
+            grossPayoutPoints = prediction.PointsAwarded,
+            netPoints = -prediction.StakePoints,
             bettingPoints = walletResult.BettingPoints,
-            seasonScore = walletResult.SeasonScore
+            seasonScore = walletResult.SeasonScore,
+            winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+            winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier
         });
     }
 
@@ -525,6 +535,7 @@ public class SpectatorPredictionsController : ControllerBase
 
         var oldStakePoints = prediction.StakePoints;
         var walletDelta = oldStakePoints - request.StakePoints;
+        var editVersion = prediction.UpdatedAt?.Ticks ?? prediction.CreatedAt.Ticks;
 
         if (walletDelta < 0 && wallet.CurrentBettingPoints < -walletDelta)
         {
@@ -557,7 +568,7 @@ public class SpectatorPredictionsController : ControllerBase
                     : PointTransactionTypes.PredictionStake,
                 walletDelta,
                 scoreDelta: 0,
-                idempotencyKey: $"PREDICTION_EDIT_{prediction.PredictionId}_{utcNow.Ticks}",
+                idempotencyKey: $"PREDICTION_EDIT_{prediction.PredictionId}_{editVersion}_{oldStakePoints}_{request.StakePoints}",
                 referenceType: "RacePrediction",
                 referenceId: prediction.PredictionId,
                 description: walletDelta > 0
@@ -586,6 +597,8 @@ public class SpectatorPredictionsController : ControllerBase
             stakePoints = prediction.StakePoints,
             bettingPoints = walletResult.BettingPoints,
             seasonScore = walletResult.SeasonScore,
+            winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+            winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
             updatedAt = prediction.UpdatedAt
         });
     }
@@ -625,6 +638,7 @@ public class SpectatorPredictionsController : ControllerBase
                 isCorrect = p.IsCorrect,
                 stakePoints = p.StakePoints,
                 payoutPoints = p.PointsAwarded,
+                grossPayoutPoints = p.PointsAwarded,
                 pointsAwarded = p.PointsAwarded,
                 netPoints = p.Status == RacePredictionStatuses.Cancelled
                     ? 0

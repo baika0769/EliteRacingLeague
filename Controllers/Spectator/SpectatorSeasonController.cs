@@ -54,7 +54,9 @@ public class SpectatorSeasonController : ControllerBase
                 s.Status,
                 s.StartDate,
                 s.EndDate,
-                s.PointsPerCorrectPrediction,
+                minimumStakePoints = SpectatorBettingRules.MinimumStakePoints,
+                winGrossPayoutMultiplier = SpectatorBettingRules.WinGrossPayoutMultiplier,
+                winProfitMultiplier = SpectatorBettingRules.WinProfitMultiplier,
                 RewardRules = s.SeasonRewardRules
                     .OrderBy(r => r.RankPosition)
                     .Select(r => new

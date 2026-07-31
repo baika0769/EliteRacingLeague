@@ -194,7 +194,6 @@ public class SpectatorWalletService
         if (after < 0) throw new InvalidOperationException("Insufficient betting points.");
 
         var scoreAfter = checked(wallet.SeasonScore + scoreDelta);
-        if (scoreAfter < 0) throw new InvalidOperationException("Season score cannot be negative.");
 
         wallet.CurrentBettingPoints = after;
         wallet.SeasonScore = scoreAfter;
@@ -204,6 +203,75 @@ public class SpectatorWalletService
         AddTransaction(wallet, transactionType, requestedAmount, amount, scoreDelta,
             recoveryDebtDelta, before, after, idempotencyKey, referenceType,
             referenceId, description, now);
+
+        return new WalletMutationResult(after, scoreAfter, wallet.PendingRecoveryPoints, false);
+    }
+
+    public async Task<WalletMutationResult> ReverseTransactionAsync(
+        SpectatorSeasonWallet wallet,
+        User spectator,
+        PointTransaction transactionToReverse,
+        string idempotencyKey,
+        string? description,
+        DateTime now,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureMutable(wallet);
+        if (transactionToReverse.SpectatorSeasonWalletId != wallet.SpectatorSeasonWalletId)
+            throw new InvalidOperationException("The transaction does not belong to this season wallet.");
+
+        if (transactionToReverse.RequestedAmount < 0)
+            throw new InvalidOperationException("The current net settlement cannot have a negative requested payout.");
+
+        if (await ExistsAsync(idempotencyKey, cancellationToken))
+            return Existing(wallet);
+
+        var before = wallet.CurrentBettingPoints;
+        var requestedRecovery = transactionToReverse.RequestedAmount;
+        int recoveredNow;
+        int recoveryDebtDelta;
+
+        if (transactionToReverse.RecoveryDebtDelta <= 0)
+        {
+            // A normal credit may have paid existing debt before reaching the
+            // wallet. Reverse its actual wallet credit and restore that paid debt.
+            var walletCreditToRecover = Math.Max(0, transactionToReverse.Amount);
+            recoveredNow = Math.Min(before, walletCreditToRecover);
+            recoveryDebtDelta = checked(
+                walletCreditToRecover - recoveredNow - transactionToReverse.RecoveryDebtDelta);
+        }
+        else
+        {
+            // A legacy cutover aggregate may already contain a clawback debt.
+            // Recover only its current net business payout; previously repaid debt
+            // must not be subtracted from the wallet a second time.
+            recoveredNow = Math.Min(before, requestedRecovery);
+            recoveryDebtDelta = requestedRecovery - recoveredNow;
+        }
+        var after = before - recoveredNow;
+        var reversedScoreDelta = checked(-transactionToReverse.ScoreDelta);
+        var scoreAfter = checked(wallet.SeasonScore + reversedScoreDelta);
+
+        wallet.CurrentBettingPoints = after;
+        wallet.SeasonScore = scoreAfter;
+        wallet.PendingRecoveryPoints = checked(wallet.PendingRecoveryPoints + recoveryDebtDelta);
+        spectator.BettingPoints = after;
+        spectator.UpdatedAt = now;
+
+        AddTransaction(
+            wallet,
+            PointTransactionTypes.PredictionSettlementReversal,
+            -requestedRecovery,
+            -recoveredNow,
+            reversedScoreDelta,
+            recoveryDebtDelta,
+            before,
+            after,
+            idempotencyKey,
+            "RacePrediction",
+            transactionToReverse.ReferenceId,
+            description,
+            now);
 
         return new WalletMutationResult(after, scoreAfter, wallet.PendingRecoveryPoints, false);
     }
@@ -232,10 +300,7 @@ public class SpectatorWalletService
         var recoveredNow = Math.Min(before, pointsToRecover);
         var debt = pointsToRecover - recoveredNow;
         var after = before - recoveredNow;
-        var scoreAfter = wallet.SeasonScore - scoreToReverse;
-
-        if (scoreAfter < 0)
-            throw new InvalidOperationException("Cannot reverse more season score than the wallet contains.");
+        var scoreAfter = checked(wallet.SeasonScore - scoreToReverse);
 
         wallet.CurrentBettingPoints = after;
         wallet.SeasonScore = scoreAfter;

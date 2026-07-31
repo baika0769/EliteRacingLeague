@@ -385,6 +385,7 @@ public class AdminRaceResultsController : ControllerBase
         var registrationById = registrations.ToDictionary(r => r.RegistrationId);
         var now = DateTime.UtcNow;
         var stage = "starting approval";
+        PredictionEvaluationResult? evaluation = null;
 
         await using var transaction = await _context.Database
             .BeginTransactionAsync(cancellationToken);
@@ -476,6 +477,15 @@ public class AdminRaceResultsController : ControllerBase
             }
 
             await _context.SaveChangesAsync(cancellationToken);
+
+            stage = "settling spectator predictions";
+            evaluation = await _predictionEvaluationService
+                .EvaluateRacePredictionsAsync(raceId, cancellationToken);
+            if (!evaluation.Success)
+            {
+                throw new InvalidOperationException(evaluation.Message);
+            }
+
             await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException ex)
@@ -624,20 +634,6 @@ public class AdminRaceResultsController : ControllerBase
             ? string.Join(" | ", secondaryWarnings)
             : null;
 
-        PredictionEvaluationResult? evaluation = null;
-        string? evaluationError = null;
-
-        try
-        {
-            evaluation = await _predictionEvaluationService
-                .EvaluateRacePredictionsAsync(raceId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Prediction evaluation failed for raceId={RaceId}", raceId);
-            evaluationError = ex.Message;
-        }
-
         IReadOnlyList<TournamentStanding>? standings = null;
         string? standingsError = null;
 
@@ -662,21 +658,13 @@ public class AdminRaceResultsController : ControllerBase
             publishedResults = results.Count,
             tournamentStatus = race.Tournament.Status,
             warning = secondaryWarning,
-            predictionEvaluation = evaluation == null
-                ? new
-                {
-                    success = false,
-                    message = evaluationError ?? "Evaluation did not run.",
-                    evaluated = 0,
-                    payoutPoints = 0
-                }
-                : new
-                {
-                    success = evaluation.Success,
-                    message = evaluation.Message,
-                    evaluated = evaluation.NewlyEvaluated,
-                    payoutPoints = evaluation.TotalPayoutPoints
-                },
+            predictionEvaluation = new
+            {
+                success = evaluation!.Success,
+                message = evaluation.Message,
+                evaluated = evaluation.NewlyEvaluated,
+                payoutPoints = evaluation.TotalPayoutPoints
+            },
             tournamentStandings = new
             {
                 success = standings != null,

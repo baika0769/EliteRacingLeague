@@ -28,7 +28,7 @@ namespace Eliteracingleague.API.Controllers.Admin
         private readonly TournamentStatusService _tournamentStatusService;
         private readonly INotificationService _notificationService;
         private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly SpectatorWalletService _spectatorWalletService;
+        private readonly RacePredictionSettlementService _predictionSettlementService;
 
         public AdminTournamentsController(
             EliteRacingLeagueContext context,
@@ -36,14 +36,14 @@ namespace Eliteracingleague.API.Controllers.Admin
             TournamentStatusService tournamentStatusService,
             INotificationService notificationService,
             IDateTimeProvider dateTimeProvider,
-            SpectatorWalletService spectatorWalletService)
+            RacePredictionSettlementService predictionSettlementService)
         {
             _context = context;
             _env = env;
             _tournamentStatusService = tournamentStatusService;
             _notificationService = notificationService;
             _dateTimeProvider = dateTimeProvider;
-            _spectatorWalletService = spectatorWalletService;
+            _predictionSettlementService = predictionSettlementService;
         }
 
         [HttpGet]
@@ -1795,55 +1795,11 @@ namespace Eliteracingleague.API.Controllers.Admin
                 assignment.Status = RefereeAssignmentStatuses.Cancelled;
             }
 
-            var refundablePredictions = await _context.RacePredictions
-                .Include(p => p.Spectator)
-                .Include(p => p.Race)
-                    .ThenInclude(r => r.Tournament)
-                .Where(p => raceIds.Contains(p.RaceId)
-                    && (p.Status == RacePredictionStatuses.Pending || p.Status == RacePredictionStatuses.Locked))
-                .ToListAsync();
-
-            foreach (var prediction in refundablePredictions)
+            foreach (var raceId in raceIds)
             {
-                if (prediction.StakePoints > 0)
-                {
-                    var wallet = await _spectatorWalletService.GetOrCreateWalletAsync(
-                        prediction.Race.Tournament.SeasonId,
-                        prediction.Spectator,
-                        prediction.Spectator.BettingPoints,
-                        now);
-
-                    await _spectatorWalletService.ApplyAsync(
-                        wallet,
-                        prediction.Spectator,
-                        PointTransactionTypes.PredictionRefund,
-                        prediction.StakePoints,
-                        scoreDelta: 0,
-                        idempotencyKey: $"PREDICTION_REFUND_{prediction.PredictionId}",
-                        referenceType: "RacePrediction",
-                        referenceId: prediction.PredictionId,
-                        description: $"Refund because tournament was cancelled for prediction #{prediction.PredictionId}.",
-                        now: now);
-                }
-
-                prediction.Status = RacePredictionStatuses.Cancelled;
-                prediction.RewardStatus = PredictionRewardStatuses.None;
-                prediction.PointsAwarded = 0;
-                prediction.IsCorrect = null;
-                prediction.UpdatedAt = now;
-
-                _context.Notifications.Add(new Notification
-                {
-                    UserId = prediction.SpectatorId,
-                    Title = "Prediction Refunded",
-                    Message = $"Race was cancelled. Your {prediction.StakePoints} stake points have been returned.",
-                    IsRead = false,
-                    CreatedAt = now,
-                    ActionType = "SpectatorPredictions",
-                    ActionUrl = "/spectator/predictions",
-                    RelatedType = "RacePrediction",
-                    RelatedId = prediction.PredictionId
-                });
+                await _predictionSettlementService.RefundForCancelledRaceAsync(
+                    raceId,
+                    "Tournament cancelled.");
             }
 
             var prizePayouts = await _context.PrizePayouts

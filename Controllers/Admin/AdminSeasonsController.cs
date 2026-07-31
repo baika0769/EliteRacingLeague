@@ -1107,6 +1107,30 @@ public class AdminSeasonsController : ControllerBase
                 });
             }
 
+            var recoveryDebt = await _context.SpectatorSeasonWallets
+                .AsNoTracking()
+                .Where(item =>
+                    item.SeasonId == season.SeasonId &&
+                    item.PendingRecoveryPoints > 0)
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    WalletCount = group.Count(),
+                    TotalPoints = group.Sum(item => item.PendingRecoveryPoints)
+                })
+                .FirstOrDefaultAsync();
+
+            if (recoveryDebt != null)
+            {
+                return BadRequest(new
+                {
+                    message = "Cannot close the season while spectator recovery debt is still outstanding.",
+                    seasonId = season.SeasonId,
+                    affectedWalletCount = recoveryDebt.WalletCount,
+                    pendingRecoveryPoints = recoveryDebt.TotalPoints
+                });
+            }
+
             var rewardRules = await _context.SeasonRewardRules
                 .Include(r => r.RewardItem)
                 .Where(r => r.SeasonId == season.SeasonId)
