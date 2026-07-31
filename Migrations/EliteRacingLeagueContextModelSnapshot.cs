@@ -929,7 +929,8 @@ namespace Eliteracingleague.API.Migrations
                     b.HasIndex(new[] { "RaceId", "PredictedRegistrationId" }, "IX_race_predictions_race_predicted_registration");
 
                     b.HasIndex(new[] { "RaceId", "SpectatorId" }, "UQ_race_predictions_race_spectator")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[status] <> 'Cancelled'");
 
                     b.ToTable("race_predictions", (string)null);
                 });

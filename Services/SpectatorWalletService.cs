@@ -171,7 +171,8 @@ public class SpectatorWalletService
         int? referenceId,
         string? description,
         DateTime now,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool settleRecoveryDebt = true)
     {
         EnsureMutable(wallet);
         if (await ExistsAsync(idempotencyKey, cancellationToken))
@@ -181,7 +182,7 @@ public class SpectatorWalletService
         var recoveryDebtDelta = 0;
 
         // Every positive credit first pays any debt caused by a prior result correction.
-        if (amount > 0 && wallet.PendingRecoveryPoints > 0)
+        if (settleRecoveryDebt && amount > 0 && wallet.PendingRecoveryPoints > 0)
         {
             var recovered = Math.Min(amount, wallet.PendingRecoveryPoints);
             wallet.PendingRecoveryPoints -= recovered;

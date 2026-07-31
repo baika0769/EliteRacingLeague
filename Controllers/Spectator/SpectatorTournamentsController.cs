@@ -413,7 +413,11 @@ public class SpectatorTournamentsController : ControllerBase
             .AsNoTracking()
             .Where(r =>
                 r.RaceId == race.RaceId &&
-                VisibleRegistrationStatuses.Contains(r.Status))
+                VisibleRegistrationStatuses.Contains(r.Status) &&
+                !_context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == r.RaceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed))
             .OrderBy(r => r.RegistrationId)
             .Select(r => new TournamentHorseItem
             {
@@ -513,6 +517,10 @@ public class SpectatorTournamentsController : ControllerBase
             .Where(r =>
                 r.RaceId == raceId &&
                 VisibleRegistrationStatuses.Contains(r.Status) &&
+                !_context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == r.RaceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
                 r.Race.Tournament.Status != TournamentStatuses.Cancelled)
             .OrderBy(r => r.RegistrationId)

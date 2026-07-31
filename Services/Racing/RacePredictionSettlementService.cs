@@ -149,6 +149,82 @@ public class RacePredictionSettlementService
         }
     }
 
+    public async Task<PredictionSettlementSummary> CancelForFailedPreRaceInspectionAsync(
+        int raceId,
+        int registrationId,
+        string horseName,
+        CancellationToken cancellationToken = default)
+    {
+        IDbContextTransaction? transaction = null;
+        if (_context.Database.CurrentTransaction == null)
+        {
+            transaction = await _context.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable, cancellationToken);
+        }
+
+        try
+        {
+            var race = await GetRaceContextAsync(raceId, cancellationToken);
+            var predictions = await _context.RacePredictions
+                .Include(prediction => prediction.Spectator)
+                .Where(prediction =>
+                    prediction.RaceId == raceId &&
+                    prediction.PredictedRegistrationId == registrationId &&
+                    prediction.Status != RacePredictionStatuses.Cancelled)
+                .OrderBy(prediction => prediction.PredictionId)
+                .ToListAsync(cancellationToken);
+
+            if (predictions.Count == 0)
+            {
+                if (transaction != null)
+                    await transaction.CommitAsync(cancellationToken);
+                return new PredictionSettlementSummary(0, 0, 0);
+            }
+
+            var now = DateTime.UtcNow;
+            var payoutReversed = 0;
+            var stakesRefunded = 0;
+            const string notificationMessage =
+                "Ngựa không vượt qua kiểm tra pre-race, tiền cược đã được hoàn.";
+
+            foreach (var prediction in predictions)
+            {
+                var result = await CancelPredictionCoreAsync(
+                    prediction,
+                    race.SeasonId,
+                    race.LifecycleVersion,
+                    $"Horse {horseName} failed pre-race inspection.",
+                    now,
+                    cancellationToken,
+                    refundBypassesRecoveryDebt: true,
+                    notificationMessage: notificationMessage);
+
+                payoutReversed = checked(payoutReversed + result.PayoutPointsReversed);
+                stakesRefunded = checked(stakesRefunded + result.StakePointsRefunded);
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction != null)
+                await transaction.CommitAsync(cancellationToken);
+
+            return new PredictionSettlementSummary(
+                predictions.Count,
+                stakesRefunded,
+                payoutReversed);
+        }
+        catch
+        {
+            if (transaction != null)
+                await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+        finally
+        {
+            if (transaction != null)
+                await transaction.DisposeAsync();
+        }
+    }
+
     public async Task<PredictionSettlementSummary> ReverseForResultCorrectionAsync(
         int raceId,
         string reason,
@@ -244,7 +320,9 @@ public class RacePredictionSettlementService
         int settlementVersion,
         string reason,
         DateTime now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool refundBypassesRecoveryDebt = false,
+        string? notificationMessage = null)
     {
         var wallet = await _walletService.GetOrCreateWalletAsync(
             seasonId,
@@ -296,7 +374,8 @@ public class RacePredictionSettlementService
                 referenceId: prediction.PredictionId,
                 description: $"Refund stake for cancelled prediction #{prediction.PredictionId}. {reason}",
                 now: now,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                settleRecoveryDebt: !refundBypassesRecoveryDebt);
 
             if (!refund.AlreadyApplied)
                 stakeRefunded = prediction.StakePoints;
@@ -315,7 +394,8 @@ public class RacePredictionSettlementService
         {
             UserId = prediction.SpectatorId,
             Title = "Prediction Cancelled - Stake Refunded",
-            Message = $"Prediction #{prediction.PredictionId} was cancelled. Its settlement was reversed and the {prediction.StakePoints}-point stake was refunded.",
+            Message = notificationMessage ??
+                $"Prediction #{prediction.PredictionId} was cancelled. Its settlement was reversed and the {prediction.StakePoints}-point stake was refunded.",
             IsRead = false,
             CreatedAt = now,
             ActionType = "SpectatorPredictions",

@@ -10,6 +10,7 @@ using Eliteracingleague.API.Services.SystemTime;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Security.Claims;
 
 namespace Eliteracingleague.API.Controllers.Referee;
@@ -24,6 +25,7 @@ public class RefereeRacesController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly RaceResultValidationService _resultValidationService;
+    private readonly RacePredictionSettlementService _predictionSettlementService;
 
     private static readonly string[] ActiveRegistrationStatuses =
     {
@@ -54,13 +56,15 @@ public class RefereeRacesController : ControllerBase
         RefereeRaceLifecycleService lifecycleService,
         INotificationService notificationService,
         IDateTimeProvider dateTimeProvider,
-        RaceResultValidationService resultValidationService)
+        RaceResultValidationService resultValidationService,
+        RacePredictionSettlementService predictionSettlementService)
     {
         _context = context;
         _lifecycleService = lifecycleService;
         _notificationService = notificationService;
         _dateTimeProvider = dateTimeProvider;
         _resultValidationService = resultValidationService;
+        _predictionSettlementService = predictionSettlementService;
     }
 
     private bool TryGetRefereeId(out int refereeId)
@@ -681,7 +685,8 @@ public class RefereeRacesController : ControllerBase
     [HttpPost("{raceId}/inspections")]
     public async Task<IActionResult> CreateOrUpdateInspection(
         int raceId,
-        CreateInspectionRequest request)
+        CreateInspectionRequest request,
+        CancellationToken cancellationToken)
     {
         if (!TryGetRefereeId(out var refereeId))
         {
@@ -732,13 +737,18 @@ public class RefereeRacesController : ControllerBase
             });
         }
 
+        await using var transaction = await _context.Database
+            .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
         var registration = await _context.RaceRegistrations
+            .Include(r => r.Horse)
             .FirstOrDefaultAsync(r =>
                 r.RaceId == raceId &&
                 r.RegistrationId == request.RegistrationId &&
                 ActiveRegistrationStatuses.Contains(r.Status) &&
                 r.Race.Status != RaceStatuses.Cancelled &&
-                r.Race.Tournament.Status != TournamentStatuses.Cancelled);
+                r.Race.Tournament.Status != TournamentStatuses.Cancelled,
+                cancellationToken);
 
         if (registration == null)
         {
@@ -748,7 +758,8 @@ public class RefereeRacesController : ControllerBase
         var inspection = await _context.PreRaceInspections
             .FirstOrDefaultAsync(i =>
                 i.RaceId == raceId &&
-                i.RegistrationId == request.RegistrationId);
+                i.RegistrationId == request.RegistrationId,
+                cancellationToken);
 
         if (inspection == null)
         {
@@ -779,7 +790,7 @@ public class RefereeRacesController : ControllerBase
                 .Where(result =>
                     result.RaceId == raceId &&
                     result.RegistrationId == request.RegistrationId)
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
 
             if (staleResults.Any(result =>
                     result.Status is RaceResultStatuses.AdminApproved or
@@ -798,13 +809,25 @@ public class RefereeRacesController : ControllerBase
             }
         }
 
-        await _context.SaveChangesAsync();
+        await _context.SaveChangesAsync(cancellationToken);
+
+        var predictionSettlement = request.Status == PreRaceInspectionStatuses.Failed
+            ? await _predictionSettlementService.CancelForFailedPreRaceInspectionAsync(
+                raceId,
+                registration.RegistrationId,
+                registration.Horse.HorseName,
+                cancellationToken)
+            : new PredictionSettlementSummary(0, 0, 0);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return Ok(new
         {
             message = "Inspection saved successfully",
             inspectionId = inspection.InspectionId,
-            status = inspection.Status
+            status = inspection.Status,
+            predictionsCancelled = predictionSettlement.PredictionsAffected,
+            stakePointsRefunded = predictionSettlement.StakePointsRefunded
         });
     }
 

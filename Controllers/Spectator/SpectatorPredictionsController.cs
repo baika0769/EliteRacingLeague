@@ -39,6 +39,21 @@ public class SpectatorPredictionsController : ControllerBase
     private int GetUserId()
         => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
+    private Task<bool> HasFailedPreRaceInspectionAsync(
+        int raceId,
+        int horseId,
+        CancellationToken cancellationToken = default)
+        => _context.RaceRegistrations
+            .AsNoTracking()
+            .AnyAsync(r =>
+                r.RaceId == raceId &&
+                r.HorseId == horseId &&
+                _context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == r.RaceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed),
+                cancellationToken);
+
     [HttpGet("wallet")]
     public async Task<IActionResult> GetWallet()
     {
@@ -302,7 +317,11 @@ public class SpectatorPredictionsController : ControllerBase
             .Where(r =>
                 r.RaceId == race.RaceId &&
                 r.HorseId == request.PredictedHorseId &&
-                PredictableRegistrationStatuses.Contains(r.Status))
+                PredictableRegistrationStatuses.Contains(r.Status) &&
+                !_context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == r.RaceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed))
             .Select(r => new
             {
                 r.RegistrationId,
@@ -318,6 +337,19 @@ public class SpectatorPredictionsController : ControllerBase
 
         if (registration == null)
         {
+            var failedPreRace = await HasFailedPreRaceInspectionAsync(
+                race.RaceId,
+                request.PredictedHorseId);
+
+            if (failedPreRace)
+            {
+                return BadRequest(new
+                {
+                    code = "HORSE_FAILED_PRE_RACE",
+                    message = "Ngựa không vượt qua kiểm tra pre-race và không còn đủ điều kiện để đặt cược."
+                });
+            }
+
             return BadRequest(new
             {
                 error = "Horse is not registered in this tournament.",
@@ -503,7 +535,11 @@ public class SpectatorPredictionsController : ControllerBase
             .Where(r =>
                 r.RaceId == race.RaceId &&
                 r.HorseId == request.PredictedHorseId &&
-                PredictableRegistrationStatuses.Contains(r.Status))
+                PredictableRegistrationStatuses.Contains(r.Status) &&
+                !_context.PreRaceInspections.Any(inspection =>
+                    inspection.RaceId == r.RaceId &&
+                    inspection.RegistrationId == r.RegistrationId &&
+                    inspection.Status == PreRaceInspectionStatuses.Failed))
             .Select(r => new
             {
                 r.RegistrationId,
@@ -519,6 +555,20 @@ public class SpectatorPredictionsController : ControllerBase
 
         if (registration == null)
         {
+            var failedPreRace = await HasFailedPreRaceInspectionAsync(
+                race.RaceId,
+                request.PredictedHorseId,
+                cancellationToken);
+
+            if (failedPreRace)
+            {
+                return BadRequest(new
+                {
+                    code = "HORSE_FAILED_PRE_RACE",
+                    message = "Ngựa không vượt qua kiểm tra pre-race và không còn đủ điều kiện để đặt cược."
+                });
+            }
+
             return BadRequest(new
             {
                 code = "HORSE_NOT_PREDICTABLE",

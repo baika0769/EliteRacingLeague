@@ -726,7 +726,9 @@ public partial class EliteRacingLeagueContext : DbContext
 
             entity.HasIndex(e => new { e.RaceId, e.PredictedRegistrationId }, "IX_race_predictions_race_predicted_registration");
 
-            entity.HasIndex(e => new { e.RaceId, e.SpectatorId }, "UQ_race_predictions_race_spectator").IsUnique();
+            entity.HasIndex(e => new { e.RaceId, e.SpectatorId }, "UQ_race_predictions_race_spectator")
+                .IsUnique()
+                .HasFilter("[status] <> 'Cancelled'");
 
             entity.Property(e => e.PredictionId).HasColumnName("prediction_id");
             entity.Property(e => e.ActualWinnerRegistrationId).HasColumnName("actual_winner_registration_id");
